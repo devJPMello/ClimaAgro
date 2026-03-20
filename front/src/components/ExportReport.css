@@ -1,0 +1,351 @@
+.export-report-container {
+  min-height: calc(100vh - 160px);
+  background: #f5f5f5;
+}
+
+.export-header-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 20px;
+}
+
+.export-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 32px;
+  background: linear-gradient(135deg, #1976D2 0%, #42A5F5 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  justify-content: center;
+}
+
+.export-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(25, 118, 210, 0.3);
+}
+
+.export-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.export-content {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 24px;
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.export-form {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.form-section {
+  margin-bottom: 32px;
+}
+
+.form-section:last-child {
+  margin-bottom: 0;
+}
+
+.form-section h2 {
+  color: #2d3748;
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 16px 0;
+}
+
+.municipality-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.municipality-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #f7fafc;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.municipality-card:hover {
+  border-color: #cbd5e0;
+  background: #edf2f7;
+}
+
+.municipality-card.selected {
+  border-color: #667eea;
+  background: #edf2f7;
+  color: #667eea;
+}
+
+.municipality-info h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+  color: #2d3748;
+}
+
+.municipality-info p {
+  font-size: 14px;
+  margin: 0;
+  color: #718096;
+}
+
+.report-types-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.report-type-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px;
+  background: #f7fafc;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.report-type-card:hover {
+  border-color: #cbd5e0;
+  background: #edf2f7;
+}
+
+.report-type-card.selected {
+  border-color: #667eea;
+  background: #edf2f7;
+}
+
+.report-type-icon {
+  color: #667eea;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.report-type-info h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: #2d3748;
+}
+
+.report-type-info p {
+  font-size: 14px;
+  margin: 0;
+  color: #718096;
+  line-height: 1.4;
+}
+
+.date-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.date-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.date-input-group label {
+  color: #4a5568;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.date-input {
+  padding: 12px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f7fafc;
+  color: #4a5568;
+  font-size: 16px;
+  transition: all 0.2s;
+}
+
+.date-input:focus {
+  outline: none;
+  border-color: #667eea;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.format-options {
+  display: flex;
+  gap: 20px;
+}
+
+.format-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: #4a5568;
+  font-weight: 500;
+}
+
+.format-option input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #667eea;
+}
+
+.export-summary {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  height: fit-content;
+  position: sticky;
+  top: 24px;
+}
+
+.export-summary h2 {
+  color: #2d3748;
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 20px 0;
+}
+
+.summary-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.summary-item {
+  padding: 12px;
+  background: #f7fafc;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #4a5568;
+}
+
+.summary-item strong {
+  color: #2d3748;
+}
+
+.no-selection {
+  color: #a0aec0;
+  font-style: italic;
+  text-align: center;
+  padding: 20px;
+  margin: 0;
+}
+
+.export-button-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.success-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.success-message {
+  background: white;
+  padding: 40px;
+  border-radius: 16px;
+  text-align: center;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  max-width: 400px;
+  width: 90%;
+}
+
+.success-message svg {
+  color: #38a169;
+  margin-bottom: 16px;
+}
+
+.success-message h3 {
+  color: #2d3748;
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+}
+
+.success-message p {
+  color: #718096;
+  font-size: 16px;
+  margin: 0;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .export-content {
+    grid-template-columns: 1fr;
+  }
+  
+  .export-summary {
+    position: static;
+  }
+}
+
+@media (max-width: 768px) {
+  .municipality-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .report-types-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .date-range {
+    grid-template-columns: 1fr;
+  }
+  
+  .format-options {
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .export-content {
+    padding: 16px;
+  }
+  
+  .export-form {
+    padding: 16px;
+  }
+  
+  .export-summary {
+    padding: 16px;
+  }
+}

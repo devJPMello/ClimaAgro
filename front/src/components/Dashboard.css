@@ -1,0 +1,374 @@
+/* Dashboard Content */
+.dashboard-content {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+/* Top Metrics Grid */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+  margin-bottom: 40px;
+  margin-top: 20px;
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+  justify-items: center;
+}
+
+.metric-card {
+  background: white;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid #e2e8f0;
+  width: 100%;
+  max-width: 280px;
+  min-height: 160px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+  border-radius: 16px 16px 0 0;
+}
+
+.metric-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+/* Card specific styles */
+.culture-card::before {
+  background: linear-gradient(90deg, #10b981, #34d399);
+}
+
+.productivity-card::before {
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+}
+
+.precipitation-card::before {
+  background: linear-gradient(90deg, #06b6d4, #22d3ee);
+}
+
+.alerts-card::before {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+
+.metric-card-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.metric-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+
+.culture-icon {
+  color: #10b981;
+  background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+}
+
+.productivity-icon {
+  color: #3b82f6;
+  background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+}
+
+.precipitation-icon {
+  color: #06b6d4;
+  background: linear-gradient(135deg, #cffafe, #a5f3fc);
+}
+
+.alerts-icon {
+  color: #f59e0b;
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+}
+
+.metric-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric-content h3 {
+  color: #6b7280;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.metric-value {
+  color: #1f2937;
+  font-size: 28px;
+  font-weight: 800;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.metric-subtitle {
+  color: #9ca3af;
+  font-size: 12px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.metric-trend {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.trend-up {
+  color: #10b981;
+  font-size: 12px;
+  font-weight: 700;
+  background: #d1fae5;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.trend-neutral {
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 700;
+  background: #f3f4f6;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+/* Main Grid Layout */
+.main-grid {
+  display: grid;
+  grid-template-columns: 2.5fr 1.5fr;
+  gap: 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+  margin-top: 20px;
+  justify-items: center;
+}
+
+.map-section {
+  background: white;
+  border-radius: 12px;
+  padding: 32px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  min-height: 500px;
+}
+
+.map-section h2 {
+  color: #2d3748;
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.map-container {
+  height: 420px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f7fafc;
+  border: 2px solid #e2e8f0;
+  margin-bottom: 20px;
+  flex: 1;
+}
+
+.view-map-button {
+  padding: 8px 16px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  align-self: center;
+}
+
+.view-map-button:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+
+/* Weather Summary */
+.weather-summary {
+  background: white;
+  border-radius: 12px;
+  padding: 32px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  max-width: 100%;
+  min-height: 500px;
+}
+
+.weather-summary h2 {
+  color: #2d3748;
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 20px;
+}
+
+.weather-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.weather-card {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 24px;
+  background: #f7fafc;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  min-height: 100px;
+}
+
+.weather-icon {
+  color: #60a5fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: #f0f9ff;
+  border-radius: 10px;
+}
+
+.weather-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.weather-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #2d3748;
+}
+
+.weather-label {
+  font-size: 13px;
+  color: #718096;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.weather-condition {
+  padding: 16px;
+  background: #f0f9ff;
+  border-radius: 8px;
+  border-left: 4px solid #60a5fa;
+}
+
+.weather-condition p {
+  color: #4a5568;
+  font-size: 14px;
+  margin: 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    max-width: 700px;
+  }
+  
+  .metric-card {
+    min-height: 140px;
+    padding: 20px;
+  }
+  
+  .metric-icon {
+    width: 48px;
+    height: 48px;
+  }
+  
+  .metric-value {
+    font-size: 24px;
+  }
+  
+  .main-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    max-width: 700px;
+  }
+  
+  .weather-cards {
+    grid-template-columns: 1fr;
+  }
+  
+  .dashboard-content {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .metrics-grid {
+    grid-template-columns: 1fr;
+    max-width: 350px;
+    gap: 16px;
+  }
+  
+  .metric-card {
+    min-height: 120px;
+    padding: 16px;
+  }
+  
+  .metric-icon {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .metric-value {
+    font-size: 20px;
+  }
+  
+  .metric-trend {
+    bottom: 12px;
+    right: 12px;
+  }
+  
+  .trend-up,
+  .trend-neutral {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+  
+  .main-grid {
+    max-width: 400px;
+  }
+}
