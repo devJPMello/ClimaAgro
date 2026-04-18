@@ -1,3 +1,9 @@
+/**
+ * Geometrias de exemplo (polígonos simplificados). Para malhas oficiais, use fontes IBGE/GeoJSON próprios.
+ */
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+
 const { sequelize } = require('../config/database');
 const GeoData = require('../models/GeoData');
 
@@ -254,6 +260,141 @@ const brazilGeoData = [
         [-54.0, -26.0]
       ]]
     }
+  },
+  {
+    layerName: 'estados_brasil',
+    geometryType: 'Polygon',
+    category: 'state',
+    name: 'Tocantins',
+    state: 'TO',
+    region: 'Norte',
+    adminLevel: 2,
+    ibgeCode: '17',
+    properties: {
+      codigo: '17',
+      sigla: 'TO',
+      area: 277621.0,
+      populacao: 1607363
+    },
+    geom: {
+      type: 'Polygon',
+      coordinates: [[
+        [-50.5, -13.5],
+        [-45.5, -13.5],
+        [-45.5, -5.5],
+        [-50.5, -5.5],
+        [-50.5, -13.5]
+      ]]
+    }
+  },
+  // Tocantins — municípios com ingestão CPTEC (ClimaAgro nichado em TO)
+  {
+    layerName: 'municipios_tocantins',
+    geometryType: 'Point',
+    category: 'municipality',
+    name: 'Palmas',
+    state: 'TO',
+    region: 'Norte',
+    adminLevel: 3,
+    ibgeCode: '1721000',
+    properties: {
+      codigo: '1721000',
+      nome: 'Palmas',
+      uf: 'TO',
+      cptecCityQuery: 'palmas',
+      populacao: 302692
+    },
+    geom: { type: 'Point', coordinates: [-47.8103, -10.184] }
+  },
+  {
+    layerName: 'municipios_tocantins',
+    geometryType: 'Point',
+    category: 'municipality',
+    name: 'Araguaína',
+    state: 'TO',
+    region: 'Norte',
+    adminLevel: 3,
+    ibgeCode: '1702109',
+    properties: {
+      codigo: '1702109',
+      nome: 'Araguaína',
+      uf: 'TO',
+      cptecCityQuery: 'araguaina',
+      populacao: 183381
+    },
+    geom: { type: 'Point', coordinates: [-48.2079, -7.1911] }
+  },
+  {
+    layerName: 'municipios_tocantins',
+    geometryType: 'Point',
+    category: 'municipality',
+    name: 'Gurupi',
+    state: 'TO',
+    region: 'Norte',
+    adminLevel: 3,
+    ibgeCode: '1709500',
+    properties: {
+      codigo: '1709500',
+      nome: 'Gurupi',
+      uf: 'TO',
+      cptecCityQuery: 'gurupi',
+      populacao: 90647
+    },
+    geom: { type: 'Point', coordinates: [-49.0689, -11.7296] }
+  },
+  {
+    layerName: 'municipios_tocantins',
+    geometryType: 'Point',
+    category: 'municipality',
+    name: 'Porto Nacional',
+    state: 'TO',
+    region: 'Norte',
+    adminLevel: 3,
+    ibgeCode: '1718204',
+    properties: {
+      codigo: '1718204',
+      nome: 'Porto Nacional',
+      uf: 'TO',
+      cptecCityQuery: 'porto nacional',
+      populacao: 53174
+    },
+    geom: { type: 'Point', coordinates: [-48.4169, -10.7081] }
+  },
+  {
+    layerName: 'municipios_tocantins',
+    geometryType: 'Point',
+    category: 'municipality',
+    name: 'Paraíso do Tocantins',
+    state: 'TO',
+    region: 'Norte',
+    adminLevel: 3,
+    ibgeCode: '1716109',
+    properties: {
+      codigo: '1716109',
+      nome: 'Paraíso do Tocantins',
+      uf: 'TO',
+      cptecCityQuery: 'paraiso do tocantins',
+      populacao: 52959
+    },
+    geom: { type: 'Point', coordinates: [-48.8823, -10.1744] }
+  },
+  {
+    layerName: 'municipios_tocantins',
+    geometryType: 'Point',
+    category: 'municipality',
+    name: 'Guaraí',
+    state: 'TO',
+    region: 'Norte',
+    adminLevel: 3,
+    ibgeCode: '1709302',
+    properties: {
+      codigo: '1709302',
+      nome: 'Guaraí',
+      uf: 'TO',
+      cptecCityQuery: 'guarai',
+      populacao: 25863
+    },
+    geom: { type: 'Point', coordinates: [-48.5106, -8.8354] }
   },
   // Municípios principais
   {

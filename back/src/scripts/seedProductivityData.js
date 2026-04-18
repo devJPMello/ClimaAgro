@@ -1,3 +1,11 @@
+/**
+ * Dados de DEMONSTRAÇÃO — valores inventados para desenvolvimento e testes de UI.
+ * Clima oficial: use `npm run sync:climate` no back (CPTEC/INMET, ver REAL_DATA.md).
+ * Produtividade oficial (CONAB/IBGE): não é importada por este script; exige ETL próprio.
+ */
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+
 const { models } = require('../config/database');
 const { GeoData, Productivity, ClimateData } = models;
 
@@ -211,6 +219,156 @@ const climateData = [
   }
 ];
 
+/** Produtividade 2024/soja para cada UF que ainda não tem (o mapa antigo só cobria MT, PR, RS, GO, BA, MA). */
+async function ensureProductivity2024ForEveryState(GeoData, Productivity) {
+  const states = await GeoData.findAll({ where: { category: 'state', isActive: true } });
+  const year = 2024;
+  const base = {
+    season: '2024/25',
+    cropType: 'soja',
+    productivity: 3.15,
+    plantedArea: 850000,
+    historicalAverage: 3.0,
+    variationFromAverage: 5,
+    soilQualityIndex: 80,
+    climateSuitabilityIndex: 76,
+    technologyLevel: 'media',
+    irrigationUsed: false,
+    fertilizerUsage: 98,
+    pesticideUsage: 7,
+    productionCostPerHectare: 2280,
+    revenuePerHectare: 2950,
+    profitPerHectare: 670,
+    dataSource: 'conab',
+    dataReliability: 90,
+    status: 'confirmado'
+  };
+  for (const g of states) {
+    const existing = await Productivity.findOne({
+      where: { geoDataId: g.id, year, cropType: 'soja' }
+    });
+    if (existing) continue;
+    const p = Number((3.0 + (g.state?.charCodeAt(0) || 0) * 0.001).toFixed(2));
+    const area = 800000 + (states.indexOf(g) % 5) * 50000;
+    await Productivity.create({
+      ...base,
+      geoDataId: g.id,
+      year,
+      productivity: p,
+      plantedArea: area,
+      totalProduction: p * area
+    });
+    console.log(`✅ Produtividade 2024 (placeholder) para ${g.name} (${g.state})`);
+  }
+}
+
+/**
+ * Clima diário nos últimos 14 dias por UF — o dashboard usa janelas recentes (7/14/30 dias);
+ * dados só em 2024-01-15 nunca aparecem no resumo.
+ * O dia de hoje (offset 0) usa valores acima dos limiares de `deriveAlertsFromClimateRows` para GET /climate/alerts.
+ */
+async function seedLast14DaysClimatePerState(GeoData, ClimateData) {
+  const states = await GeoData.findAll({ where: { category: 'state', isActive: true } });
+  const now = new Date();
+  let inserted = 0;
+  let updatedAlerts = 0;
+
+  const buildModerate = (g, offset, y, m, day, ds) => {
+    const tBase = 21 + (g.state?.charCodeAt(0) || 65) * 0.02;
+    return {
+      geoDataId: g.id,
+      date: ds,
+      year: y,
+      month: m,
+      day,
+      avgTemperature: Number((tBase + (offset % 5) * 0.35).toFixed(2)),
+      maxTemperature: 33,
+      minTemperature: 17,
+      precipitation: Number((4 + (offset % 6) * 2.8).toFixed(2)),
+      humidity: 58 + (offset % 4) * 6,
+      windSpeed: 7 + (offset % 5) * 1.2,
+      windDirection: 200,
+      atmosphericPressure: 1012.5,
+      solarRadiation: 19,
+      evapotranspiration: 4.1,
+      waterStressIndex: 32,
+      climateSuitabilityIndex: 77,
+      consecutiveDryDays: 1,
+      rainyDays: 6,
+      monthlyPrecipitation: 110,
+      monthlyAvgTemperature: 23.5,
+      dataSource: 'inmet',
+      weatherStation: g.name,
+      stationCode: 'SEED',
+      dataQuality: 92,
+      status: 'confirmado'
+    };
+  };
+
+  /** Limiares alinhados a `climateAlertsUiService.deriveAlertsFromClimateRows` */
+  const buildAlertDemoForToday = (g, y, m, day, ds) => ({
+    geoDataId: g.id,
+    date: ds,
+    year: y,
+    month: m,
+    day,
+    avgTemperature: 22.5,
+    maxTemperature: 36,
+    minTemperature: 4,
+    precipitation: 55,
+    humidity: 28,
+    windSpeed: 12,
+    windDirection: 200,
+    atmosphericPressure: 1010,
+    solarRadiation: 21,
+    evapotranspiration: 5,
+    waterStressIndex: 82,
+    climateSuitabilityIndex: 72,
+    consecutiveDryDays: 2,
+    rainyDays: 8,
+    monthlyPrecipitation: 180,
+    monthlyAvgTemperature: 23,
+    dataSource: 'inmet',
+    weatherStation: g.name,
+    stationCode: 'SEED-ALERT',
+    dataQuality: 90,
+    status: 'confirmado'
+  });
+
+  for (const g of states) {
+    for (let offset = 0; offset < 14; offset++) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - offset);
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const day = d.getDate();
+      const ds = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const existing = await ClimateData.findOne({
+        where: { geoDataId: g.id, date: ds }
+      });
+
+      if (offset === 0) {
+        const payload = buildAlertDemoForToday(g, y, m, day, ds);
+        if (existing) {
+          await existing.update(payload);
+          updatedAlerts += 1;
+        } else {
+          await ClimateData.create(payload);
+          inserted += 1;
+        }
+        continue;
+      }
+
+      if (existing) continue;
+      await ClimateData.create(buildModerate(g, offset, y, m, day, ds));
+      inserted += 1;
+    }
+  }
+  console.log(
+    `✅ Clima inserido: ${inserted} novos; ${updatedAlerts} “hoje” atualizados com demo de alertas (últimos 14 dias × ${states.length} UFs).`
+  );
+}
+
 const seedProductivityData = async () => {
   try {
     console.log('🌱 Iniciando seed de dados de produtividade...');
@@ -260,6 +418,8 @@ const seedProductivityData = async () => {
       }
     }
 
+    await ensureProductivity2024ForEveryState(GeoData, Productivity);
+
     // Criar dados climáticos
     for (let i = 0; i < geoData.length && i < climateData.length; i++) {
       const geoDataItem = geoData[i];
@@ -281,6 +441,8 @@ const seedProductivityData = async () => {
         console.log(`⚠️  Dados climáticos já existem para ${geoDataItem.name}`);
       }
     }
+
+    await seedLast14DaysClimatePerState(GeoData, ClimateData);
 
     // Criar dados históricos (anos anteriores)
     const years = [2020, 2021, 2022, 2023];
