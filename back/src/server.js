@@ -1,17 +1,42 @@
+const path = require('path');
+// Carregar .env ANTES de qualquer módulo que use process.env (ex.: database.js)
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const { connectDB } = require('./config/database');
-require('dotenv').config();
 
 const app = express();
 
-// Middleware
-app.use(helmet());
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
-}));
+function parseFrontendOrigins() {
+  const raw =
+    process.env.FRONTEND_URL ||
+    'http://localhost:3000,http://localhost:5173';
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+// Middleware — CORP `same-origin` (padrão do Helmet) pode bloquear fetch cross-origin (ex.: Vite :5173 → API :5000).
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
+app.use(
+  cors({
+    origin(origin, callback) {
+      const allowed = parseFrontendOrigins();
+      if (!origin) return callback(null, true);
+      if (allowed.includes(origin)) return callback(null, true);
+      return callback(null, false);
+    },
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Export-Client-Id']
+  })
+);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -27,7 +52,23 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/geo', require('./routes/geo'));
 app.use('/api/productivity', require('./routes/productivity'));
 app.use('/api/climate', require('./routes/climate'));
+app.use('/api/ai', require('./routes/ai'));
 app.use('/api/superset', require('./routes/superset'));
+app.use('/api/inmet-adapter', require('./routes/inmetAdapter'));
+
+// Raiz da API (abrir no browser em /api só mostrava 404 — não há recurso em GET /api antes)
+app.get('/api', (req, res) => {
+  res.json({
+    success: true,
+    name: 'ClimaAgro API',
+    message: 'Rotas ficam em subcaminhos; exemplos abaixo.',
+    examples: {
+      health: '/api/health',
+      dashboardSummary: '/api/climate/dashboard-summary',
+      climateList: '/api/climate?state=SP&startDate=2025-01-01&endDate=2025-12-31&limit=10'
+    }
+  });
+});
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -61,7 +102,7 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`📊 API: http://localhost:${PORT}/api  ·  health: http://localhost:${PORT}/api/health`);
 });
 
 module.exports = app;

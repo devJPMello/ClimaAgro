@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
-const { protect, authorize } = require('../middleware/auth');
+const { auth } = require('../middleware/auth');
 const { spatialQueries } = require('../config/database');
 const GeoData = require('../models/GeoData');
 const Weather = require('../models/Weather');
@@ -8,7 +8,7 @@ const Weather = require('../models/Weather');
 const router = express.Router();
 
 // Aplicar middleware de autenticação em todas as rotas
-router.use(protect);
+router.use(auth);
 
 // @route   GET /api/geo/regions
 // @desc    Buscar todas as regiões

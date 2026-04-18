@@ -1,7 +1,25 @@
 const express = require('express');
 const router = express.Router();
-const { models } = require('../config/database');
-const { ClimateData, GeoData } = models;
+const { sequelize, models } = require('../config/database');
+const { ClimateData, GeoData, OfficialAlert } = models;
+const { buildDashboardSummary } = require('../services/dashboardSummaryService');
+const { runClimateSync } = require('../services/climateSyncService');
+const alertSvc = require('../services/climateAlertsUiService');
+
+function requireClimateSyncToken(req, res, next) {
+  const secret = process.env.CLIMATE_SYNC_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(503).json({ message: 'CLIMATE_SYNC_SECRET não configurada no servidor.' });
+    }
+    return next();
+  }
+  const token = req.header('x-climaagro-sync-token');
+  if (token !== secret) {
+    return res.status(401).json({ message: 'Token de sincronização inválido ou ausente.' });
+  }
+  return next();
+}
 const { validationResult } = require('express-validator');
 const { body, query, param } = require('express-validator');
 
@@ -20,12 +38,13 @@ router.get('/', [
   query('endDate').optional().isISO8601(),
   query('region').optional().isString(),
   query('state').optional().isString().isLength({ min: 2, max: 2 }),
+  query('place').optional().isString().trim().isLength({ min: 2, max: 200 }),
   query('limit').optional().isInt({ min: 1, max: 1000 }),
   query('offset').optional().isInt({ min: 0 }),
   validateRequest
 ], async (req, res) => {
   try {
-    const { startDate, endDate, region, state, limit = 100, offset = 0 } = req.query;
+    const { startDate, endDate, region, state, place, limit = 100, offset = 0 } = req.query;
     
     const whereClause = {};
     const includeWhere = { isActive: true };
@@ -37,6 +56,15 @@ router.get('/', [
     }
     if (region) includeWhere.region = region;
     if (state) includeWhere.state = state;
+    if (place) {
+      if (!state) {
+        return res.status(400).json({
+          success: false,
+          message: 'O parâmetro place exige state (sigla da UF, ex.: TO).'
+        });
+      }
+      includeWhere.name = String(place).trim();
+    }
     
     const climateData = await ClimateData.findAndCountAll({
       where: whereClause,
@@ -179,149 +207,107 @@ router.get('/stats', [
   }
 });
 
-// GET /api/climate/alerts - Obter alertas climáticos baseados em dados
+// GET /api/climate/dashboard-summary — contrato alinhado ao new_front (DashboardSummaryDto)
+// Query opcional: ?state=TO — KPIs e tabela apenas para essa UF (se existir em geo_data).
+router.get('/dashboard-summary', [
+  query('state').optional().isString().isLength({ min: 2, max: 2 }),
+  validateRequest
+], async (req, res) => {
+  try {
+    const dto = await buildDashboardSummary({ models, state: req.query.state });
+    res.json(dto);
+  } catch (error) {
+    console.error('Erro ao montar dashboard-summary:', error);
+    res.status(500).json({
+      message: 'Erro ao montar resumo do dashboard',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// POST /api/climate/sync — ingere CPTEC/INMET no PostgreSQL (ver DATA_SOURCES.md e .env)
+router.post('/sync', requireClimateSyncToken, async (req, res) => {
+  try {
+    const out = await runClimateSync({ sequelize, models });
+    if (!out.ok) {
+      return res.status(500).json({ message: 'Falha na sincronização', error: out.error });
+    }
+    res.json({ ok: true, ...out });
+  } catch (error) {
+    console.error('Erro na sincronização climática:', error);
+    res.status(500).json({
+      message: 'Erro na sincronização climática',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// GET /api/climate/alerts — padrão: ClimateAlertListDto; `?legacy=1` mantém JSON antigo
 router.get('/alerts', [
   query('geoDataId').optional().isUUID(),
   query('region').optional().isString(),
   query('state').optional().isString().isLength({ min: 2, max: 2 }),
+  query('city').optional().isString().trim().isLength({ min: 2, max: 100 }),
   query('days').optional().isInt({ min: 1, max: 30 }),
   validateRequest
 ], async (req, res) => {
   try {
-    const { geoDataId, region, state, days = 7 } = req.query;
-    
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-    
-    const whereClause = {
-      date: {
-        [require('sequelize').Op.between]: [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]]
-      }
-    };
-    
-    const includeWhere = { isActive: true };
-    
-    if (geoDataId) {
-      whereClause.geoDataId = geoDataId;
-    } else {
-      if (region) includeWhere.region = region;
-      if (state) includeWhere.state = state;
-    }
-    
-    const climateData = await ClimateData.findAll({
-      where: whereClause,
-      include: [{
-        model: GeoData,
-        as: 'geoData',
-        where: includeWhere
-      }],
-      order: [['date', 'DESC']]
+    const { geoDataId, region, state, city, days = 7 } = req.query;
+    const legacy =
+      req.query.legacy === '1' ||
+      req.query.legacy === 'true' ||
+      (req.get('Accept') || '').includes('application/vnd.climaagro.climate-alerts-legacy+json');
+
+    const climateData = await alertSvc.loadClimateForAlerts({
+      ClimateData,
+      GeoData,
+      geoDataId,
+      region,
+      state,
+      days
     });
-    
-    // Gerar alertas baseados nos dados
-    const alerts = [];
-    
-    for (const data of climateData) {
-      const alertsForLocation = [];
-      
-      // Alerta de temperatura alta
-      if (data.maxTemperature && data.maxTemperature >= 35) {
-        alertsForLocation.push({
-          type: 'high_temperature',
-          severity: 'warning',
-          message: `Temperatura muito alta: ${data.maxTemperature}°C`,
-          date: data.date,
-          value: parseFloat(data.maxTemperature),
-          threshold: 35
-        });
-      }
-      
-      // Alerta de temperatura baixa
-      if (data.minTemperature && data.minTemperature <= 5) {
-        alertsForLocation.push({
-          type: 'low_temperature',
-          severity: 'warning',
-          message: `Temperatura muito baixa: ${data.minTemperature}°C`,
-          date: data.date,
-          value: parseFloat(data.minTemperature),
-          threshold: 5
-        });
-      }
-      
-      // Alerta de chuva intensa
-      if (data.precipitation && data.precipitation >= 50) {
-        alertsForLocation.push({
-          type: 'heavy_rain',
-          severity: 'info',
-          message: `Chuva intensa: ${data.precipitation}mm`,
-          date: data.date,
-          value: parseFloat(data.precipitation),
-          threshold: 50
-        });
-      }
-      
-      // Alerta de estresse hídrico
-      if (data.waterStressIndex && data.waterStressIndex >= 80) {
-        alertsForLocation.push({
-          type: 'water_stress',
-          severity: 'danger',
-          message: `Alto índice de estresse hídrico: ${data.waterStressIndex}%`,
-          date: data.date,
-          value: parseFloat(data.waterStressIndex),
-          threshold: 80
-        });
-      }
-      
-      // Alerta de baixa umidade
-      if (data.humidity && data.humidity <= 30) {
-        alertsForLocation.push({
-          type: 'low_humidity',
-          severity: 'warning',
-          message: `Umidade muito baixa: ${data.humidity}%`,
-          date: data.date,
-          value: parseFloat(data.humidity),
-          threshold: 30
-        });
-      }
-      
-      if (alertsForLocation.length > 0) {
-        alerts.push({
-          location: {
-            name: data.geoData.name,
-            state: data.geoData.state,
-            region: data.geoData.region
-          },
-          alerts: alertsForLocation
-        });
-      }
+
+    if (legacy) {
+      const payload = alertSvc.buildLegacyAlertsPayload(climateData, days);
+      return res.json({
+        success: true,
+        data: payload
+      });
     }
-    
+
+    const officialRows = await alertSvc.loadOfficialAlertsForUi({ OfficialAlert, days });
+    const liveNormalized = await alertSvc.fetchLiveOfficialProductsForRead(days);
+    const dbExternalIds = new Set(officialRows.map((r) => String(r.externalId || '')));
+    const liveOnlyNormalized = liveNormalized.filter((n) => !dbExternalIds.has(n.externalId));
+
+    const officialFromDb = await alertSvc.buildOfficialAlertUiItems(officialRows, state, city, GeoData);
+    const officialFromLive = await alertSvc.buildOfficialAlertUiItems(
+      alertSvc.normalizedListToOfficialRowLikes(liveOnlyNormalized),
+      state,
+      city,
+      GeoData
+    );
+    const includeCptecQualitative = process.env.ENABLE_CPTEC_QUALITATIVE_ALERTS === 'true';
+    const cptecOutlook = includeCptecQualitative
+      ? alertSvc.deriveCptecOutlookAlertsFromClimateRows(climateData)
+      : [];
+    const metarWind = alertSvc.deriveMetarWindAlertsFromClimateRows(climateData);
+    const derivedClimate = alertSvc.deriveAlertsFromClimateRows(climateData);
+
+    const items = [
+      ...officialFromDb,
+      ...officialFromLive,
+      ...cptecOutlook,
+      ...metarWind,
+      ...derivedClimate
+    ];
     res.json({
-      success: true,
-      data: {
-        period: {
-          startDate: startDate.toISOString().split('T')[0],
-          endDate: endDate.toISOString().split('T')[0],
-          days: days
-        },
-        alerts: alerts,
-        summary: {
-          totalAlerts: alerts.reduce((sum, location) => sum + location.alerts.length, 0),
-          locationsWithAlerts: alerts.length,
-          alertTypes: {
-            high_temperature: alerts.reduce((sum, location) => 
-              sum + location.alerts.filter(a => a.type === 'high_temperature').length, 0),
-            low_temperature: alerts.reduce((sum, location) => 
-              sum + location.alerts.filter(a => a.type === 'low_temperature').length, 0),
-            heavy_rain: alerts.reduce((sum, location) => 
-              sum + location.alerts.filter(a => a.type === 'heavy_rain').length, 0),
-            water_stress: alerts.reduce((sum, location) => 
-              sum + location.alerts.filter(a => a.type === 'water_stress').length, 0),
-            low_humidity: alerts.reduce((sum, location) => 
-              sum + location.alerts.filter(a => a.type === 'low_humidity').length, 0)
-          }
-        }
+      items,
+      updatedAt: new Date().toISOString(),
+      resumoCamadas: {
+        oficialExplicito: officialFromDb.length + officialFromLive.length,
+        cptecProduto: cptecOutlook.length + metarWind.length,
+        derivadoClimateData: derivedClimate.length
       }
     });
   } catch (error) {
