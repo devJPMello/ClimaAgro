@@ -132,9 +132,9 @@ const ClimateData = sequelize.define('ClimateData', {
     type: DataTypes.STRING(100),
     field: 'weather_station'
   },
-  // Código da estação meteorológica
+  // Código da estação meteorológica (pode incluir sufixo METAR, ex.: CPTEC:244+METAR:SBGR)
   stationCode: {
-    type: DataTypes.STRING(20),
+    type: DataTypes.STRING(80),
     field: 'station_code'
   },
   // Qualidade dos dados (0-100)
@@ -148,6 +148,11 @@ const ClimateData = sequelize.define('ClimateData', {
     type: DataTypes.ENUM('preliminar', 'confirmado', 'revisado', 'final'),
     defaultValue: 'preliminar',
     field: 'status'
+  },
+  // Metadados da fonte (ex.: CPTEC: sigla tempo, IUV; METAR mesclado)
+  metadata: {
+    type: DataTypes.JSONB,
+    field: 'metadata'
   }
 }, {
   tableName: 'climate_data',

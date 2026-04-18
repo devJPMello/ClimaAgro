@@ -1,14 +1,30 @@
 const { Sequelize } = require('sequelize');
 
+const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+if (!dbUrl || typeof dbUrl !== 'string') {
+  console.error(
+    '❌ Defina DATABASE_URL ou POSTGRES_URL no arquivo back/.env (ou carregue o dotenv antes de importar database.js).'
+  );
+  process.exit(1);
+}
+
+const useSsl =
+  process.env.DATABASE_SSL === 'true' ||
+  process.env.NODE_ENV === 'production' ||
+  (typeof dbUrl === 'string' &&
+    (dbUrl.includes('neon.tech') || dbUrl.includes('sslmode=require')));
+
 // Configuração do banco de dados PostgreSQL com PostGIS
-const sequelize = new Sequelize(process.env.DATABASE_URL || process.env.POSTGRES_URL, {
+const sequelize = new Sequelize(dbUrl, {
   dialect: 'postgres',
   protocol: 'postgres',
   dialectOptions: {
-    ssl: process.env.NODE_ENV === 'production' ? {
-      require: true,
-      rejectUnauthorized: false
-    } : false
+    ssl: useSsl
+      ? {
+          require: true,
+          rejectUnauthorized: false
+        }
+      : false
   },
   logging: process.env.NODE_ENV === 'development' ? console.log : false,
   pool: {
@@ -22,6 +38,9 @@ const sequelize = new Sequelize(process.env.DATABASE_URL || process.env.POSTGRES
     freezeTableName: true
   }
 });
+
+// Disponibilizar `sequelize` antes de `require` dos modelos (evita circular: database → User → database com exports ainda vazio).
+module.exports.sequelize = sequelize;
 
 const connectDB = async () => {
   try {
@@ -138,11 +157,11 @@ const spatialQueries = {
 // Importar e configurar modelos
 const User = require('../models/User');
 const Weather = require('../models/Weather');
-const Alert = require('../models/Alert');
-const Report = require('../models/Report');
 const GeoData = require('../models/GeoData');
 const Productivity = require('../models/Productivity');
 const ClimateData = require('../models/ClimateData');
+const OfficialAlert = require('../models/OfficialAlert');
+const ReportExport = require('../models/ReportExport');
 
 // Configurar associações entre modelos
 const setupAssociations = () => {
@@ -154,13 +173,7 @@ const setupAssociations = () => {
   GeoData.hasMany(ClimateData, { foreignKey: 'geoDataId', as: 'climateData' });
   ClimateData.belongsTo(GeoData, { foreignKey: 'geoDataId', as: 'geoData' });
 
-  // User tem muitos Reports
-  User.hasMany(Report, { foreignKey: 'userId', as: 'reports' });
-  Report.belongsTo(User, { foreignKey: 'userId', as: 'user' });
-
-  // User tem muitos Alerts
-  User.hasMany(Alert, { foreignKey: 'userId', as: 'alerts' });
-  Alert.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+  // Report/Alert em models/ ainda são esquemas Mongoose legados — não associar aqui ao Sequelize.
 };
 
 // Configurar associações
@@ -173,10 +186,10 @@ module.exports = {
   models: {
     User,
     Weather,
-    Alert,
-    Report,
     GeoData,
     Productivity,
-    ClimateData
+    ClimateData,
+    OfficialAlert,
+    ReportExport
   }
 };
