@@ -4,7 +4,7 @@ import type { Layer } from 'leaflet';
 import { Button } from '../ui/Button';
 import 'leaflet/dist/leaflet.css';
 import type { BrazilMapMetric } from './brazilMapConfig';
-import { fillColorForMetric, resolveValueForFeature } from './brazilMapConfig';
+import { fillColorForMetric, formatPopupValueForMetric, resolveValueForFeature } from './brazilMapConfig';
 
 interface BrazilMapProps {
   metric: BrazilMapMetric;
@@ -13,24 +13,6 @@ interface BrazilMapProps {
   valuesByUf?: Partial<Record<string, number>>;
   /** Incrementar após atualizar dados para forçar repaint das cores no Leaflet. */
   dataRevision?: number;
-}
-
-function formatPopupValue(metric: BrazilMapMetric, value: number | null): string {
-  if (value == null || Number.isNaN(value)) return 'Sem dado para esta UF';
-  switch (metric) {
-    case 'temperatura':
-      return `${value.toFixed(1)}°C`;
-    case 'umidade':
-      return `${Math.round(value)}%`;
-    case 'precipitacao':
-      return `${value.toFixed(0)} mm`;
-    case 'vento':
-      return `${value.toFixed(0)} km/h`;
-    case 'produtividade':
-      return `${value.toFixed(1)} t/ha`;
-    default:
-      return String(value);
-  }
 }
 
 export function BrazilMap({ metric, height = 600, valuesByUf, dataRevision = 0 }: BrazilMapProps) {
@@ -92,7 +74,8 @@ export function BrazilMap({ metric, height = 600, valuesByUf, dataRevision = 0 }
         .toUpperCase()
         .slice(0, 2);
       const v = resolveValueForFeature(metric, feature as { properties?: Record<string, unknown> }, valuesByUf);
-      const label = formatPopupValue(metric, v);
+      const label =
+        v == null || Number.isNaN(v) ? 'Sem dado para esta UF' : formatPopupValueForMetric(metric, v);
       (layer as Layer & { bindPopup: (s: string) => void }).bindPopup(
         `<strong>${name}${uf ? ` (${uf})` : ''}</strong><br/>${label}`
       );

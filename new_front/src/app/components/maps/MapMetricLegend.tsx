@@ -14,7 +14,10 @@ export function MapMetricLegend({ metric, className }: MapMetricLegendProps) {
       <div className="space-y-2">
         {items.map((item) => (
           <div key={item.label} className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded shrink-0" style={{ backgroundColor: item.color }} />
+            <div
+              className="w-6 h-6 rounded shrink-0 border border-border/60"
+              style={{ backgroundColor: item.color, opacity: 0.85 }}
+            />
             <span className="text-xs text-muted-foreground">{item.label}</span>
           </div>
         ))}

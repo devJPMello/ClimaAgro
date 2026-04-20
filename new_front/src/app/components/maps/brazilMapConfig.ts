@@ -34,7 +34,8 @@ export const LEGEND_BY_METRIC: Record<BrazilMapMetric, LegendItem[]> = {
     { color: '#14532d', label: '> 70 km/h' },
   ],
   produtividade: [
-    { color: '#ea580c', label: '< 3.0 t/ha' },
+    { color: '#9ca3b8', label: '0 t/ha' },
+    { color: '#ea580c', label: '> 0 e < 3.0 t/ha' },
     { color: '#eab308', label: '3.0–3.5 t/ha' },
     { color: '#84cc16', label: '3.5–4.0 t/ha' },
     { color: '#16a34a', label: '4.0–4.5 t/ha' },
@@ -86,9 +87,53 @@ export function bucketIndexForMetric(metric: BrazilMapMetric, value: number): nu
 }
 
 const COLOR_NO_DATA = '#cbd5e1';
+/** Produtividade nula na série (SIDRA / sem área colhida) — distinto de «sem dado» na malha. */
+const COLOR_PROD_ZERO = '#9ca3b8';
+
+function numFromUnknown(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Texto do popup / legenda contextual para o valor numérico do indicador. */
+export function formatPopupValueForMetric(metric: BrazilMapMetric, value: number | null): string {
+  if (value == null || Number.isNaN(value)) {
+    switch (metric) {
+      case 'temperatura':
+        return 'Sem dado de temperatura';
+      case 'umidade':
+        return 'Sem dado de umidade';
+      case 'precipitacao':
+        return 'Sem dado de precipitação';
+      case 'vento':
+        return 'Sem dado de vento';
+      case 'produtividade':
+        return 'Sem dado de produtividade';
+      default:
+        return 'Sem dado';
+    }
+  }
+  switch (metric) {
+    case 'temperatura':
+      return `${value.toFixed(1)}°C`;
+    case 'umidade':
+      return `${Math.round(value)}%`;
+    case 'precipitacao':
+      return `${value.toFixed(0)} mm`;
+    case 'vento':
+      return `${value.toFixed(0)} km/h`;
+    case 'produtividade':
+      if (value === 0) return '0.00 t/ha (valor nulo na série)';
+      return `${value.toFixed(2)} t/ha`;
+    default:
+      return String(value);
+  }
+}
 
 export function fillColorForMetric(metric: BrazilMapMetric, value: number | null): string {
   if (value == null || Number.isNaN(value)) return COLOR_NO_DATA;
+  if (metric === 'produtividade' && value === 0) return COLOR_PROD_ZERO;
   const i = bucketIndexForMetric(metric, value);
   const scales: Record<BrazilMapMetric, string[]> = {
     temperatura: COLOR_SCALE_TEMP,
@@ -121,6 +166,134 @@ export function resolveValueForFeature(
     return Number(valuesByUf[uf]);
   }
   return null;
+}
+
+/** Média de produtividade (t/ha) por UF a partir das linhas da API `/productivity`. */
+/** Código IBGE do município (7 dígitos), sem caracteres não numéricos. */
+export function normalizeIbgeMunicipioCode(raw: string | number | null | undefined): string {
+  const d = String(raw ?? '').replace(/\D/g, '');
+  return d.length >= 7 ? d.slice(0, 7) : d;
+}
+
+/**
+ * Mapa coroplético por município: chave = `codarea` da malha IBGE (7 dígitos).
+ * Ignora linhas sem `ibgeCode` ou com `geoData.category` diferente de `municipality`.
+ */
+/**
+ * Agrega registros climáticos diários por município (`codarea` IBGE).
+ * Precipitação: soma no período; demais métricas: média aritmética.
+ */
+export function buildClimateMetricByIbgeCodarea(
+  rows: Array<{
+    avgTemperature?: unknown;
+    humidity?: unknown;
+    windSpeed?: unknown;
+    precipitation?: unknown;
+    geoData?: { ibgeCode?: string | null; name?: string | null; category?: string | null } | null;
+  }>,
+  metric: BrazilMapMetric
+): { valuesByCodarea: Record<string, number>; nameByCodarea: Record<string, string> } {
+  if (metric === 'produtividade') {
+    return { valuesByCodarea: {}, nameByCodarea: {} };
+  }
+  const buckets: Record<string, number[]> = {};
+  const nameByCodarea: Record<string, string> = {};
+  for (const row of rows) {
+    const cat = row.geoData?.category;
+    if (cat && cat !== 'municipality') continue;
+    const code = normalizeIbgeMunicipioCode(row.geoData?.ibgeCode ?? undefined);
+    if (!code || code.length < 7) continue;
+
+    let v: number | null = null;
+    switch (metric) {
+      case 'temperatura':
+        v = numFromUnknown(row.avgTemperature);
+        break;
+      case 'umidade':
+        v = numFromUnknown(row.humidity);
+        break;
+      case 'vento':
+        v = numFromUnknown(row.windSpeed);
+        break;
+      case 'precipitacao':
+        v = numFromUnknown(row.precipitation);
+        break;
+      default:
+        break;
+    }
+    if (v == null) continue;
+    if (!buckets[code]) buckets[code] = [];
+    buckets[code].push(v);
+    const nm = row.geoData?.name?.trim();
+    if (nm) nameByCodarea[code] = nm;
+  }
+  const valuesByCodarea: Record<string, number> = {};
+  for (const [code, arr] of Object.entries(buckets)) {
+    if (!arr.length) continue;
+    valuesByCodarea[code] =
+      metric === 'precipitacao' ? arr.reduce((a, x) => a + x, 0) : arr.reduce((a, x) => a + x, 0) / arr.length;
+  }
+  return { valuesByCodarea, nameByCodarea };
+}
+
+export function buildProductivityByIbgeCodarea(
+  rows: Array<{
+    productivity?: string | number | null;
+    municipalityIbgeCode?: string | null;
+    municipalityName?: string | null;
+    geoData?: { ibgeCode?: string | null; name?: string | null; category?: string | null } | null;
+  }>
+): { valuesByCodarea: Record<string, number>; nameByCodarea: Record<string, string> } {
+  const buckets: Record<string, number[]> = {};
+  const nameByCodarea: Record<string, string> = {};
+  for (const row of rows) {
+    const cat = row.geoData?.category;
+    if (cat && cat !== 'municipality') continue;
+    const code = normalizeIbgeMunicipioCode(
+      row.municipalityIbgeCode ?? row.geoData?.ibgeCode ?? undefined
+    );
+    if (!code || code.length < 7) continue;
+    const v = Number(row.productivity);
+    if (!Number.isFinite(v)) continue;
+    if (!buckets[code]) buckets[code] = [];
+    buckets[code].push(v);
+    const nm =
+      row.municipalityName?.trim() || row.geoData?.name?.trim();
+    if (nm) nameByCodarea[code] = nm;
+  }
+  const valuesByCodarea: Record<string, number> = {};
+  for (const [code, arr] of Object.entries(buckets)) {
+    if (!arr.length) continue;
+    valuesByCodarea[code] = arr.reduce((a, x) => a + x, 0) / arr.length;
+  }
+  return { valuesByCodarea, nameByCodarea };
+}
+
+export function buildValuesByUfFromProductivityRows(
+  rows: Array<{
+    productivity?: string | number | null;
+    state?: string | null;
+    geoData?: { state?: string | null } | null;
+  }>
+): Partial<Record<string, number>> {
+  const buckets: Record<string, number[]> = {};
+  for (const row of rows) {
+    const uf = String(row.state || row.geoData?.state || '')
+      .trim()
+      .toUpperCase()
+      .slice(0, 2);
+    if (!uf || uf.length !== 2) continue;
+    const v = Number(row.productivity);
+    if (!Number.isFinite(v)) continue;
+    if (!buckets[uf]) buckets[uf] = [];
+    buckets[uf].push(v);
+  }
+  const out: Partial<Record<string, number>> = {};
+  for (const [uf, arr] of Object.entries(buckets)) {
+    if (!arr.length) continue;
+    out[uf] = arr.reduce((a, x) => a + x, 0) / arr.length;
+  }
+  return out;
 }
 
 export function buildValuesByUfFromDashboard(
