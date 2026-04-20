@@ -379,3 +379,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
+
+# ETL (Python)
+ETL/__pycache__/
