@@ -1,15 +1,17 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Card, CardBody, CardHeader, CardTitle } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { MapPin } from 'lucide-react';
 import { BrazilMap } from '../components/maps/BrazilMap';
+import { IbgeMunicipiosChoroplethMap } from '../components/maps/IbgeMunicipiosChoroplethMap';
 import { MapMetricLegend } from '../components/maps/MapMetricLegend';
 import type { BrazilMapMetric } from '../components/maps/brazilMapConfig';
-import { buildValuesByUfFromDashboard } from '../components/maps/brazilMapConfig';
-import { getDashboardSummary, listClimateRecords, type ClimateListResponse } from '../../lib/api/climateApi';
+import { buildClimateMetricByIbgeCodarea, buildValuesByUfFromDashboard } from '../components/maps/brazilMapConfig';
+import { getDashboardSummary, listAllClimateRecordsInRange, type ClimateListResponse } from '../../lib/api/climateApi';
 import type { DashboardSummaryDto } from '../../lib/api/contracts/climate';
 import { TOCANTINS_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
-import { CLIMATE_PERIOD_OPTIONS, TO_CITY_OPTIONS_WITH_ALL } from '../../lib/filters/appFilters';
+import { CLIMATE_PERIOD_OPTIONS } from '../../lib/filters/appFilters';
+import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
@@ -58,26 +60,44 @@ function calcPeriodRange(periodo: string): { startDate: string; endDate: string 
   return { startDate: iso(start), endDate: iso(end) };
 }
 
+function cityNameFromMapaPref(cidade: string): string | null {
+  if (cidade === 'todas') return null;
+  const legacy = TOCANTINS_CITY_VALUE_TO_NAME[cidade as keyof typeof TOCANTINS_CITY_VALUE_TO_NAME];
+  if (legacy) return legacy;
+  return cidade;
+}
+
 export function MapaClimatico() {
   const [cidade, setCidade] = usePersistedState<string>('climaagro.pref.mapaClimatico.cidade', 'todas');
   const [periodo, setPeriodo] = usePersistedState<string>('climaagro.pref.mapaClimatico.periodo', 'hoje');
+  const { options: munOptions, loading: munLoading, error: munError } = useIbgeMunicipioSelectOptions();
+  const cidadeOptions = useMemo(
+    () => [{ value: 'todas', label: 'Todas as cidades (TO)' }, ...munOptions],
+    [munOptions],
+  );
 
-  const selectedCityName = cidade !== 'todas' ? TOCANTINS_CITY_VALUE_TO_NAME[cidade] : null;
+  useEffect(() => {
+    if (cidade === 'todas') return;
+    if (munOptions.some((o) => o.value === cidade)) return;
+    const legacy = TOCANTINS_CITY_VALUE_TO_NAME[cidade as keyof typeof TOCANTINS_CITY_VALUE_TO_NAME];
+    if (legacy && munOptions.some((o) => o.value === legacy)) setCidade(legacy);
+  }, [cidade, munOptions, setCidade]);
+
+  const selectedCityName = cityNameFromMapaPref(cidade);
 
   const { status, data, error, reload } = useAsyncResource(
     async () => {
       const range = calcPeriodRange(periodo);
-      const [summary, climate] = await Promise.all([
+      const [summary, rows] = await Promise.all([
         getDashboardSummary({ state: 'TO' }),
-        listClimateRecords({
+        listAllClimateRecordsInRange({
           state: 'TO',
           startDate: range.startDate,
           endDate: range.endDate,
           place: selectedCityName || undefined,
-          limit: 1000,
         }),
       ]);
-      const rows = climate.success ? climate.data : [];
+      const climateMunicipioMap = buildClimateMetricByIbgeCodarea(rows, MAP_METRIC);
       const byCity = new Map<string, { temps: number[]; hums: number[]; winds: number[]; precs: number[] }>();
       for (const r of rows as Array<
         ClimateListResponse['data'][number] & { geoData?: { name?: string }; windSpeed?: string | number | null }
@@ -120,6 +140,7 @@ export function MapaClimatico() {
         summary,
         periodRows,
         mapRevision: Date.now(),
+        climateMunicipioMap,
       };
     },
     [periodo, selectedCityName]
@@ -178,7 +199,8 @@ export function MapaClimatico() {
           Mapa Climático
         </h1>
         <p className="text-muted-foreground">
-          Tocantins — cores no mapa usam os dados reais do período selecionado
+          Tocantins — quando os registros trazem código IBGE do município, o mapa usa a malha municipal (IBGE) e a legenda
+          de temperatura; caso contrário, mantém-se a visão por UF.
         </p>
       </div>
 
@@ -207,7 +229,14 @@ export function MapaClimatico() {
                 <CardTitle>Filtros</CardTitle>
               </CardHeader>
               <CardBody className="space-y-4">
-                <Select label="Cidade (TO)" value={cidade} onChange={(e) => setCidade(e.target.value)} options={TO_CITY_OPTIONS_WITH_ALL} />
+                <Select
+                  label="Cidade (TO)"
+                  value={cidade}
+                  onChange={(e) => setCidade(e.target.value)}
+                  options={cidadeOptions}
+                  disabled={munLoading}
+                  error={munError ?? undefined}
+                />
                 <Select label="Período" value={periodo} onChange={(e) => setPeriodo(e.target.value)} options={CLIMATE_PERIOD_OPTIONS} />
                 <div className="pt-4 border-t border-border">
                   <MapMetricLegend metric={MAP_METRIC} />
@@ -218,16 +247,29 @@ export function MapaClimatico() {
             <div className="lg:col-span-3 space-y-4">
               <Card className="relative">
                 <CardBody className="p-0">
-                  <BrazilMap metric={MAP_METRIC} valuesByUf={valuesByUf} dataRevision={payload.mapRevision} />
+                  {payload.climateMunicipioMap &&
+                  Object.keys(payload.climateMunicipioMap.valuesByCodarea).length > 0 ? (
+                    <IbgeMunicipiosChoroplethMap
+                      metric={MAP_METRIC}
+                      valuesByCodarea={payload.climateMunicipioMap.valuesByCodarea}
+                      nameByCodarea={payload.climateMunicipioMap.nameByCodarea}
+                      dataRevision={payload.mapRevision}
+                    />
+                  ) : (
+                    <BrazilMap metric={MAP_METRIC} valuesByUf={valuesByUf} dataRevision={payload.mapRevision} />
+                  )}
                 </CardBody>
               </Card>
 
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <MapPin className="w-4 h-4" />
                 <span>
-                  {selectedCityName
-                    ? `Mapa em TO usa o valor de ${selectedCityName} no período selecionado.`
-                    : 'Mapa em TO usa a média das cidades disponíveis no período selecionado.'}
+                  {payload.climateMunicipioMap &&
+                  Object.keys(payload.climateMunicipioMap.valuesByCodarea).length > 0
+                    ? 'Malha municipal (IBGE): temperatura média no período por município; cores conforme legenda.'
+                    : selectedCityName
+                      ? `Sem código IBGE nos registros de clima: mapa por UF com o valor agregado de ${selectedCityName} no período.`
+                      : 'Sem código IBGE nos registros de clima: mapa em TO com a média das cidades disponíveis no período.'}
                 </span>
               </div>
 

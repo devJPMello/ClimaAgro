@@ -67,7 +67,7 @@ export function Dashboard() {
           Dashboard
         </h1>
         <p className="text-muted-foreground">
-          Visão geral do Tocantins — clima por grandes municípios e produtividade estadual
+          Visão geral do Tocantins — KPIs estaduais e as cinco maiores cidades (população IBGE)
         </p>
       </div>
 
@@ -102,7 +102,10 @@ export function Dashboard() {
             <Card>
               <CardHeader>
                 <CardTitle>Resumo por localidade</CardTitle>
-                <CardDescription>Municípios com previsão CPTEC (Tocantins)</CardDescription>
+                <CardDescription>
+                  Cinco principais municípios — clima (últimos 14 dias) e produtividade média no último ano
+                  agrícola com dados na base
+                </CardDescription>
               </CardHeader>
               <CardBody>
                 <div className="overflow-x-auto">

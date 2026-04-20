@@ -7,7 +7,8 @@ import { Checkbox } from '../components/ui/Checkbox';
 import { User, Mail, Phone, MapPin, Bell, FileText, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUser } from '@clerk/clerk-react';
-import { TOCANTINS_CITY_OPTIONS } from '../../lib/geo/tocantinsCities';
+import { TO_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
+import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 import { listReportExports } from '../../lib/api/reportExportsApi';
 import { listClimateAlerts } from '../../lib/api/alertsApi';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
@@ -66,7 +67,20 @@ export function Perfil() {
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
   const [telefone, setTelefone] = useState('');
-  const [municipioFavorito, setMunicipioFavorito] = usePersistedState('climaagro.pref.perfil.municipioFavorito', 'palmas');
+  const [municipioFavorito, setMunicipioFavorito] = usePersistedState('climaagro.pref.perfil.municipioFavorito', 'Palmas');
+  const { options: municipioOptions, loading: municipiosLoading, error: municipiosError } = useIbgeMunicipioSelectOptions();
+
+  useEffect(() => {
+    if (!municipioOptions.length) return;
+    const valid = new Set(municipioOptions.map((o) => o.value));
+    if (valid.has(municipioFavorito)) return;
+    const legacy = TO_CITY_VALUE_TO_NAME[municipioFavorito as keyof typeof TO_CITY_VALUE_TO_NAME];
+    if (legacy && valid.has(legacy)) {
+      setMunicipioFavorito(legacy);
+      return;
+    }
+    if (valid.has('Palmas')) setMunicipioFavorito('Palmas');
+  }, [municipioOptions, municipioFavorito, setMunicipioFavorito]);
 
   const [notifAlertasCriticos, setNotifAlertasCriticos] = useState(true);
   const [notifRelatorios, setNotifRelatorios] = useState(true);
@@ -204,9 +218,10 @@ export function Perfil() {
                   label="Município Favorito"
                   value={municipioFavorito}
                   onChange={(e) => setMunicipioFavorito(e.target.value)}
-                  options={TOCANTINS_CITY_OPTIONS}
+                  options={municipioOptions}
                   className="pl-11"
-                  disabled={!editando}
+                  disabled={!editando || municipiosLoading}
+                  error={municipiosError ?? undefined}
                 />
               </div>
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Card, CardBody } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
@@ -9,7 +9,8 @@ import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { listClimateAlerts } from '../../lib/api/alertsApi';
 import type { ClimateAlertDto, ClimateAlertListDto } from '../../lib/api/contracts/alerts';
-import { TO_CITY_FILTER_OPTIONS, TO_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
+import { TO_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
+import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 
 function norm(s: string) {
@@ -23,7 +24,17 @@ export function Alertas() {
   const [severidadeFiltro, setSeveridadeFiltro] = usePersistedState('climaagro.pref.alertas.severidade', 'todos');
   const [tipoFiltro, setTipoFiltro] = usePersistedState('climaagro.pref.alertas.tipo', 'todos');
   const [regiaoFiltro, setRegiaoFiltro] = usePersistedState('climaagro.pref.alertas.cidade', 'todos');
-  const cityFilterLabel = regiaoFiltro !== 'todos' ? TO_CITY_VALUE_TO_NAME[regiaoFiltro] : undefined;
+  const { options: munOptions, loading: munLoading, error: munError } = useIbgeMunicipioSelectOptions();
+  const muniSelectOptions = useMemo(() => [{ value: 'todos', label: 'Todos' }, ...munOptions], [munOptions]);
+
+  useEffect(() => {
+    if (regiaoFiltro === 'todos') return;
+    if (munOptions.some((o) => o.value === regiaoFiltro)) return;
+    const legacy = TO_CITY_VALUE_TO_NAME[regiaoFiltro as keyof typeof TO_CITY_VALUE_TO_NAME];
+    if (legacy && munOptions.some((o) => o.value === legacy)) setRegiaoFiltro(legacy);
+  }, [regiaoFiltro, munOptions, setRegiaoFiltro]);
+
+  const cityFilterLabel = regiaoFiltro !== 'todos' ? regiaoFiltro : undefined;
   const { status, data, error, reload } = useAsyncResource(
     () => listClimateAlerts({ state: 'TO', city: cityFilterLabel }),
     [regiaoFiltro]
@@ -179,7 +190,9 @@ export function Alertas() {
                         label="Município"
                         value={regiaoFiltro}
                         onChange={(e) => setRegiaoFiltro(e.target.value)}
-                        options={TO_CITY_FILTER_OPTIONS}
+                        options={muniSelectOptions}
+                        disabled={munLoading}
+                        error={munError ?? undefined}
                       />
                     </div>
 

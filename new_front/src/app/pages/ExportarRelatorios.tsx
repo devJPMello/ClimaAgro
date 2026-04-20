@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { Input } from '../components/ui/Input';
@@ -12,7 +13,16 @@ import type { ReportHistoryItemDto } from '../../lib/api/contracts/aiReports';
 import { createReportExport, listReportExports } from '../../lib/api/reportExportsApi';
 import type { ReportExportItemDto } from '../../lib/api/contracts/reportExports';
 import { EmptyState } from '../components/ui/EmptyState';
-import { getTocantinsCityLabel, TOCANTINS_CITY_OPTIONS } from '../../lib/geo/tocantinsCities';
+import { displayLocalidadeLabel, TO_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
+import { getProductivitySeasonOptions } from '../../lib/filters/appFilters';
+import { downloadReportFile, type ReportExportFileFormat } from '../../lib/reportExportFile';
+import {
+  gatherReportDados,
+  type ReportTipoKey,
+  localidadeKeyFromStoredLocal,
+  parseExportPeriodoLabel,
+  reportTipoFromStoredLabel,
+} from '../../lib/report/gatherReportData';
 
 function labelTipoRelatorio(value: string): string {
   if (value === 'clima') return 'Relatório de Clima';
@@ -21,10 +31,32 @@ function labelTipoRelatorio(value: string): string {
 }
 
 export function ExportarRelatorios() {
-  const [localidade, setLocalidade] = useState('palmas');
+  const [localidade, setLocalidade] = useState('Palmas');
+  const { options: ibgeLocalOptions, loading: localidadesLoading, error: localidadesError } =
+    useIbgeMunicipioSelectOptions();
+  const localidadeSelectOptions = ibgeLocalOptions.map((o) => ({
+    value: o.value,
+    label: `${o.label} - TO`,
+  }));
+
+  useEffect(() => {
+    if (!ibgeLocalOptions.length) return;
+    const valid = new Set(ibgeLocalOptions.map((o) => o.value));
+    if (valid.has(localidade)) return;
+    const legacy = TO_CITY_VALUE_TO_NAME[localidade as keyof typeof TO_CITY_VALUE_TO_NAME];
+    if (legacy && valid.has(legacy)) {
+      setLocalidade(legacy);
+      return;
+    }
+    if (valid.has('Palmas')) setLocalidade('Palmas');
+  }, [ibgeLocalOptions, localidade]);
   const [tipoRelatorio, setTipoRelatorio] = useState('clima');
-  const [periodoInicio, setPeriodoInicio] = useState('2025-01-01');
+  const [periodoInicio, setPeriodoInicio] = useState('2026-01-01');
   const [periodoFim, setPeriodoFim] = useState('2026-04-16');
+  const seasonOptions = useMemo(() => getProductivitySeasonOptions(), []);
+  const [safraProdutividade, setSafraProdutividade] = useState(
+    () => getProductivitySeasonOptions()[0]?.value ?? ''
+  );
   const [formato, setFormato] = useState('pdf');
   const [loading, setLoading] = useState(false);
   const [loadingHistorico, setLoadingHistorico] = useState(true);
@@ -63,11 +95,16 @@ export function ExportarRelatorios() {
   const handleGerarResumoIA = async () => {
     setLoadingIA(true);
     try {
+      const safraTrim = safraProdutividade.trim();
+      const periodoIaInicio =
+        tipoRelatorio === 'produtividade' && safraTrim ? `Safra ${safraTrim}` : periodoInicio;
+      const periodoIaFim =
+        tipoRelatorio === 'produtividade' && safraTrim ? `Safra ${safraTrim}` : periodoFim;
       const response = await generateAiReport({
         localidade,
         tipoRelatorio,
-        periodoInicio,
-        periodoFim,
+        periodoInicio: periodoIaInicio,
+        periodoFim: periodoIaFim,
         formato,
         instrucoesUsuario: instrucoesIA,
         historicoRelatorios: mapHistorico(),
@@ -86,34 +123,90 @@ export function ExportarRelatorios() {
   };
 
   const handleExportar = async () => {
+    const safraTrim = safraProdutividade.trim();
+    if (tipoRelatorio === 'produtividade' && !safraTrim) {
+      toast.error('Selecione a safra agrícola para o relatório de produtividade.');
+      return;
+    }
     setLoading(true);
     try {
-      const local = getTocantinsCityLabel(localidade);
+      const local = displayLocalidadeLabel(localidade);
       const tipo = labelTipoRelatorio(tipoRelatorio);
-      const periodo = `${periodoInicio} — ${periodoFim}`;
+      const periodo =
+        tipoRelatorio === 'produtividade' && safraTrim
+          ? `Safra ${safraTrim}`
+          : `${periodoInicio} — ${periodoFim}`;
+      const fmt = formato as ReportExportFileFormat;
+
+      const dadosIntegrados = await gatherReportDados({
+        tipo: tipoRelatorio as ReportTipoKey,
+        localidadeKey: localidade,
+        displayLocal: local,
+        startDate: periodoInicio,
+        endDate: periodoFim,
+        productivitySeason: tipoRelatorio === 'produtividade' ? safraTrim : undefined,
+      });
+
+      downloadReportFile({
+        titulo: tipo,
+        local,
+        periodo,
+        formato: fmt,
+        corpoTexto: resumoIA.trim() || undefined,
+        dadosIntegrados,
+      });
+
+      if (fmt === 'xlsx') {
+        toast.message('Ficheiro CSV gerado (abre no Excel com importação UTF-8).');
+      }
+
       await createReportExport({
         tipo,
         local,
         periodo,
         formato: formato.toUpperCase(),
-        status: 'registrado',
+        status: 'concluido',
         foiGeradoComIA: Boolean(resumoIA.trim()),
       });
-      toast.success('Exportação registrada no histórico.');
+      toast.success('Download iniciado e registo guardado no histórico.');
       await carregarHistorico();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao registrar exportação.');
+      toast.error(e instanceof Error ? e.message : 'Falha ao gerar ou registrar exportação.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDownload = (item: ReportExportItemDto) => {
-    if (item.status !== 'concluido') {
-      toast.message('Download disponível apenas quando o relatório estiver concluído no servidor.');
+  const handleDownload = async (item: ReportExportItemDto) => {
+    if (item.status === 'falha') {
+      toast.message('Este pedido falhou; gere um novo relatório.');
       return;
     }
-    toast.success('Download iniciado!');
+    try {
+      const parsed = parseExportPeriodoLabel(item.periodo);
+      const tipoItem = reportTipoFromStoredLabel(item.tipo);
+      const key = localidadeKeyFromStoredLocal(item.local);
+      const dadosIntegrados = await gatherReportDados({
+        tipo: tipoItem,
+        localidadeKey: key,
+        displayLocal: item.local,
+        startDate: parsed.startDate,
+        endDate: parsed.endDate,
+        productivitySeason: tipoItem === 'produtividade' ? parsed.productivitySeason : undefined,
+      });
+      const fmt = String(item.formato).toLowerCase() as ReportExportFileFormat;
+      downloadReportFile({
+        titulo: item.tipo,
+        local: item.local,
+        periodo: item.periodo,
+        formato: fmt === 'pdf' || fmt === 'csv' || fmt === 'xlsx' ? fmt : 'pdf',
+        corpoTexto: undefined,
+        dadosIntegrados,
+      });
+      toast.success('Download iniciado.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao montar o relatório.');
+    }
   };
 
   return (
@@ -140,7 +233,9 @@ export function ExportarRelatorios() {
                   label="Localidade"
                   value={localidade}
                   onChange={(e) => setLocalidade(e.target.value)}
-                  options={TOCANTINS_CITY_OPTIONS}
+                  options={localidadeSelectOptions}
+                  disabled={localidadesLoading}
+                  error={localidadesError ?? undefined}
                 />
 
                 <Select
@@ -155,21 +250,30 @@ export function ExportarRelatorios() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  label="Período - Início"
-                  type="date"
-                  value={periodoInicio}
-                  onChange={(e) => setPeriodoInicio(e.target.value)}
+              {tipoRelatorio === 'produtividade' ? (
+                <Select
+                  label="Safra agrícola"
+                  value={safraProdutividade}
+                  onChange={(e) => setSafraProdutividade(e.target.value)}
+                  options={seasonOptions}
                 />
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Período - Início"
+                    type="date"
+                    value={periodoInicio}
+                    onChange={(e) => setPeriodoInicio(e.target.value)}
+                  />
 
-                <Input
-                  label="Período - Fim"
-                  type="date"
-                  value={periodoFim}
-                  onChange={(e) => setPeriodoFim(e.target.value)}
-                />
-              </div>
+                  <Input
+                    label="Período - Fim"
+                    type="date"
+                    value={periodoFim}
+                    onChange={(e) => setPeriodoFim(e.target.value)}
+                  />
+                </div>
+              )}
 
               <Select
                 label="Formato"
@@ -250,8 +354,8 @@ export function ExportarRelatorios() {
 
               <div className="pt-4 border-t border-border">
                 <p className="text-xs text-muted-foreground">
-                  O histórico é guardado no servidor por navegador (cabeçalho X-Export-Client-Id). Geração de arquivo
-                  para download pode ser ativada em versões futuras.
+                  O histórico usa o cabeçalho X-Export-Client-Id. O PDF/CSV é gerado no navegador; «Gerar relatório»
+                  descarrega o ficheiro e marca o pedido como concluído.
                 </p>
               </div>
             </CardBody>
@@ -332,8 +436,13 @@ export function ExportarRelatorios() {
                         )}
                       </td>
                       <td className="py-4">
-                        {exp.status === 'concluido' && (
-                          <Button variant="ghost" className="px-3 py-1" onClick={() => handleDownload(exp)}>
+                        {exp.status !== 'falha' && (
+                          <Button
+                            variant="ghost"
+                            className="px-3 py-1"
+                            onClick={() => void handleDownload(exp)}
+                            title="Descarregar de novo com dados atuais da API (o resumo de IA não fica guardado no servidor)"
+                          >
                             <Download className="w-4 h-4" />
                           </Button>
                         )}
