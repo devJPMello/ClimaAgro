@@ -1,5 +1,6 @@
 const { Op, fn, col } = require('sequelize');
 const alertSvc = require('./climateAlertsUiService');
+const top5CityDefs = require('../data/dashboardTopTocantinsCities');
 
 function n(v, digits = 1) {
   if (v == null || Number.isNaN(Number(v))) return null;
@@ -73,10 +74,8 @@ async function buildDashboardSummary({ models, state: stateParam }) {
     where: { state: uf, category: 'municipality', isActive: true },
     order: [['name', 'ASC']]
   });
-  const climatePlaces = allMuns.filter((g) => g.properties && String(g.properties.cptecCityQuery || '').trim());
-
-  /** Linhas da tabela + fontes de clima: municípios com CPTEC, senão polígono do estado. */
-  const regionRows = climatePlaces.length > 0 ? climatePlaces : stateRow ? [stateRow] : [];
+  /** Todos os municípios TO em geo_data (Open-Meteo / CPTEC por cidade); senão visão estadual. */
+  const regionRows = allMuns.length > 0 ? allMuns : stateRow ? [stateRow] : [];
 
   if (regionRows.length === 0) {
     return {
@@ -91,7 +90,6 @@ async function buildDashboardSummary({ models, state: stateParam }) {
   }
 
   const climateGeoIds = regionRows.map((r) => r.id);
-  const prodGeoId = stateRow ? stateRow.id : regionRows[0].id;
 
   const inClimateIds = { geoDataId: { [Op.in]: climateGeoIds } };
 
@@ -170,16 +168,14 @@ async function buildDashboardSummary({ models, state: stateParam }) {
   }
   const totalAlerts = allAlertItems.length;
 
-  const maxY = await Productivity.max('year');
-  const latestYear = maxY || new Date().getFullYear();
+  let latestYear = await Productivity.max('year', { where: { state: uf } });
+  if (latestYear == null) latestYear = await Productivity.max('year');
+  latestYear = latestYear != null ? Number(latestYear) : new Date().getFullYear();
 
-  const prodWhere = {
-    year: latestYear,
-    geoDataId: prodGeoId
-  };
+  /** Média estadual (todos os registros SIDRA/APP do ano na UF), não o polígono `geo_data` do estado. */
   const [kpiProd] = await Productivity.findAll({
     attributes: [[fn('AVG', col('productivity')), 'v']],
-    where: prodWhere,
+    where: { state: uf, year: latestYear },
     raw: true
   });
 
@@ -192,38 +188,67 @@ async function buildDashboardSummary({ models, state: stateParam }) {
 
   const rainSum = n(kpiRain?.v, 0) ?? 0;
 
-  const regioes = [];
-  for (const s of regionRows) {
-    const [trow] = await ClimateData.findAll({
-      attributes: [[fn('AVG', col('avg_temperature')), 'v']],
-      where: { geoDataId: s.id, date: { [Op.gte]: d14.toISOString().split('T')[0] } },
-      raw: true
-    });
-    const [prow] = await ClimateData.findAll({
-      attributes: [[fn('COALESCE', fn('SUM', col('precipitation')), 0), 'v']],
-      where: { geoDataId: s.id, date: { [Op.gte]: d14.toISOString().split('T')[0] } },
-      raw: true
-    });
-    const prodRow = await Productivity.findOne({
-      where: { geoDataId: prodGeoId, year: latestYear },
-      order: [['cropType', 'ASC']]
-    });
-    const [hrow] = await ClimateData.findAll({
-      attributes: [[fn('AVG', col('humidity')), 'v']],
-      where: { geoDataId: s.id, date: { [Op.gte]: d14.toISOString().split('T')[0] } },
-      raw: true
-    });
-    const [wrow] = await ClimateData.findAll({
-      attributes: [[fn('AVG', col('wind_speed')), 'v']],
-      where: { geoDataId: s.id, date: { [Op.gte]: d14.toISOString().split('T')[0] } },
-      raw: true
-    });
+  const since14Str = d14.toISOString().split('T')[0];
+  const geoIdsForClimate = regionRows.map((r) => r.id);
 
-    const t = n(trow?.v, 1);
-    const p = n(prow?.v, 1) ?? 0;
-    const h = n(hrow?.v, 1);
-    const w = n(wrow?.v, 1);
-    const prodN = prodRow ? n(prodRow.productivity, 2) : null;
+  const climateByGeoId = new Map();
+  if (geoIdsForClimate.length > 0) {
+    const statRows = await ClimateData.findAll({
+      attributes: [
+        'geoDataId',
+        [fn('AVG', col('avg_temperature')), 'avgT'],
+        [fn('COALESCE', fn('SUM', col('precipitation')), 0), 'sumP'],
+        [fn('AVG', col('humidity')), 'avgH'],
+        [fn('AVG', col('wind_speed')), 'avgW']
+      ],
+      where: {
+        geoDataId: { [Op.in]: geoIdsForClimate },
+        date: { [Op.gte]: since14Str }
+      },
+      group: ['geoDataId'],
+      raw: true
+    });
+    for (const row of statRows) {
+      climateByGeoId.set(String(row.geoDataId), row);
+    }
+  }
+
+  const top5GeoRows = [];
+  for (const def of top5CityDefs) {
+    const g = allMuns.find((m) => m.name === def.name);
+    if (g) top5GeoRows.push(g);
+  }
+
+  const prodByGeoId = await Promise.all(
+    top5GeoRows.map(async (s) => {
+      const code7 =
+        s.ibgeCode != null && String(s.ibgeCode).replace(/\D/g, '').length >= 7
+          ? String(s.ibgeCode).replace(/\D/g, '').padStart(7, '0').slice(0, 7)
+          : '';
+      const prodWhere = {
+        state: uf,
+        year: latestYear,
+        [Op.or]: [{ geoDataId: s.id }, ...(code7 ? [{ municipalityIbgeCode: code7 }] : [])]
+      };
+      const [aggProd] = await Productivity.findAll({
+        attributes: [[fn('AVG', col('productivity')), 'v']],
+        where: prodWhere,
+        raw: true
+      });
+      return { geoId: s.id, aggProd };
+    })
+  );
+  const prodMap = new Map(prodByGeoId.map((x) => [String(x.geoId), x.aggProd]));
+
+  const regioes = [];
+  for (const s of top5GeoRows) {
+    const st = climateByGeoId.get(String(s.id));
+    const t = n(st?.avgT, 1);
+    const p = n(st?.sumP, 1) ?? 0;
+    const h = n(st?.avgH, 1);
+    const w = n(st?.avgW, 1);
+    const aggProd = prodMap.get(String(s.id));
+    const prodN = n(aggProd?.v, 2);
 
     regioes.push({
       uf: s.state,
@@ -236,7 +261,7 @@ async function buildDashboardSummary({ models, state: stateParam }) {
       ventoNum: w,
       precipitacao: `${p}mm`,
       precipitacaoNum: p,
-      produtividade: prodRow ? `${n(prodRow.productivity, 1)} t/ha` : '—',
+      produtividade: prodN != null && aggProd?.v != null ? `${n(aggProd.v, 1)} t/ha` : '—',
       produtividadeNum: prodN,
       alertas: alertMap[s.id] || 0
     });
