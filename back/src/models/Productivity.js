@@ -1,5 +1,6 @@
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
+const { normalizeMunicipalityKey } = require('../utils/municipalityNameMatch');
 
 const Productivity = sequelize.define('Productivity', {
   id: {
@@ -7,15 +8,40 @@ const Productivity = sequelize.define('Productivity', {
     defaultValue: DataTypes.UUIDV4,
     primaryKey: true
   },
-  // Referência ao GeoData
+  // Referência ao GeoData (opcional — SIDRA pode existir só com nome/código IBGE do município)
   geoDataId: {
     type: DataTypes.UUID,
-    allowNull: false,
+    allowNull: true,
     field: 'geo_data_id',
     references: {
       model: 'geo_data',
       key: 'id'
     }
+  },
+  /** UF do município (denormalizado; filtro sem depender de join em geo_data). */
+  state: {
+    type: DataTypes.STRING(2),
+    allowNull: false,
+    defaultValue: 'TO',
+    field: 'state'
+  },
+  /** Nome do município como no SIDRA / IBGE. */
+  municipalityName: {
+    type: DataTypes.STRING(200),
+    allowNull: false,
+    field: 'municipality_name'
+  },
+  /** Chave estável para unicidade (nome normalizado, sem acento). */
+  municipalityKey: {
+    type: DataTypes.STRING(220),
+    allowNull: false,
+    field: 'municipality_key'
+  },
+  /** Código IBGE do município (7 dígitos), para mapas / joins externos. */
+  municipalityIbgeCode: {
+    type: DataTypes.STRING(7),
+    allowNull: true,
+    field: 'municipality_ibge_code'
   },
   // Ano da safra
   year: {
@@ -29,11 +55,20 @@ const Productivity = sequelize.define('Productivity', {
     allowNull: false,
     field: 'season'
   },
-  // Tipo de cultura
+  /**
+   * Categoria/cultura: chaves canónicas (soja, milho, …) ou slug do produto SIDRA
+   * (ex.: abacaxi, mandioca) — ver `sidra1612ProductCropMap.js`.
+   */
   cropType: {
-    type: DataTypes.ENUM('soja', 'milho', 'cafe', 'cana', 'algodao', 'trigo', 'arroz', 'feijao', 'outros'),
+    type: DataTypes.STRING(80),
     allowNull: false,
     field: 'crop_type'
+  },
+  /** Rótulo do produto (ex.: texto SIDRA) — chave lógica do mapa/listagem junto com geo/ano. */
+  productLabel: {
+    type: DataTypes.STRING(300),
+    allowNull: false,
+    field: 'product_label'
   },
   // Produtividade em toneladas por hectare
   productivity: {
@@ -152,7 +187,8 @@ const Productivity = sequelize.define('Productivity', {
       fields: ['year', 'crop_type']
     },
     {
-      fields: ['geo_data_id', 'year', 'crop_type'],
+      name: 'productivity_state_munkey_year_product_uidx',
+      fields: ['state', 'municipality_key', 'year', 'product_label'],
       unique: true
     },
     {
@@ -160,8 +196,24 @@ const Productivity = sequelize.define('Productivity', {
     },
     {
       fields: ['status']
+    },
+    {
+      fields: ['state']
+    },
+    {
+      fields: ['municipality_key']
     }
   ]
+});
+
+Productivity.beforeValidate((row) => {
+  const name = String(row.municipalityName || '').trim();
+  if (name && (!row.municipalityKey || String(row.municipalityKey).trim() === '')) {
+    row.municipalityKey = normalizeMunicipalityKey(name);
+  }
+  if (row.state && String(row.state).length > 2) {
+    row.state = String(row.state).trim().toUpperCase().slice(0, 2);
+  }
 });
 
 // Métodos de consulta específicos
@@ -193,15 +245,19 @@ Productivity.findByStateAndYear = async function(state, year, cropType = null) {
   });
 };
 
-Productivity.getTimeSeries = async function(geoDataId, cropType, startYear, endYear) {
+Productivity.getTimeSeries = async function(geoDataId, cropType, startYear, endYear, productLabel = null) {
+  const where = {
+    geoDataId,
+    cropType,
+    year: {
+      [sequelize.Sequelize.Op.between]: [startYear, endYear]
+    }
+  };
+  if (productLabel != null && String(productLabel).trim() !== '') {
+    where.productLabel = String(productLabel).trim();
+  }
   return await this.findAll({
-    where: {
-      geoDataId,
-      cropType,
-      year: {
-        [sequelize.Sequelize.Op.between]: [startYear, endYear]
-      }
-    },
+    where,
     order: [['year', 'ASC']]
   });
 };
@@ -237,39 +293,44 @@ Productivity.getProductivityStats = async function(year, cropType = null) {
   return stats[0];
 };
 
-// Método para calcular variação em relação à média histórica
-Productivity.calculateHistoricalVariation = async function(geoDataId, cropType, year) {
-  const currentYear = await this.findOne({
-    where: { geoDataId, cropType, year }
-  });
-  
+// Método para calcular variação em relação à média histórica (identifica o registo por id)
+Productivity.calculateHistoricalVariation = async function(productivityId) {
+  const currentYear = await this.findByPk(productivityId);
   if (!currentYear) return null;
-  
+
+  const { Op } = sequelize.Sequelize;
+  const scope =
+    currentYear.geoDataId != null
+      ? { geoDataId: currentYear.geoDataId }
+      : { state: currentYear.state, municipalityKey: currentYear.municipalityKey };
+
+  const histWhere = {
+    ...scope,
+    cropType: currentYear.cropType,
+    productLabel: currentYear.productLabel,
+    year: { [Op.lt]: currentYear.year }
+  };
+
   const historicalYears = await this.findAll({
-    where: {
-      geoDataId,
-      cropType,
-      year: {
-        [sequelize.Sequelize.Op.lt]: year
-      }
-    },
+    where: histWhere,
     order: [['year', 'DESC']],
     limit: 5
   });
-  
+
   if (historicalYears.length === 0) return null;
-  
-  const historicalAverage = historicalYears.reduce((sum, record) => 
-    sum + parseFloat(record.productivity), 0) / historicalYears.length;
-  
-  const variation = ((parseFloat(currentYear.productivity) - historicalAverage) / historicalAverage) * 100;
-  
-  // Atualizar o registro com a variação calculada
+
+  const historicalAverage =
+    historicalYears.reduce((sum, record) => sum + parseFloat(record.productivity), 0) /
+    historicalYears.length;
+
+  const variation =
+    ((parseFloat(currentYear.productivity) - historicalAverage) / historicalAverage) * 100;
+
   await currentYear.update({
     historicalAverage: historicalAverage,
     variationFromAverage: variation
   });
-  
+
   return {
     current: parseFloat(currentYear.productivity),
     historical: historicalAverage,

@@ -14,7 +14,14 @@
     "seed:all": "npm run seed:geo && npm run seed:productivity",
     "db:reset": "npm run seed:all",
     "sync:climate": "node src/scripts/syncRealClimateData.js",
-    "purge:seed": "node src/scripts/purgeInventedSeedData.js"
+    "purge:seed": "node src/scripts/purgeInventedSeedData.js",
+    "import:ibge1612": "node src/scripts/importIbgeSidra1612Csv.js",
+    "sync:productivity-ibge": "node src/scripts/syncProductivityFromIbgeSidra1612.js",
+    "migrate:productivity-label": "node src/scripts/migrateProductivityProductLabel.js",
+    "migrate:productivity-municipality": "node src/scripts/migrateProductivityMunicipalityColumns.js",
+    "migrate:productivity-crop-type-varchar": "node src/scripts/migrateCropTypeEnumToVarchar.js",
+    "geo:ensure-tocantins-municipios": "node src/scripts/ensureTocantinsMunicipiosGeoData.js",
+    "geo:geocode-tocantins": "node src/scripts/geocodeTocantinsMunicipiosGeoData.js"
   },
   "keywords": ["clima", "agricultura", "api", "nodejs"],
   "author": "ClimaAgro Team",

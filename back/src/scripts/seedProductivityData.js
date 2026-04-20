@@ -8,6 +8,20 @@ require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
 const { models } = require('../config/database');
 const { GeoData, Productivity, ClimateData } = models;
+const { normalizeMunicipalityKey } = require('../utils/municipalityNameMatch');
+
+function municipalityFieldsFromGeo(g) {
+  const name = String(g?.name || '—').trim() || '—';
+  const st = String(g?.state || 'BR').trim().toUpperCase().slice(0, 2);
+  let ibge = g?.ibgeCode ? String(g.ibgeCode).replace(/\D/g, '') : '';
+  if (ibge.length !== 7) ibge = null;
+  return {
+    municipalityName: name,
+    municipalityKey: normalizeMunicipalityKey(name),
+    state: st,
+    municipalityIbgeCode: ibge,
+  };
+}
 
 // Dados de exemplo para produtividade
 const productivityData = [
@@ -17,6 +31,7 @@ const productivityData = [
     year: 2024,
     season: '2024/25',
     cropType: 'soja',
+    productLabel: 'Soja',
     productivity: 3.2,
     plantedArea: 10500000,
     totalProduction: 33600000,
@@ -41,6 +56,7 @@ const productivityData = [
     year: 2024,
     season: '2024/25',
     cropType: 'soja',
+    productLabel: 'Soja',
     productivity: 3.8,
     plantedArea: 5500000,
     totalProduction: 20900000,
@@ -65,6 +81,7 @@ const productivityData = [
     year: 2024,
     season: '2024/25',
     cropType: 'soja',
+    productLabel: 'Soja',
     productivity: 3.5,
     plantedArea: 6200000,
     totalProduction: 21700000,
@@ -89,6 +106,7 @@ const productivityData = [
     year: 2024,
     season: '2024/25',
     cropType: 'soja',
+    productLabel: 'Soja',
     productivity: 3.1,
     plantedArea: 3800000,
     totalProduction: 11780000,
@@ -113,6 +131,7 @@ const productivityData = [
     year: 2024,
     season: '2024/25',
     cropType: 'soja',
+    productLabel: 'Soja',
     productivity: 2.8,
     plantedArea: 1800000,
     totalProduction: 5040000,
@@ -137,6 +156,7 @@ const productivityData = [
     year: 2024,
     season: '2024/25',
     cropType: 'soja',
+    productLabel: 'Soja',
     productivity: 2.9,
     plantedArea: 2200000,
     totalProduction: 6380000,
@@ -226,6 +246,7 @@ async function ensureProductivity2024ForEveryState(GeoData, Productivity) {
   const base = {
     season: '2024/25',
     cropType: 'soja',
+    productLabel: 'Soja',
     productivity: 3.15,
     plantedArea: 850000,
     historicalAverage: 3.0,
@@ -244,19 +265,26 @@ async function ensureProductivity2024ForEveryState(GeoData, Productivity) {
     status: 'confirmado'
   };
   for (const g of states) {
+    const mf = municipalityFieldsFromGeo(g);
     const existing = await Productivity.findOne({
-      where: { geoDataId: g.id, year, cropType: 'soja' }
+      where: {
+        state: mf.state,
+        municipalityKey: mf.municipalityKey,
+        year,
+        productLabel: 'Soja',
+      },
     });
     if (existing) continue;
     const p = Number((3.0 + (g.state?.charCodeAt(0) || 0) * 0.001).toFixed(2));
     const area = 800000 + (states.indexOf(g) % 5) * 50000;
     await Productivity.create({
       ...base,
+      ...mf,
       geoDataId: g.id,
       year,
       productivity: p,
       plantedArea: area,
-      totalProduction: p * area
+      totalProduction: p * area,
     });
     console.log(`✅ Produtividade 2024 (placeholder) para ${g.name} (${g.state})`);
   }
@@ -397,16 +425,20 @@ const seedProductivityData = async () => {
     for (const [stateCode, dataIndex] of Object.entries(stateMapping)) {
       const geoDataItem = geoData.find(g => g.state === stateCode);
       if (geoDataItem) {
-        const productivityItem = { ...productivityData[dataIndex] };
+        const productivityItem = {
+          ...productivityData[dataIndex],
+          ...municipalityFieldsFromGeo(geoDataItem),
+        };
         productivityItem.geoDataId = geoDataItem.id;
 
         // Verificar se já existe
         const existing = await Productivity.findOne({
           where: {
-            geoDataId: geoDataItem.id,
+            state: productivityItem.state,
+            municipalityKey: productivityItem.municipalityKey,
             year: productivityItem.year,
-            cropType: productivityItem.cropType
-          }
+            productLabel: productivityItem.productLabel,
+          },
         });
 
         if (!existing) {
@@ -453,6 +485,7 @@ const seedProductivityData = async () => {
           const baseData = productivityData[dataIndex];
           const historicalData = {
             ...baseData,
+            ...municipalityFieldsFromGeo(geoDataItem),
             geoDataId: geoDataItem.id,
             year: year,
             season: `${year}/${year + 1}`,
@@ -460,7 +493,7 @@ const seedProductivityData = async () => {
             plantedArea: baseData.plantedArea * (0.9 + Math.random() * 0.2), // Variação de área
             historicalAverage: null, // Será calculado depois
             variationFromAverage: null,
-            dataReliability: 85 + Math.random() * 10
+            dataReliability: 85 + Math.random() * 10,
           };
 
           // Calcular produção total
@@ -469,10 +502,11 @@ const seedProductivityData = async () => {
           // Verificar se já existe
           const existing = await Productivity.findOne({
             where: {
-              geoDataId: geoDataItem.id,
+              state: historicalData.state,
+              municipalityKey: historicalData.municipalityKey,
               year: year,
-              cropType: historicalData.cropType
-            }
+              productLabel: historicalData.productLabel,
+            },
           });
 
           if (!existing) {
@@ -486,14 +520,21 @@ const seedProductivityData = async () => {
     // Calcular médias históricas e variações
     console.log('📊 Calculando médias históricas...');
     for (const [stateCode, dataIndex] of Object.entries(stateMapping)) {
-      const geoDataItem = geoData.find(g => g.state === stateCode);
+      const geoDataItem = geoData.find((g) => g.state === stateCode);
       if (geoDataItem) {
-        await Productivity.calculateHistoricalVariation(
-          geoDataItem.id,
-          'soja',
-          2024
-        );
-        console.log(`✅ Médias históricas calculadas para ${geoDataItem.name}`);
+        const mf = municipalityFieldsFromGeo(geoDataItem);
+        const p2024 = await Productivity.findOne({
+          where: {
+            state: mf.state,
+            municipalityKey: mf.municipalityKey,
+            year: 2024,
+            productLabel: 'Soja',
+          },
+        });
+        if (p2024) {
+          await Productivity.calculateHistoricalVariation(p2024.id);
+          console.log(`✅ Médias históricas calculadas para ${geoDataItem.name}`);
+        }
       }
     }
 

@@ -1,9 +1,11 @@
 const express = require('express');
+const { Op, QueryTypes } = require('sequelize');
 const router = express.Router();
-const { models } = require('../config/database');
+const { sequelize, models } = require('../config/database');
 const { Productivity, GeoData, ClimateData } = models;
 const { validationResult } = require('express-validator');
 const { body, query, param } = require('express-validator');
+const { normalizeMunicipalityKey } = require('../utils/municipalityNameMatch');
 
 // Middleware de validação
 const validateRequest = (req, res, next) => {
@@ -17,34 +19,62 @@ const validateRequest = (req, res, next) => {
 // GET /api/productivity - Listar dados de produtividade com filtros
 router.get('/', [
   query('year').optional().isInt({ min: 2000, max: 2030 }),
-  query('cropType').optional().isIn(['soja', 'milho', 'cafe', 'cana', 'algodao', 'trigo', 'arroz', 'feijao', 'outros']),
+  query('season').optional().matches(/^\d{4}\/\d{2}$/),
+  query('cropType').optional({ checkFalsy: true }).trim().isString().isLength({ min: 1, max: 80 }),
+  query('productLabel').optional().isString().isLength({ min: 1, max: 300 }),
   query('region').optional().isString(),
   query('state').optional().isString().isLength({ min: 2, max: 2 }),
-  query('limit').optional().isInt({ min: 1, max: 100 }),
+  query('municipality').optional().isString().isLength({ min: 1, max: 200 }),
+  query('limit').optional().isInt({ min: 1, max: 500 }),
   query('offset').optional().isInt({ min: 0 }),
   validateRequest
 ], async (req, res) => {
   try {
-    const { year, cropType, region, state, limit = 50, offset = 0 } = req.query;
+    const { year, season, cropType, productLabel, region, state, municipality, limit = 50, offset = 0 } = req.query;
     
     const whereClause = {};
     const includeWhere = { isActive: true };
     
-    if (year) whereClause.year = year;
+    if (season) whereClause.season = String(season);
+    else if (year) whereClause.year = year;
     if (cropType) whereClause.cropType = cropType;
+    if (productLabel && String(productLabel).trim()) {
+      whereClause.productLabel = String(productLabel).trim();
+    }
+    if (state && String(state).trim()) {
+      whereClause.state = String(state).trim().toUpperCase().slice(0, 2);
+    }
+    if (municipality && String(municipality).trim()) {
+      const m = String(municipality).trim();
+      whereClause.municipalityName = { [Op.iLike]: `%${m}%` };
+    }
     if (region) includeWhere.region = region;
-    if (state) includeWhere.state = state;
-    
+
+    const lim = Math.min(parseInt(String(limit), 10) || 50, 500);
+    const off = Math.max(parseInt(String(offset), 10) || 0, 0);
+
+    const order =
+      municipality && String(municipality).trim()
+        ? [
+            ['year', 'ASC'],
+            ['productLabel', 'ASC'],
+            ['cropType', 'ASC'],
+          ]
+        : [['productivity', 'DESC']];
+
     const productivity = await Productivity.findAndCountAll({
       where: whereClause,
       include: [{
         model: GeoData,
         as: 'geoData',
-        where: includeWhere
+        where: includeWhere,
+        required: false
       }],
-      order: [['productivity', 'DESC']],
-      limit: parseInt(limit),
-      offset: parseInt(offset)
+      distinct: true,
+      col: 'id',
+      order,
+      limit: lim,
+      offset: off
     });
     
     res.json({
@@ -52,9 +82,9 @@ router.get('/', [
       data: productivity.rows,
       pagination: {
         total: productivity.count,
-        limit: parseInt(limit),
-        offset: parseInt(offset),
-        pages: Math.ceil(productivity.count / limit)
+        limit: lim,
+        offset: off,
+        pages: lim ? Math.ceil(productivity.count / lim) : 0
       }
     });
   } catch (error) {
@@ -67,35 +97,106 @@ router.get('/', [
   }
 });
 
+// GET /api/productivity/crop-types — culturas distintas presentes na base (opcionalmente por UF)
+router.get('/crop-types', [
+  query('state').optional().isString().isLength({ min: 2, max: 2 }),
+  validateRequest
+], async (req, res) => {
+  try {
+    const raw = req.query.state != null ? String(req.query.state).trim().toUpperCase().slice(0, 2) : '';
+    const uf = /^[A-Z]{2}$/.test(raw) ? raw : null;
+    const rows = await sequelize.query(
+      `
+      SELECT DISTINCT p.crop_type AS "cropType"
+      FROM productivity p
+      WHERE (:uf::text IS NULL OR p.state = :uf)
+      ORDER BY p.crop_type ASC
+      `,
+      {
+        replacements: { uf },
+        type: QueryTypes.SELECT
+      }
+    );
+    const data = rows.map((r) => r.cropType).filter((x) => x != null && String(x).trim() !== '');
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Erro ao listar crop-types:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro interno do servidor',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// GET /api/productivity/product-labels — rótulos distintos (produto SIDRA / nome exibido), opcionalmente por UF
+router.get('/product-labels', [
+  query('state').optional().isString().isLength({ min: 2, max: 2 }),
+  validateRequest
+], async (req, res) => {
+  try {
+    const raw = req.query.state != null ? String(req.query.state).trim().toUpperCase().slice(0, 2) : '';
+    const uf = /^[A-Z]{2}$/.test(raw) ? raw : null;
+    const rows = await sequelize.query(
+      `
+      SELECT DISTINCT p.product_label AS "productLabel"
+      FROM productivity p
+      WHERE (:uf::text IS NULL OR p.state = :uf)
+      ORDER BY p.product_label ASC
+      `,
+      {
+        replacements: { uf },
+        type: QueryTypes.SELECT
+      }
+    );
+    const data = rows.map((r) => r.productLabel).filter((x) => x != null && String(x).trim() !== '');
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Erro ao listar product-labels:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro interno do servidor',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 // GET /api/productivity/geojson - Obter dados de produtividade como GeoJSON
 router.get('/geojson', [
   query('year').isInt({ min: 2000, max: 2030 }),
-  query('cropType').optional().isIn(['soja', 'milho', 'cafe', 'cana', 'algodao', 'trigo', 'arroz', 'feijao', 'outros']),
+  query('cropType').optional({ checkFalsy: true }).trim().isString().isLength({ min: 1, max: 80 }),
+  query('productLabel').optional().isString().isLength({ min: 1, max: 300 }),
   query('region').optional().isString(),
   query('state').optional().isString().isLength({ min: 2, max: 2 }),
   validateRequest
 ], async (req, res) => {
   try {
-    const { year, cropType, region, state } = req.query;
+    const { year, cropType, productLabel, region, state } = req.query;
     
     const whereClause = { year };
     const includeWhere = { isActive: true };
     
     if (cropType) whereClause.cropType = cropType;
+    if (productLabel && String(productLabel).trim()) {
+      whereClause.productLabel = String(productLabel).trim();
+    }
+    if (state && String(state).trim()) {
+      whereClause.state = String(state).trim().toUpperCase().slice(0, 2);
+    }
     if (region) includeWhere.region = region;
-    if (state) includeWhere.state = state;
     
     const productivity = await Productivity.findAll({
       where: whereClause,
       include: [{
         model: GeoData,
         as: 'geoData',
-        where: includeWhere
+        where: includeWhere,
+        required: false
       }]
     });
     
-    // Converter para GeoJSON
-    const features = productivity.map(record => {
+    // Converter para GeoJSON (só linhas com geometria em geo_data)
+    const features = productivity.filter((r) => r.geoData && r.geoData.geom).map(record => {
       const geoData = record.geoData;
       return {
         type: 'Feature',
@@ -106,11 +207,13 @@ router.get('/geojson', [
         properties: {
           id: record.id,
           name: geoData.name,
-          state: geoData.state,
+          municipalityName: record.municipalityName,
+          state: geoData.state || record.state,
           region: geoData.region,
           year: record.year,
           season: record.season,
           cropType: record.cropType,
+          productLabel: record.productLabel,
           productivity: parseFloat(record.productivity),
           plantedArea: parseFloat(record.plantedArea),
           totalProduction: parseFloat(record.totalProduction),
@@ -148,15 +251,17 @@ router.get('/geojson', [
 // GET /api/productivity/timeseries - Obter série temporal de produtividade
 router.get('/timeseries', [
   query('geoDataId').isUUID(),
-  query('cropType').isIn(['soja', 'milho', 'cafe', 'cana', 'algodao', 'trigo', 'arroz', 'feijao', 'outros']),
+  query('cropType').trim().isString().isLength({ min: 1, max: 80 }),
+  query('productLabel').optional().isString().isLength({ min: 1, max: 300 }),
   query('startYear').isInt({ min: 2000, max: 2030 }),
   query('endYear').isInt({ min: 2000, max: 2030 }),
   validateRequest
 ], async (req, res) => {
   try {
-    const { geoDataId, cropType, startYear, endYear } = req.query;
+    const { geoDataId, cropType, productLabel, startYear, endYear } = req.query;
+    const pl = productLabel && String(productLabel).trim() ? String(productLabel).trim() : null;
     
-    const timeSeries = await Productivity.getTimeSeries(geoDataId, cropType, startYear, endYear);
+    const timeSeries = await Productivity.getTimeSeries(geoDataId, cropType, startYear, endYear, pl);
     
     // Buscar dados climáticos para o mesmo período
     const climateData = await ClimateData.getYearlyAverages(geoDataId, startYear, endYear);
@@ -199,7 +304,7 @@ router.get('/timeseries', [
 // GET /api/productivity/stats - Obter estatísticas de produtividade
 router.get('/stats', [
   query('year').isInt({ min: 2000, max: 2030 }),
-  query('cropType').optional().isIn(['soja', 'milho', 'cafe', 'cana', 'algodao', 'trigo', 'arroz', 'feijao', 'outros']),
+  query('cropType').optional({ checkFalsy: true }).trim().isString().isLength({ min: 1, max: 80 }),
   query('region').optional().isString(),
   query('state').optional().isString().isLength({ min: 2, max: 2 }),
   validateRequest
@@ -287,10 +392,13 @@ router.get('/:id', [
 
 // POST /api/productivity - Criar novos dados de produtividade
 router.post('/', [
-  body('geoDataId').isUUID(),
+  body('geoDataId').optional().isUUID(),
   body('year').isInt({ min: 2000, max: 2030 }),
   body('season').isString().isLength({ min: 1, max: 10 }),
-  body('cropType').isIn(['soja', 'milho', 'cafe', 'cana', 'algodao', 'trigo', 'arroz', 'feijao', 'outros']),
+  body('cropType').trim().isString().isLength({ min: 1, max: 80 }),
+  body('state').optional().isString().isLength({ min: 2, max: 2 }),
+  body('municipalityName').optional().isString().isLength({ min: 1, max: 200 }),
+  body('productLabel').optional().isString().isLength({ min: 1, max: 300 }),
   body('productivity').isDecimal(),
   body('plantedArea').isDecimal(),
   body('totalProduction').isDecimal(),
@@ -298,32 +406,56 @@ router.post('/', [
   validateRequest
 ], async (req, res) => {
   try {
-    const productivityData = req.body;
-    
-    // Verificar se já existe dados para a mesma região, ano e cultura
+    const productivityData = { ...req.body };
+    const pl =
+      productivityData.productLabel && String(productivityData.productLabel).trim()
+        ? String(productivityData.productLabel).trim()
+        : String(productivityData.cropType || '');
+    productivityData.productLabel = pl;
+
+    const st = String(productivityData.state || 'TO')
+      .trim()
+      .toUpperCase()
+      .slice(0, 2);
+    productivityData.state = st;
+
+    let munName = String(productivityData.municipalityName || '').trim();
+    if (!munName && productivityData.geoDataId) {
+      const g = await GeoData.findByPk(productivityData.geoDataId, { attributes: ['name'] });
+      munName = g?.name ? String(g.name).trim() : '';
+    }
+    if (!munName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Informe municipalityName ou geoDataId com nome em geo_data'
+      });
+    }
+    productivityData.municipalityName = munName;
+    productivityData.municipalityKey = normalizeMunicipalityKey(munName);
+    if (productivityData.municipalityIbgeCode != null) {
+      const c = String(productivityData.municipalityIbgeCode).replace(/\D/g, '').slice(0, 7);
+      productivityData.municipalityIbgeCode = c.length === 7 ? c : null;
+    }
+
     const existing = await Productivity.findOne({
       where: {
-        geoDataId: productivityData.geoDataId,
+        state: st,
+        municipalityKey: productivityData.municipalityKey,
         year: productivityData.year,
-        cropType: productivityData.cropType
+        productLabel: pl
       }
     });
     
     if (existing) {
       return res.status(409).json({
         success: false,
-        message: 'Já existem dados de produtividade para esta região, ano e cultura'
+        message: 'Já existem dados de produtividade para este município/UF, ano e produto'
       });
     }
     
     const productivity = await Productivity.create(productivityData);
     
-    // Calcular variação histórica
-    await Productivity.calculateHistoricalVariation(
-      productivity.geoDataId, 
-      productivity.cropType, 
-      productivity.year
-    );
+    await Productivity.calculateHistoricalVariation(productivity.id);
     
     res.status(201).json({
       success: true,
@@ -377,11 +509,7 @@ router.put('/:id', [
     
     // Recalcular variação histórica se necessário
     if (updateData.productivity) {
-      await Productivity.calculateHistoricalVariation(
-        productivity.geoDataId, 
-        productivity.cropType, 
-        productivity.year
-      );
+      await Productivity.calculateHistoricalVariation(productivity.id);
     }
     
     res.json({

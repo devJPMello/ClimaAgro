@@ -162,12 +162,16 @@ const Productivity = require('../models/Productivity');
 const ClimateData = require('../models/ClimateData');
 const OfficialAlert = require('../models/OfficialAlert');
 const ReportExport = require('../models/ReportExport');
+const IbgeSidra1612Row = require('../models/IbgeSidra1612Row');
 
 // Configurar associações entre modelos
 const setupAssociations = () => {
   // GeoData tem muitos Productivity
   GeoData.hasMany(Productivity, { foreignKey: 'geoDataId', as: 'productivity' });
   Productivity.belongsTo(GeoData, { foreignKey: 'geoDataId', as: 'geoData' });
+
+  GeoData.hasMany(IbgeSidra1612Row, { foreignKey: 'geoDataId', as: 'ibgeSidra1612Rows' });
+  IbgeSidra1612Row.belongsTo(GeoData, { foreignKey: 'geoDataId', as: 'geoData' });
 
   // GeoData tem muitos ClimateData
   GeoData.hasMany(ClimateData, { foreignKey: 'geoDataId', as: 'climateData' });
@@ -190,6 +194,7 @@ module.exports = {
     Productivity,
     ClimateData,
     OfficialAlert,
-    ReportExport
+    ReportExport,
+    IbgeSidra1612Row
   }
 };
