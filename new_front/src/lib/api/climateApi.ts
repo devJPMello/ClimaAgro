@@ -16,11 +16,15 @@ export interface ClimateListResponse {
   data: Array<{
     id: string;
     date: string;
+    /** Ano civil (coluna `year` no backend) — preferir ao parsear `date` (evita fuso). */
+    year?: number;
     avgTemperature?: string | number | null;
+    maxTemperature?: string | number | null;
+    minTemperature?: string | number | null;
     precipitation?: string | number | null;
     humidity?: string | number | null;
     windSpeed?: string | number | null;
-    geoData?: { name?: string; state?: string };
+    geoData?: { name?: string; state?: string; ibgeCode?: string | null; category?: string | null };
   }>;
 }
 

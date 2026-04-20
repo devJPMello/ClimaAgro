@@ -27,3 +27,10 @@ export function getTocantinsCityLabel(value: string): string {
   const option = TOCANTINS_CITY_OPTIONS.find((x) => x.value === value);
   return option?.label ?? value;
 }
+
+/** Rótulo para relatório/exportação: chave legada → `Palmas - TO`; nome IBGE → acrescenta sufixo UF. */
+export function displayLocalidadeLabel(keyOrName: string): string {
+  const fromSlug = getTocantinsCityLabel(keyOrName);
+  if (fromSlug !== keyOrName || keyOrName.includes('-')) return fromSlug;
+  return `${keyOrName} - TO`;
+}

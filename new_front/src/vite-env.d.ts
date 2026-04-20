@@ -15,6 +15,10 @@ interface ImportMetaEnv {
   readonly VITE_GEMINI_MODEL?: string;
   /** URL base opcional da API Gemini compatível com generateContent. */
   readonly VITE_GEMINI_API_URL?: string;
+  /** Lista JSON de municípios (IBGE localidades). URL completa ou com `{uf_id}`. */
+  readonly VITE_IBGE_LOCALIDADES_MUNICIPIOS_URL?: string;
+  /** Malha municipal em GeoJSON (IBGE malhas v3, ex. `intrarregiao=Municipio`). */
+  readonly VITE_IBGE_MALHA_UF_MUNICIPIOS_GEOJSON_URL?: string;
 }
 
 interface ImportMeta {
