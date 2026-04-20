@@ -199,8 +199,7 @@ export function MapaClimatico() {
           Mapa Climático
         </h1>
         <p className="text-muted-foreground">
-          Tocantins — quando os registros trazem código IBGE do município, o mapa usa a malha municipal (IBGE) e a legenda
-          de temperatura; caso contrário, mantém-se a visão por UF.
+          Visualização geoespacial de dados climáticos no Tocantins.
         </p>
       </div>
 

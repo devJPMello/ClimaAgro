@@ -123,7 +123,7 @@ export function MapaProdutividade() {
           Mapa de Produtividade
         </h1>
         <p className="text-muted-foreground">
-          Tocantins — produtos/culturas (`product_label` na tabela productivity, ex. nomes SIDRA); mapa e indicadores filtram por esse rótulo e pela safra.
+          Análise geoespacial de produtividade agrícola por região no Tocantins.
         </p>
       </div>
 

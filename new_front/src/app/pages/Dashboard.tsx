@@ -67,7 +67,7 @@ export function Dashboard() {
           Dashboard
         </h1>
         <p className="text-muted-foreground">
-          Visão geral do Tocantins — KPIs estaduais e as cinco maiores cidades (população IBGE)
+          Visão geral do monitoramento climático e produtividade agrícola no Tocantins.
         </p>
       </div>
 
