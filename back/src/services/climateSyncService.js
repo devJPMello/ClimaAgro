@@ -311,8 +311,9 @@ async function syncCptecForTocantinsMunicipalities({ ClimateData, GeoData, trans
 }
 
 /**
- * Open-Meteo diário por municípios do Tocantins (pontos em geo_data).
- * Preenche chuva em mm/dia, umidade, vento e pressão mantendo CPTEC como fonte complementar.
+ * Open-Meteo diário por **todos** os municípios TO em `geo_data` (ponto + ibge_code).
+ * Modelo/reanálise Open-Meteo nas coordenadas do registo — `npm run geo:geocode-tocantins` atualiza sedes.
+ * CPTEC permanece só nas cidades de `tocantinsCitiesCptec.js`.
  */
 async function syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, transaction }) {
   if (process.env.ENABLE_OPEN_METEO_SYNC === 'false') {
@@ -321,16 +322,26 @@ async function syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, t
 
   const daysBack = Number(process.env.OPEN_METEO_PAST_DAYS || 7);
   const daysForward = Number(process.env.OPEN_METEO_FORECAST_DAYS || 7);
-  const results = { upserted: 0, skippedCities: 0, errors: [], scope: 'tocantins' };
+  const interCityDelayMs = Number(process.env.OPEN_METEO_SYNC_DELAY_MS || 120);
+  const results = {
+    upserted: 0,
+    skippedCities: 0,
+    citiesProcessed: 0,
+    errors: [],
+    scope: 'tocantins'
+  };
 
-  for (const def of TOCANTINS_CITIES) {
-    const g = await GeoData.findOne({
-      where: { name: def.name, state: 'TO', category: 'municipality', isActive: true },
-      transaction
-    });
-    if (!g || !g.geom || !Array.isArray(g.geom.coordinates)) {
+  const municipalities = await GeoData.findAll({
+    where: { state: 'TO', category: 'municipality', isActive: true },
+    order: [['name', 'ASC']],
+    transaction
+  });
+
+  for (const g of municipalities) {
+    const cityName = String(g.name || '').trim() || '—';
+    if (!g.geom || !Array.isArray(g.geom.coordinates)) {
       results.skippedCities += 1;
-      results.errors.push({ city: def.name, message: 'Município sem geom ponto em geo_data.' });
+      results.errors.push({ city: cityName, message: 'Município sem geom ponto em geo_data.' });
       continue;
     }
 
@@ -338,9 +349,11 @@ async function syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, t
     const lat = Number(g.geom.coordinates[1]);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
       results.skippedCities += 1;
-      results.errors.push({ city: def.name, message: 'Coordenadas inválidas no geo_data.' });
+      results.errors.push({ city: cityName, message: 'Coordenadas inválidas no geo_data.' });
       continue;
     }
+
+    const ibge = g.ibgeCode ? String(g.ibgeCode).replace(/\D/g, '').slice(0, 7) : '';
 
     try {
       // eslint-disable-next-line no-await-in-loop
@@ -353,8 +366,13 @@ async function syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, t
       const rows = openMeteo.dailyToRows(payload);
       if (!rows.length) {
         results.skippedCities += 1;
+        results.errors.push({ city: cityName, message: 'Open-Meteo retornou série vazia.' });
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(interCityDelayMs);
         continue;
       }
+
+      results.citiesProcessed += 1;
 
       for (const r of rows) {
         const y = parseInt(String(r.date).slice(0, 4), 10);
@@ -391,8 +409,8 @@ async function syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, t
             windDirection: r.windDirection,
             atmosphericPressure: r.atmosphericPressure,
             dataSource: 'outros',
-            weatherStation: `Open-Meteo ${def.name}`,
-            stationCode: `OPENMETEO:${def.ibgeCode || def.name}`.slice(0, 80),
+            weatherStation: `Open-Meteo ${cityName}`,
+            stationCode: `OPENMETEO:${ibge || cityName}`.slice(0, 80),
             dataQuality: 85,
             status: 'preliminar',
             metadata: md
@@ -413,8 +431,8 @@ async function syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, t
             windDirection: r.windDirection ?? row.windDirection,
             atmosphericPressure: r.atmosphericPressure ?? row.atmosphericPressure,
             dataSource: 'outros',
-            weatherStation: `Open-Meteo ${def.name}`,
-            stationCode: `OPENMETEO:${def.ibgeCode || def.name}`.slice(0, 80),
+            weatherStation: `Open-Meteo ${cityName}`,
+            stationCode: `OPENMETEO:${ibge || cityName}`.slice(0, 80),
             metadata: mergedMd,
             status: 'preliminar'
           },
@@ -424,8 +442,11 @@ async function syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, t
         results.upserted += 1;
       }
     } catch (e) {
-      results.errors.push({ city: def.name, message: e.message || String(e) });
+      results.errors.push({ city: cityName, message: e.message || String(e) });
     }
+
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(interCityDelayMs);
   }
 
   return results;
