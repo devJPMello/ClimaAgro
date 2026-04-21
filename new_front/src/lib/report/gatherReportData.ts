@@ -1,6 +1,10 @@
 import { listAllClimateRecordsInRange, type ClimateListResponse } from '../api/climateApi';
 import { listAllIbgeSidra1612Rows } from '../api/ibgeSidra1612Api';
-import { listAllProductivityForYear, type ProductivityListResponse } from '../api/productivityApi';
+import {
+  getClimateVsProductivity,
+  listAllProductivityForYear,
+  type ProductivityListResponse,
+} from '../api/productivityApi';
 import { TOCANTINS_CITY_VALUE_TO_NAME } from '../geo/tocantinsCities';
 
 export type ReportTipoKey = 'clima' | 'produtividade' | 'comparativo';
@@ -75,6 +79,17 @@ export function parseSeasonToCalendarBounds(raw: string): { start: number; end: 
   return null;
 }
 
+/** Ano base da safra (ex.: `2024/25` -> 2024). */
+export function parseSeasonBaseYear(raw: string): number | null {
+  const s = String(raw).trim();
+  if (!s) return null;
+  const full = /^(\d{4})\/(\d{2}|\d{4})$/.exec(s);
+  if (full) return parseInt(full[1], 10);
+  const short = /^(\d{2})\/(\d{2})$/.exec(s);
+  if (short) return 2000 + parseInt(short[1], 10);
+  return null;
+}
+
 /**
  * Histórico gravado como `Safra 2024/25` (produtividade) ou `AAAA-MM-DD — AAAA-MM-DD`.
  */
@@ -84,9 +99,17 @@ export function parseExportPeriodoLabel(periodo: string): {
   productivitySeason?: string;
 } {
   const trimmed = periodo.trim();
-  const safraM = /^Safra\s+(\d{4}\/\d{2})$/i.exec(trimmed);
+  const safraM = /^Safra\s+(\d{4}\/\d{2})(?:\s+\(clima\s+(\d{4})\))?$/i.exec(trimmed);
   if (safraM) {
     const season = safraM[1];
+    const climateBaseYear = safraM[2] ? parseInt(safraM[2], 10) : null;
+    if (climateBaseYear) {
+      return {
+        startDate: `${climateBaseYear}-01-01`,
+        endDate: `${climateBaseYear}-12-31`,
+        productivitySeason: season,
+      };
+    }
     const bounds = parseSeasonToCalendarBounds(season);
     if (bounds) {
       return {
@@ -104,6 +127,11 @@ function n(v: unknown): number | null {
   if (v == null || v === '') return null;
   const x = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
   return Number.isFinite(x) ? x : null;
+}
+
+function mean(values: number[]): number {
+  if (!values.length) return 0;
+  return values.reduce((acc, value) => acc + value, 0) / values.length;
 }
 
 /** Igual à série temporal: média ou (máx+mín)/2 quando CPTEC não envia média. */
@@ -184,6 +212,42 @@ function formatClimateBlock(rows: ClimateListResponse['data'], place: string): s
   return lines.join('\n');
 }
 
+function formatComparativoClimateBlock(rows: Array<{
+  mes?: string;
+  month?: string;
+  climate: number | null;
+  avgTemperature?: number | null;
+  avgHumidity?: number | null;
+}>): string {
+  if (!rows.length) {
+    return 'Sem dados climáticos históricos retornados pela rota de comparativo para a safra selecionada.';
+  }
+  const sorted = [...rows].sort((a, b) => String(a.month || a.mes || '').localeCompare(String(b.month || b.mes || '')));
+  const totalPrecip = sorted.reduce((acc, row) => acc + (Number.isFinite(Number(row.climate)) ? Number(row.climate) : 0), 0);
+  const tempVals = sorted
+    .map((row) => Number(row.avgTemperature))
+    .filter((x) => Number.isFinite(x));
+  const humVals = sorted
+    .map((row) => Number(row.avgHumidity))
+    .filter((x) => Number.isFinite(x));
+  const lines: string[] = [
+    `Meses retornados: ${sorted.length}`,
+    `Precipitação acumulada no ano-base: ${totalPrecip.toFixed(1)} mm`,
+    tempVals.length ? `Temperatura média mensal (média das médias): ${mean(tempVals).toFixed(1)} °C` : 'Temperatura média mensal: —',
+    humVals.length ? `Umidade média mensal (média das médias): ${mean(humVals).toFixed(0)} %` : 'Umidade média mensal: —',
+    '',
+    'Detalhe mensal:',
+  ];
+  sorted.forEach((row) => {
+    lines.push(
+      `  ${row.mes || row.month || '—'} | chuva ${row.climate != null ? `${Number(row.climate).toFixed(1)} mm` : '—'} | T média ${
+        row.avgTemperature != null ? `${Number(row.avgTemperature).toFixed(1)} °C` : '—'
+      } | umidade ${row.avgHumidity != null ? `${Number(row.avgHumidity).toFixed(0)} %` : '—'}`
+    );
+  });
+  return lines.join('\n');
+}
+
 function formatProductivityBlock(perYear: ProductivityListResponse['data'][], place: string): string {
   const flat = perYear.flat();
   const placeLc = place.trim().toLowerCase();
@@ -231,17 +295,34 @@ export async function gatherReportDados(params: {
 }): Promise<string> {
   const place = climatePlaceFromUi(params.localidadeKey, params.displayLocal);
   const chunks: string[] = [];
+  const seasonProd =
+    (params.tipo === 'produtividade' || params.tipo === 'comparativo') && params.productivitySeason?.trim()
+      ? params.productivitySeason.trim()
+      : '';
 
   if (params.tipo === 'clima' || params.tipo === 'comparativo') {
     try {
-      const rows = await listAllClimateRecordsInRange({
-        state: 'TO',
-        startDate: params.startDate,
-        endDate: params.endDate,
-        place,
-      });
-      chunks.push('=== Dados climáticos (API /api/climate) ===\n');
-      chunks.push(formatClimateBlock(rows, place));
+      if (params.tipo === 'comparativo' && seasonProd) {
+        const comp = await getClimateVsProductivity({
+          season: seasonProd,
+          state: 'TO',
+          municipality: place,
+        });
+        const compRows = comp.success && Array.isArray(comp.data) ? comp.data : [];
+        chunks.push('=== Dados climáticos (API /api/productivity/climate-vs-productivity) ===\n');
+        chunks.push(`Safra: ${seasonProd}\n`);
+        if (comp.meta?.baseYear) chunks.push(`Ano-base do clima: ${comp.meta.baseYear}\n`);
+        chunks.push(formatComparativoClimateBlock(compRows));
+      } else {
+        const rows = await listAllClimateRecordsInRange({
+          state: 'TO',
+          startDate: params.startDate,
+          endDate: params.endDate,
+          place,
+        });
+        chunks.push('=== Dados climáticos (API /api/climate) ===\n');
+        chunks.push(formatClimateBlock(rows, place));
+      }
     } catch {
       chunks.push('=== Dados climáticos ===\nNão foi possível obter os dados (rede, sessão ou servidor).');
     }
@@ -249,10 +330,6 @@ export async function gatherReportDados(params: {
 
   if (params.tipo === 'produtividade' || params.tipo === 'comparativo') {
     try {
-      const seasonProd =
-        params.tipo === 'produtividade' && params.productivitySeason?.trim()
-          ? params.productivitySeason.trim()
-          : '';
       const perYear: Awaited<ReturnType<typeof listAllProductivityForYear>>[] = [];
       if (seasonProd) {
         const rows = await listAllProductivityForYear({
@@ -278,10 +355,6 @@ export async function gatherReportDados(params: {
     }
 
     try {
-      const seasonProd =
-        params.tipo === 'produtividade' && params.productivitySeason?.trim()
-          ? params.productivitySeason.trim()
-          : '';
       let loSidra: number;
       let hiSidra: number;
       if (seasonProd) {

@@ -20,6 +20,7 @@ import {
   gatherReportDados,
   type ReportTipoKey,
   localidadeKeyFromStoredLocal,
+  parseSeasonBaseYear,
   parseExportPeriodoLabel,
   reportTipoFromStoredLabel,
 } from '../../lib/report/gatherReportData';
@@ -97,9 +98,13 @@ export function ExportarRelatorios() {
     try {
       const safraTrim = safraProdutividade.trim();
       const periodoIaInicio =
-        tipoRelatorio === 'produtividade' && safraTrim ? `Safra ${safraTrim}` : periodoInicio;
+        (tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo') && safraTrim
+          ? `Safra ${safraTrim}`
+          : periodoInicio;
       const periodoIaFim =
-        tipoRelatorio === 'produtividade' && safraTrim ? `Safra ${safraTrim}` : periodoFim;
+        (tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo') && safraTrim
+          ? `Safra ${safraTrim}`
+          : periodoFim;
       const response = await generateAiReport({
         localidade,
         tipoRelatorio,
@@ -124,17 +129,22 @@ export function ExportarRelatorios() {
 
   const handleExportar = async () => {
     const safraTrim = safraProdutividade.trim();
-    if (tipoRelatorio === 'produtividade' && !safraTrim) {
-      toast.error('Selecione a safra agrícola para o relatório de produtividade.');
+    if ((tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo') && !safraTrim) {
+      toast.error('Selecione a safra agrícola para o relatório de produtividade/comparativo.');
       return;
     }
     setLoading(true);
     try {
       const local = displayLocalidadeLabel(localidade);
       const tipo = labelTipoRelatorio(tipoRelatorio);
+      const baseYear = safraTrim ? parseSeasonBaseYear(safraTrim) : null;
+      const climaInicioComparativo = baseYear != null ? `${baseYear}-01-01` : periodoInicio;
+      const climaFimComparativo = baseYear != null ? `${baseYear}-12-31` : periodoFim;
       const periodo =
-        tipoRelatorio === 'produtividade' && safraTrim
-          ? `Safra ${safraTrim}`
+        (tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo') && safraTrim
+          ? tipoRelatorio === 'comparativo' && baseYear != null
+            ? `Safra ${safraTrim} (clima ${baseYear})`
+            : `Safra ${safraTrim}`
           : `${periodoInicio} — ${periodoFim}`;
       const fmt = formato as ReportExportFileFormat;
 
@@ -142,9 +152,10 @@ export function ExportarRelatorios() {
         tipo: tipoRelatorio as ReportTipoKey,
         localidadeKey: localidade,
         displayLocal: local,
-        startDate: periodoInicio,
-        endDate: periodoFim,
-        productivitySeason: tipoRelatorio === 'produtividade' ? safraTrim : undefined,
+        startDate: tipoRelatorio === 'comparativo' ? climaInicioComparativo : periodoInicio,
+        endDate: tipoRelatorio === 'comparativo' ? climaFimComparativo : periodoFim,
+        productivitySeason:
+          tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo' ? safraTrim : undefined,
       });
 
       downloadReportFile({
@@ -192,7 +203,8 @@ export function ExportarRelatorios() {
         displayLocal: item.local,
         startDate: parsed.startDate,
         endDate: parsed.endDate,
-        productivitySeason: tipoItem === 'produtividade' ? parsed.productivitySeason : undefined,
+        productivitySeason:
+          tipoItem === 'produtividade' || tipoItem === 'comparativo' ? parsed.productivitySeason : undefined,
       });
       const fmt = String(item.formato).toLowerCase() as ReportExportFileFormat;
       downloadReportFile({
@@ -250,7 +262,7 @@ export function ExportarRelatorios() {
                 />
               </div>
 
-              {tipoRelatorio === 'produtividade' ? (
+              {tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo' ? (
                 <Select
                   label="Safra agrícola"
                   value={safraProdutividade}

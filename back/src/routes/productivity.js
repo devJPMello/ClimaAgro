@@ -6,6 +6,7 @@ const { Productivity, GeoData, ClimateData } = models;
 const { validationResult } = require('express-validator');
 const { body, query, param } = require('express-validator');
 const { normalizeMunicipalityKey } = require('../utils/municipalityNameMatch');
+const { fetchHistoricalDailyByCoords } = require('../services/openMeteoClient');
 
 // Middleware de validação
 const validateRequest = (req, res, next) => {
@@ -15,6 +16,176 @@ const validateRequest = (req, res, next) => {
   }
   next();
 };
+
+function parseSeasonBaseYear(rawSeason) {
+  const season = String(rawSeason || '').trim();
+  const matchShort = /^(\d{2})\/\d{2}$/.exec(season);
+  if (matchShort) return 2000 + parseInt(matchShort[1], 10);
+  const matchFull = /^(\d{4})\/\d{2,4}$/.exec(season);
+  if (matchFull) return parseInt(matchFull[1], 10);
+  return null;
+}
+
+function mean(values) {
+  if (!Array.isArray(values) || values.length === 0) return null;
+  return values.reduce((acc, value) => acc + value, 0) / values.length;
+}
+
+function monthLabelFromYm(ym) {
+  const [y, m] = String(ym || '').split('-').map((x) => parseInt(x, 10));
+  if (!y || !m) return String(ym || '');
+  const names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  return `${names[m - 1]}/${String(y).slice(2)}`;
+}
+
+// GET /api/productivity/climate-vs-productivity - Série comparativa por safra
+router.get('/climate-vs-productivity', [
+  query('season').exists().isString().matches(/^(\d{2}|\d{4})\/(\d{2}|\d{4})$/),
+  query('cropType').optional({ checkFalsy: true }).trim().isString().isLength({ min: 1, max: 80 }),
+  query('state').optional().isString().isLength({ min: 2, max: 2 }),
+  query('municipality').optional().isString().isLength({ min: 1, max: 200 }),
+  validateRequest
+], async (req, res) => {
+  try {
+    const rawSeason = String(req.query.season || '').trim();
+    const normalizedSeason = /^\d{2}\/\d{2}$/.test(rawSeason) ? `20${rawSeason}` : rawSeason;
+    const state = String(req.query.state || 'TO').trim().toUpperCase().slice(0, 2);
+    const municipality = String(req.query.municipality || '').trim();
+    const cropType = req.query.cropType ? String(req.query.cropType).trim() : null;
+
+    const baseYear = parseSeasonBaseYear(rawSeason);
+    if (!baseYear) {
+      return res.status(400).json({ success: false, message: 'Safra inválida.' });
+    }
+    const startDate = `${baseYear}-01-01`;
+    const endDate = `${baseYear}-12-31`;
+
+    const productivityWhere = {
+      season: rawSeason === normalizedSeason ? rawSeason : { [Op.in]: [rawSeason, normalizedSeason] },
+      state
+    };
+    if (cropType) productivityWhere.cropType = cropType;
+    if (municipality) {
+      productivityWhere.municipalityName = { [Op.iLike]: `%${municipality}%` };
+    }
+
+    const productivityRows = await Productivity.findAll({
+      where: productivityWhere,
+      include: [{
+        model: GeoData,
+        as: 'geoData',
+        attributes: ['id', 'name'],
+        required: false
+      }],
+      attributes: ['productivity', 'municipalityName', 'season', 'cropType', 'state']
+    });
+
+    if (!productivityRows.length) {
+      return res.json({
+        success: true,
+        data: [],
+        meta: { season: rawSeason, baseYear, startDate, endDate }
+      });
+    }
+
+    const firstWithGeo = productivityRows.find((row) => row.geoData && row.geoData.id);
+    const municipalityName = municipality || String(productivityRows[0].municipalityName || '');
+    if (!firstWithGeo?.geoData?.id) {
+      return res.status(404).json({
+        success: false,
+        message: `Geometria não encontrada para ${municipalityName}/${state}.`
+      });
+    }
+
+    const centroidRows = await sequelize.query(
+      `
+      SELECT
+        ST_Y(ST_Centroid(geom))::float AS lat,
+        ST_X(ST_Centroid(geom))::float AS lon
+      FROM geo_data
+      WHERE id = :geoDataId
+      LIMIT 1
+      `,
+      {
+        replacements: { geoDataId: firstWithGeo.geoData.id },
+        type: QueryTypes.SELECT
+      }
+    );
+    const coords = centroidRows[0];
+    if (!coords || !Number.isFinite(Number(coords.lat)) || !Number.isFinite(Number(coords.lon))) {
+      return res.status(404).json({ success: false, message: 'Coordenadas não encontradas para o município.' });
+    }
+
+    const climatePayload = await fetchHistoricalDailyByCoords({
+      lat: Number(coords.lat),
+      lon: Number(coords.lon),
+      startDate,
+      endDate
+    });
+    const daily = climatePayload?.daily || {};
+    const precipArray = Array.isArray(daily.precipitation_sum) ? daily.precipitation_sum : [];
+    const tempArray = Array.isArray(daily.temperature_2m_mean) ? daily.temperature_2m_mean : [];
+    const humidityArray = Array.isArray(daily.relative_humidity_2m_mean) ? daily.relative_humidity_2m_mean : [];
+
+    const avgProductivity = mean(
+      productivityRows
+        .map((row) => Number(row.productivity))
+        .filter((value) => Number.isFinite(value))
+    );
+
+    const dayKeys = Array.isArray(daily.time) ? daily.time : [];
+    const monthBuckets = new Map();
+    for (let i = 0; i < dayKeys.length; i += 1) {
+      const dayKey = String(dayKeys[i] || '');
+      const ym = /^\d{4}-\d{2}/.test(dayKey) ? dayKey.slice(0, 7) : null;
+      if (!ym) continue;
+      if (!monthBuckets.has(ym)) monthBuckets.set(ym, { precs: [], temps: [], hums: [] });
+      const bucket = monthBuckets.get(ym);
+      const p = Number(precipArray[i]);
+      if (Number.isFinite(p)) bucket.precs.push(p);
+      const t = Number(tempArray[i]);
+      if (Number.isFinite(t)) bucket.temps.push(t);
+      const h = Number(humidityArray[i]);
+      if (Number.isFinite(h)) bucket.hums.push(h);
+    }
+
+    const monthlyData = [...monthBuckets.keys()].sort().map((ym) => {
+      const bucket = monthBuckets.get(ym);
+      const monthPrecipitation = bucket.precs.reduce((acc, value) => acc + value, 0);
+      const monthTemperature = mean(bucket.temps);
+      const monthHumidity = mean(bucket.hums);
+      return {
+        season: rawSeason,
+        month: ym,
+        mes: monthLabelFromYm(ym),
+        climate: Math.round(monthPrecipitation * 10) / 10,
+        productivity: avgProductivity != null ? Math.round(avgProductivity * 100) / 100 : null,
+        avgTemperature: monthTemperature != null ? Math.round(monthTemperature * 10) / 10 : null,
+        avgHumidity: monthHumidity != null ? Math.round(monthHumidity * 10) / 10 : null
+      };
+    });
+
+    res.json({
+      success: true,
+      data: monthlyData,
+      meta: {
+        season: rawSeason,
+        baseYear,
+        startDate,
+        endDate,
+        municipality: municipalityName,
+        state
+      }
+    });
+  } catch (error) {
+    console.error('Erro ao montar clima vs produtividade por safra:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro interno do servidor',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
 
 // GET /api/productivity - Listar dados de produtividade com filtros
 router.get('/', [

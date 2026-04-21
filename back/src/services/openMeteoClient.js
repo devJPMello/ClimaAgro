@@ -4,6 +4,10 @@ function getBaseUrl() {
   return (process.env.OPEN_METEO_BASE_URL || 'https://api.open-meteo.com/v1').replace(/\/$/, '');
 }
 
+function getArchiveBaseUrl() {
+  return (process.env.OPEN_METEO_ARCHIVE_BASE_URL || 'https://archive-api.open-meteo.com/v1').replace(/\/$/, '');
+}
+
 async function fetchForecastDailyByCoords({ lat, lon, daysBack = 7, daysForward = 7 }) {
   const client = createUpstreamAxios({ baseURL: getBaseUrl(), timeoutMs: Number(process.env.OPEN_METEO_TIMEOUT_MS || 20000) });
   const params = new URLSearchParams({
@@ -42,6 +46,38 @@ async function fetchForecastDailyByCoords({ lat, lon, daysBack = 7, daysForward 
   return res.data;
 }
 
+async function fetchHistoricalDailyByCoords({ lat, lon, startDate, endDate }) {
+  const client = createUpstreamAxios({
+    baseURL: getArchiveBaseUrl(),
+    timeoutMs: Number(process.env.OPEN_METEO_TIMEOUT_MS || 20000)
+  });
+  const params = new URLSearchParams({
+    latitude: String(lat),
+    longitude: String(lon),
+    timezone: process.env.OPEN_METEO_TIMEZONE || 'America/Sao_Paulo',
+    start_date: String(startDate),
+    end_date: String(endDate),
+    daily: ['temperature_2m_mean', 'precipitation_sum', 'relative_humidity_2m_mean'].join(',')
+  });
+
+  const res = await axiosWithRetries(
+    client,
+    {
+      method: 'GET',
+      url: `/archive?${params.toString()}`,
+      headers: { Accept: 'application/json' },
+      responseType: 'json'
+    },
+    { retries: 2 }
+  );
+
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`Open-Meteo Historical HTTP ${res.status}`);
+  }
+
+  return res.data;
+}
+
 function dailyToRows(payload) {
   const d = payload && payload.daily ? payload.daily : null;
   if (!d || !Array.isArray(d.time)) return [];
@@ -65,4 +101,4 @@ function dailyToRows(payload) {
   return rows;
 }
 
-module.exports = { fetchForecastDailyByCoords, dailyToRows };
+module.exports = { fetchForecastDailyByCoords, fetchHistoricalDailyByCoords, dailyToRows };

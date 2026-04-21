@@ -8,6 +8,7 @@ import { Calendar } from 'lucide-react';
 import { EmptyState } from '../components/ui/EmptyState';
 import { listAllClimateRecordsInRange, type ClimateListResponse } from '../../lib/api/climateApi';
 import {
+  getClimateVsProductivity,
   listAllProductivityRecords,
   listProductivityCropTypes,
   listProductivityRecords,
@@ -43,27 +44,6 @@ function num(v: unknown): number | null {
   if (v == null || v === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
-}
-
-/** Ano civil: usa `year` do registo climático quando existir (evita erro de fuso em `Date`). */
-function calendarYearFromClimateRow(r: ClimateListResponse['data'][number]): number | null {
-  const y = (r as { year?: unknown }).year;
-  if (y != null && Number.isFinite(Number(y))) return Number(y);
-  const s = String(r.date || '');
-  const parsed = parseInt(s.slice(0, 4), 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-/** Média, ou (máx+mín)/2 quando CPTEC não preenche média. */
-function temperatureFromClimateRow(r: ClimateListResponse['data'][number]): number | null {
-  const avg = num(r.avgTemperature);
-  if (avg != null) return avg;
-  const maxT = num((r as { maxTemperature?: unknown }).maxTemperature);
-  const minT = num((r as { minTemperature?: unknown }).minTemperature);
-  if (maxT != null && minT != null) return (maxT + minT) / 2;
-  if (maxT != null) return maxT;
-  if (minT != null) return minT;
-  return null;
 }
 
 function mesLabelFromYm(ym: string): string {
@@ -158,6 +138,12 @@ function compareSafras(a: string, b: string): number {
   return startYear(a) - startYear(b) || a.localeCompare(b, 'pt-BR');
 }
 
+function normalizeSeasonForApi(raw: string): string {
+  const season = String(raw || '').trim();
+  if (/^\d{2}\/\d{2}$/.test(season)) return `20${season}`;
+  return season;
+}
+
 /** Agrupa por safra SIDRA (`season`); fallback: ano agrícola. */
 function aggregateProductivityBySeason(rows: ProductivityListResponse['data'], cropFilter: string): ProdRow[] {
   const map = new Map<string, number[]>();
@@ -177,110 +163,6 @@ function aggregateProductivityBySeason(rows: ProductivityListResponse['data'], c
     }));
 }
 
-/**
- * Anos civis cobertos pela safra (para média de temperatura).
- * Ex.: `2024/25` → 2024 e 2025; `2020/2021` → 2020–2021; só `2024` → 2024.
- */
-function parseSeasonToClimateYearSpan(raw: string): { start: number; end: number } | null {
-  const s = String(raw).trim();
-  if (!s) return null;
-  const full = /^(\d{4})\/(\d{4})$/.exec(s);
-  if (full) {
-    const y1 = parseInt(full[1], 10);
-    const y2 = parseInt(full[2], 10);
-    if (Number.isFinite(y1) && Number.isFinite(y2) && y2 >= y1 && y2 - y1 <= 3) return { start: y1, end: y2 };
-    return null;
-  }
-  const short = /^(\d{4})\/(\d{2})$/.exec(s);
-  if (short) {
-    const y1 = parseInt(short[1], 10);
-    const d2 = parseInt(short[2], 10);
-    if (!Number.isFinite(y1) || !Number.isFinite(d2)) return null;
-    if (d2 === (y1 + 1) % 100) return { start: y1, end: y1 + 1 };
-    const yGuess = 2000 + d2;
-    if (yGuess > y1 && yGuess <= y1 + 2) return { start: y1, end: yGuess };
-    return { start: y1, end: y1 + 1 };
-  }
-  const yOnly = /^(\d{4})$/.exec(s);
-  if (yOnly) {
-    const y = parseInt(yOnly[1], 10);
-    return Number.isFinite(y) ? { start: y, end: y } : null;
-  }
-  return null;
-}
-
-/** Intervalo de calendário mínimo que cobre todas as safras (dois anos por safra típica). */
-function climateCalendarBoundsFromProductivityRows(prodRows: ProductivityListResponse['data']): {
-  yMin: number;
-  yMax: number;
-} | null {
-  let yMin = Infinity;
-  let yMax = -Infinity;
-  for (const r of prodRows) {
-    const key = (r.season && String(r.season).trim()) || String(r.year);
-    const span = parseSeasonToClimateYearSpan(key);
-    if (span) {
-      yMin = Math.min(yMin, span.start, span.end);
-      yMax = Math.max(yMax, span.start, span.end);
-    } else {
-      const y = Number(r.year);
-      if (Number.isFinite(y)) {
-        yMin = Math.min(yMin, y);
-        yMax = Math.max(yMax, y);
-      }
-    }
-  }
-  if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) return null;
-  return { yMin, yMax };
-}
-
-function mean(nums: number[]): number {
-  return nums.reduce((a, x) => a + x, 0) / nums.length;
-}
-
-/** Por safra: temperatura = média de todos os dias nos anos civis da safra; produtividade = média dos registos da safra. */
-function buildComparativo(
-  climateRows: ClimateListResponse['data'],
-  prodRows: ProductivityListResponse['data']
-): CompRow[] {
-  const tempByYear = new Map<number, number[]>();
-  for (const r of climateRows) {
-    const y = calendarYearFromClimateRow(r);
-    if (y == null) continue;
-    const t = temperatureFromClimateRow(r);
-    if (t == null) continue;
-    if (!tempByYear.has(y)) tempByYear.set(y, []);
-    tempByYear.get(y)!.push(t);
-  }
-  const prodBySeason = new Map<string, number[]>();
-  for (const r of prodRows) {
-    const p = num(r.productivity);
-    if (p == null) continue;
-    const seasonKey = (r.season && String(r.season).trim()) || String(r.year);
-    if (!prodBySeason.has(seasonKey)) prodBySeason.set(seasonKey, []);
-    prodBySeason.get(seasonKey)!.push(p);
-  }
-  const out: CompRow[] = [];
-  const keys = [...prodBySeason.keys()].sort((a, b) => compareSafras(a, b));
-  for (const seasonKey of keys) {
-    const span = parseSeasonToClimateYearSpan(seasonKey);
-    if (!span) continue;
-    const climateTemps: number[] = [];
-    for (let cy = span.start; cy <= span.end; cy++) {
-      const ts = tempByYear.get(cy);
-      if (ts) climateTemps.push(...ts);
-    }
-    if (!climateTemps.length) continue;
-    const ps = prodBySeason.get(seasonKey)!;
-    out.push({
-      mes: seasonKey,
-      clima: Math.round(mean(climateTemps) * 10) / 10,
-      produtividade: Math.round(mean(ps) * 100) / 100,
-    });
-  }
-  return out;
-}
-
 const CULTURA_FALLBACK_OPTIONS = [
   { value: 'soja', label: 'Soja' },
   { value: 'milho', label: 'Milho' },
@@ -296,8 +178,8 @@ export function SeriesTemporais() {
   /** Intervalo de calendário só para a API de clima (registos diários). */
   const [dataInicioClima, setDataInicioClima] = useState('2026-01-01');
   const [dataFimClima, setDataFimClima] = useState('2026-04-16');
-  /** Safra SIDRA (`2024/25`); vazio = todas as safras disponíveis na base para o filtro. */
-  const [safraProdutividade, setSafraProdutividade] = useState('');
+  /** Safra selecionada para cruzar clima histórico e produtividade. */
+  const [selectedSeason, setSelectedSeason] = useState('24/25');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dadosProdutividade, setDadosProdutividade] = useState<ProdRow[]>([]);
@@ -357,7 +239,8 @@ export function SeriesTemporais() {
     setLoading(true);
     setError(null);
     try {
-      const safraTrim = safraProdutividade.trim();
+      const selectedSeasonTrim = selectedSeason.trim();
+      const selectedSeasonApi = normalizeSeasonForApi(selectedSeasonTrim);
       const [cRows, pRows] = await Promise.all([
         listAllClimateRecordsInRange({
           state: loc.uf,
@@ -366,12 +249,12 @@ export function SeriesTemporais() {
           endDate: dataFimClima,
         }),
         (async (): Promise<ProductivityListResponse['data']> => {
-          if (safraTrim) {
+          if (selectedSeasonApi) {
             const prodRes = await listProductivityRecords({
               state: loc.uf,
               cropType: cultura,
               municipality: loc.place,
-              season: safraTrim,
+              season: selectedSeasonApi,
               limit: 500,
             });
             return prodRes.success && Array.isArray(prodRes.data) ? prodRes.data : [];
@@ -388,22 +271,28 @@ export function SeriesTemporais() {
       setClimaSerieModo(useDaily ? 'diaria' : 'mensal');
       setDadosClimaticos(useDaily ? aggregateClimateDaily(cRows) : aggregateClimateMonthly(cRows));
       setDadosProdutividade(aggregateProductivityBySeason(pRows, cultura));
-
-      /** Comparativo: busca clima em todos os anos civis cobertos pelas safras (ex. 2024/25 → 2024 e 2025). */
-      const bounds = climateCalendarBoundsFromProductivityRows(pRows);
-      let climateForComparativo = cRows;
-      if (bounds) {
-        const span = bounds.yMax - bounds.yMin;
-        if (span <= 50) {
-          climateForComparativo = await listAllClimateRecordsInRange({
-            state: loc.uf,
-            place: loc.place,
-            startDate: `${bounds.yMin}-01-01`,
-            endDate: `${bounds.yMax}-12-31`,
-          });
-        }
+      if (selectedSeasonApi) {
+        const comparativoRes = await getClimateVsProductivity({
+          state: loc.uf,
+          municipality: loc.place,
+          cropType: cultura,
+          season: selectedSeasonTrim,
+        });
+        const comparativoData = comparativoRes.success && Array.isArray(comparativoRes.data)
+          ? comparativoRes.data
+          : [];
+        setDadosComparativos(
+          comparativoData
+            .filter((row) => row.climate != null && row.productivity != null)
+            .map((row) => ({
+              mes: row.mes || row.month || row.season,
+              clima: Number(row.climate),
+              produtividade: Number(row.productivity),
+            }))
+        );
+      } else {
+        setDadosComparativos([]);
       }
-      setDadosComparativos(buildComparativo(climateForComparativo, pRows));
     } catch (e) {
       setDadosClimaticos([]);
       setDadosProdutividade([]);
@@ -412,7 +301,7 @@ export function SeriesTemporais() {
     } finally {
       setLoading(false);
     }
-  }, [local, cultura, dataInicioClima, dataFimClima, safraProdutividade]);
+  }, [local, cultura, dataInicioClima, dataFimClima, selectedSeason]);
 
   useEffect(() => {
     void carregar();
@@ -468,16 +357,13 @@ export function SeriesTemporais() {
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
             <Select
               label="Produtividade — safra (SIDRA)"
-              value={safraProdutividade}
-              onChange={(e) => setSafraProdutividade(e.target.value)}
-              options={[
-                { value: '', label: 'Todas as safras (série histórica no município)' },
-                ...seasonOptions.map(({ value, label }) => ({ value, label })),
-              ]}
+              value={selectedSeason}
+              onChange={(e) => setSelectedSeason(e.target.value)}
+              options={seasonOptions.map(({ value, label }) => ({ value, label }))}
             />
             <p className="text-sm text-muted-foreground self-end pb-2 md:col-span-1">
-              O clima usa o intervalo de datas acima; a produtividade filtra por safra agrícola (ex.: 2024/25), como
-              na tabela do backend.
+              A safra selecionada atualiza automaticamente o gráfico de clima vs produtividade com o clima histórico do
+              ano base da safra (ex.: 24/25 usa clima de 2024).
             </p>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -494,7 +380,7 @@ export function SeriesTemporais() {
           <CardTitle>Produtividade ao Longo do Tempo</CardTitle>
           <CardDescription>
             Média por safra no município e cultura selecionados
-            {safraProdutividade.trim() ? ` (safra ${safraProdutividade.trim()})` : ' (todas as safras com dados)'}
+            {selectedSeason.trim() ? ` (safra ${selectedSeason.trim()})` : ' (todas as safras com dados)'}
           </CardDescription>
         </CardHeader>
         <CardBody>
@@ -576,8 +462,7 @@ export function SeriesTemporais() {
         <CardHeader>
           <CardTitle>Clima vs Produtividade</CardTitle>
           <CardDescription>
-            Por safra: temperatura média de todos os dias nos anos civis da safra (ex. 2024/25 usa 2024 e 2025) ×
-            produtividade média da mesma safra no município
+            Safra selecionada: chuva mensal do ano base da safra × produtividade média da mesma safra no município
           </CardDescription>
         </CardHeader>
         <CardBody>
@@ -585,7 +470,7 @@ export function SeriesTemporais() {
             <EmptyState
               icon={Calendar}
               title="Sem dados comparativos"
-              description="O gráfico usa clima dos anos da safra (dois anos para 2024/25). Verifique se há dados climáticos municipais nesses anos e produtividade para a cultura escolhida."
+              description="Selecione uma safra válida e verifique dados climáticos históricos e produtividade para a cultura escolhida."
             />
           ) : (
             <ResponsiveContainer width="100%" height={300}>
@@ -609,7 +494,7 @@ export function SeriesTemporais() {
                   stroke="#F97316"
                   strokeWidth={2}
                   dot={{ fill: '#F97316' }}
-                  name="Temperatura média (°C)"
+                  name="Chuva acumulada (mm)"
                 />
                 <Line
                   yAxisId="right"

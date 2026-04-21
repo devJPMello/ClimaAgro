@@ -20,6 +20,27 @@ export interface ProductivityListResponse {
   }>;
 }
 
+export interface ClimateVsProductivityResponse {
+  success: boolean;
+  data: Array<{
+    season: string;
+    month?: string;
+    mes?: string;
+    climate: number | null;
+    productivity: number | null;
+    avgTemperature?: number | null;
+    avgHumidity?: number | null;
+  }>;
+  meta?: {
+    season: string;
+    baseYear: number;
+    startDate: string;
+    endDate: string;
+    municipality?: string;
+    state?: string;
+  };
+}
+
 /** GET /productivity/crop-types — valores distintos de `crop_type` (slug/cultura) por UF. */
 export async function listProductivityCropTypes(params?: { state?: string }): Promise<{
   success: boolean;
@@ -137,4 +158,18 @@ export async function listAllProductivityForYear(params: {
     offset += PRODUCTIVITY_PAGE_MAX;
   }
   return all;
+}
+
+export async function getClimateVsProductivity(params: {
+  season: string;
+  state: string;
+  municipality: string;
+  cropType?: string;
+}): Promise<ClimateVsProductivityResponse> {
+  const sp = new URLSearchParams();
+  sp.set('season', params.season.trim());
+  sp.set('state', params.state.trim().toUpperCase().slice(0, 2));
+  sp.set('municipality', params.municipality.trim());
+  if (params.cropType?.trim()) sp.set('cropType', params.cropType.trim());
+  return httpClient.get<ClimateVsProductivityResponse>(`productivity/climate-vs-productivity?${sp.toString()}`);
 }
