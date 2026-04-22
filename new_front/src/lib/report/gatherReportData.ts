@@ -99,6 +99,17 @@ export function parseExportPeriodoLabel(periodo: string): {
   productivitySeason?: string;
 } {
   const trimmed = periodo.trim();
+  const anosM = /^Anos\s+(\d{4})\s*[—–-]\s*(\d{4})$/i.exec(trimmed);
+  if (anosM) {
+    const y0 = parseInt(anosM[1], 10);
+    const y1 = parseInt(anosM[2], 10);
+    const lo = Math.min(y0, y1);
+    const hi = Math.max(y0, y1);
+    return {
+      startDate: `${lo}-01-01`,
+      endDate: `${hi}-12-31`,
+    };
+  }
   const safraM = /^Safra\s+(\d{4}\/\d{2})(?:\s+\(clima\s+(\d{4})\))?$/i.exec(trimmed);
   if (safraM) {
     const season = safraM[1];

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
-import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Textarea } from '../components/ui/textarea';
@@ -14,13 +13,12 @@ import { createReportExport, listReportExports } from '../../lib/api/reportExpor
 import type { ReportExportItemDto } from '../../lib/api/contracts/reportExports';
 import { EmptyState } from '../components/ui/EmptyState';
 import { displayLocalidadeLabel, TO_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
-import { getProductivitySeasonOptions } from '../../lib/filters/appFilters';
+import { getProductivityYearOptions } from '../../lib/filters/appFilters';
 import { downloadReportFile, type ReportExportFileFormat } from '../../lib/reportExportFile';
 import {
   gatherReportDados,
   type ReportTipoKey,
   localidadeKeyFromStoredLocal,
-  parseSeasonBaseYear,
   parseExportPeriodoLabel,
   reportTipoFromStoredLabel,
 } from '../../lib/report/gatherReportData';
@@ -52,12 +50,9 @@ export function ExportarRelatorios() {
     if (valid.has('Palmas')) setLocalidade('Palmas');
   }, [ibgeLocalOptions, localidade]);
   const [tipoRelatorio, setTipoRelatorio] = useState('clima');
-  const [periodoInicio, setPeriodoInicio] = useState('2026-01-01');
-  const [periodoFim, setPeriodoFim] = useState('2026-04-16');
-  const seasonOptions = useMemo(() => getProductivitySeasonOptions(), []);
-  const [safraProdutividade, setSafraProdutividade] = useState(
-    () => getProductivitySeasonOptions()[0]?.value ?? ''
-  );
+  const yearOptions = useMemo(() => getProductivityYearOptions(), []);
+  const [anoInicio, setAnoInicio] = useState(yearOptions[Math.min(2, yearOptions.length - 1)]?.value ?? '2024');
+  const [anoFim, setAnoFim] = useState(yearOptions[0]?.value ?? '2026');
   const [formato, setFormato] = useState('pdf');
   const [loading, setLoading] = useState(false);
   const [loadingHistorico, setLoadingHistorico] = useState(true);
@@ -96,15 +91,10 @@ export function ExportarRelatorios() {
   const handleGerarResumoIA = async () => {
     setLoadingIA(true);
     try {
-      const safraTrim = safraProdutividade.trim();
-      const periodoIaInicio =
-        (tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo') && safraTrim
-          ? `Safra ${safraTrim}`
-          : periodoInicio;
-      const periodoIaFim =
-        (tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo') && safraTrim
-          ? `Safra ${safraTrim}`
-          : periodoFim;
+      const y0 = Math.min(parseInt(anoInicio, 10), parseInt(anoFim, 10));
+      const y1 = Math.max(parseInt(anoInicio, 10), parseInt(anoFim, 10));
+      const periodoIaInicio = `${y0}`;
+      const periodoIaFim = `${y1}`;
       const response = await generateAiReport({
         localidade,
         tipoRelatorio,
@@ -128,34 +118,23 @@ export function ExportarRelatorios() {
   };
 
   const handleExportar = async () => {
-    const safraTrim = safraProdutividade.trim();
-    if ((tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo') && !safraTrim) {
-      toast.error('Selecione a safra agrícola para o relatório de produtividade/comparativo.');
-      return;
-    }
     setLoading(true);
     try {
       const local = displayLocalidadeLabel(localidade);
       const tipo = labelTipoRelatorio(tipoRelatorio);
-      const baseYear = safraTrim ? parseSeasonBaseYear(safraTrim) : null;
-      const climaInicioComparativo = baseYear != null ? `${baseYear}-01-01` : periodoInicio;
-      const climaFimComparativo = baseYear != null ? `${baseYear}-12-31` : periodoFim;
-      const periodo =
-        (tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo') && safraTrim
-          ? tipoRelatorio === 'comparativo' && baseYear != null
-            ? `Safra ${safraTrim} (clima ${baseYear})`
-            : `Safra ${safraTrim}`
-          : `${periodoInicio} — ${periodoFim}`;
+      const y0 = Math.min(parseInt(anoInicio, 10), parseInt(anoFim, 10));
+      const y1 = Math.max(parseInt(anoInicio, 10), parseInt(anoFim, 10));
+      const startDate = `${y0}-01-01`;
+      const endDate = `${y1}-12-31`;
+      const periodo = `Anos ${y0} — ${y1}`;
       const fmt = formato as ReportExportFileFormat;
 
       const dadosIntegrados = await gatherReportDados({
         tipo: tipoRelatorio as ReportTipoKey,
         localidadeKey: localidade,
         displayLocal: local,
-        startDate: tipoRelatorio === 'comparativo' ? climaInicioComparativo : periodoInicio,
-        endDate: tipoRelatorio === 'comparativo' ? climaFimComparativo : periodoFim,
-        productivitySeason:
-          tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo' ? safraTrim : undefined,
+        startDate,
+        endDate,
       });
 
       downloadReportFile({
@@ -262,30 +241,21 @@ export function ExportarRelatorios() {
                 />
               </div>
 
-              {tipoRelatorio === 'produtividade' || tipoRelatorio === 'comparativo' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Select
-                  label="Safra agrícola"
-                  value={safraProdutividade}
-                  onChange={(e) => setSafraProdutividade(e.target.value)}
-                  options={seasonOptions}
+                  label="Ano inicial"
+                  value={anoInicio}
+                  onChange={(e) => setAnoInicio(e.target.value)}
+                  options={yearOptions}
                 />
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Input
-                    label="Período - Início"
-                    type="date"
-                    value={periodoInicio}
-                    onChange={(e) => setPeriodoInicio(e.target.value)}
-                  />
 
-                  <Input
-                    label="Período - Fim"
-                    type="date"
-                    value={periodoFim}
-                    onChange={(e) => setPeriodoFim(e.target.value)}
-                  />
-                </div>
-              )}
+                <Select
+                  label="Ano final"
+                  value={anoFim}
+                  onChange={(e) => setAnoFim(e.target.value)}
+                  options={yearOptions}
+                />
+              </div>
 
               <Select
                 label="Formato"

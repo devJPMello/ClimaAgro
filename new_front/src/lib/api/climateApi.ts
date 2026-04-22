@@ -1,5 +1,5 @@
 import { httpClient } from './httpClient';
-import type { DashboardSummaryDto } from './contracts/climate';
+import type { ClimateSeriesResponseDto, ClimateSeriesVariable, DashboardSummaryDto } from './contracts/climate';
 
 /**
  * Resumo do dashboard — `GET climate/dashboard-summary`.
@@ -7,8 +7,11 @@ import type { DashboardSummaryDto } from './contracts/climate';
  */
 export async function getDashboardSummary(params?: { state?: string }): Promise<DashboardSummaryDto> {
   const raw = params?.state?.trim().toUpperCase();
-  const uf = raw && raw.length === 2 ? raw : 'TO';
-  return httpClient.get<DashboardSummaryDto>(`climate/dashboard-summary?state=${encodeURIComponent(uf)}`);
+  if (raw && raw.length === 2) {
+    return httpClient.get<DashboardSummaryDto>(`climate/dashboard-summary?state=${encodeURIComponent(raw)}`);
+  }
+  /** Sem `state`: resumo principal (MT, TO, GO, SP, MG) no backend. */
+  return httpClient.get<DashboardSummaryDto>('climate/dashboard-summary');
 }
 
 export interface ClimateListResponse {
@@ -74,4 +77,27 @@ export async function listAllClimateRecordsInRange(params: {
     offset += CLIMATE_PAGE_MAX;
   }
   return all;
+}
+
+export async function listClimateUfs(): Promise<Array<{ value: string; label: string }>> {
+  const response = await httpClient.get<{ success: boolean; data: Array<{ value: string; label: string }> }>('climate/ufs');
+  return response.data ?? [];
+}
+
+export async function getClimateSeriesByUf(params: {
+  uf: string;
+  start: string;
+  end: string;
+  variavel: ClimateSeriesVariable;
+  limit?: number;
+  offset?: number;
+}): Promise<ClimateSeriesResponseDto> {
+  const sp = new URLSearchParams();
+  sp.set('uf', params.uf);
+  sp.set('start', params.start);
+  sp.set('end', params.end);
+  sp.set('variavel', params.variavel);
+  if (params.limit != null) sp.set('limit', String(params.limit));
+  if (params.offset != null) sp.set('offset', String(params.offset));
+  return httpClient.get<ClimateSeriesResponseDto>(`climate/series?${sp.toString()}`);
 }

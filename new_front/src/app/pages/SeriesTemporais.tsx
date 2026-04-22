@@ -1,44 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
-import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Calendar } from 'lucide-react';
 import { EmptyState } from '../components/ui/EmptyState';
-import { listAllClimateRecordsInRange, type ClimateListResponse } from '../../lib/api/climateApi';
 import {
-  getClimateVsProductivity,
-  listAllProductivityRecords,
+  getClimateSeriesByUf,
+  listClimateUfs,
+} from '../../lib/api/climateApi';
+import {
   listProductivityCropTypes,
   listProductivityRecords,
+  getClimateVsProductivity,
   type ProductivityListResponse,
 } from '../../lib/api/productivityApi';
-import { getProductivitySeasonOptions, labelForProductivityCropType } from '../../lib/filters/appFilters';
-import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
+import { getProductivityYearOptions, labelForProductivityCropType } from '../../lib/filters/appFilters';
+import type { ClimateSeriesVariable } from '../../lib/api/contracts/climate';
 
-type ProdRow = { mes: string; produtividade: number };
+type ProdRow = { mes: string; produtividade: number | null; produtividadeNum?: number | null };
 type ClimaRow = { mes: string; temperatura: number; precipitacao: number; umidade: number };
 type CompRow = { mes: string; clima: number; produtividade: number };
-
-/** Municípios do Tocantins — `place` deve coincidir com geo_data.name (seed). */
-const LOCAL_SERIES: Record<string, { place: string; uf: string }> = {
-  palmas: { place: 'Palmas', uf: 'TO' },
-  araguaina: { place: 'Araguaína', uf: 'TO' },
-  gurupi: { place: 'Gurupi', uf: 'TO' },
-  'porto-nacional': { place: 'Porto Nacional', uf: 'TO' },
-  'paraiso-to': { place: 'Paraíso do Tocantins', uf: 'TO' },
-  guarai: { place: 'Guaraí', uf: 'TO' },
-};
-
-/** Nome oficial do município (ou chave legada do mapa) → `{ place, uf }` para a API de clima. */
-function resolveSeriesPlace(localKey: string): { place: string; uf: string } | null {
-  const mapped = LOCAL_SERIES[localKey];
-  if (mapped) return mapped;
-  const trimmed = localKey.trim();
-  if (!trimmed) return null;
-  return { place: trimmed, uf: 'TO' };
-}
 
 function num(v: unknown): number | null {
   if (v == null || v === '') return null;
@@ -53,173 +35,148 @@ function mesLabelFromYm(ym: string): string {
   return `${names[m - 1]}/${String(y).slice(2)}`;
 }
 
-/** Quantidade de dias no intervalo inclusivo (datas `YYYY-MM-DD`). */
-function daysInclusive(startIso: string, endIso: string): number {
-  const a = new Date(`${startIso}T12:00:00`);
-  const b = new Date(`${endIso}T12:00:00`);
-  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 9999;
-  const ms = Math.abs(b.getTime() - a.getTime());
-  return Math.floor(ms / 86_400_000) + 1;
+function seasonFromYear(year: string): string {
+  const y = parseInt(year, 10);
+  const next = (y + 1) % 100;
+  return `${y}/${String(next).padStart(2, '0')}`;
 }
 
-function dayKeyFromRowDate(dateRaw: string | undefined): string | null {
-  if (!dateRaw) return null;
-  const d = String(dateRaw).slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+function buildYearMonthKeys(year: string): string[] {
+  return Array.from({ length: 12 }, (_, idx) => `${year}-${String(idx + 1).padStart(2, '0')}`);
 }
 
-function labelFromDayKey(day: string): string {
-  const [y, m, dayNum] = day.split('-').map((x) => parseInt(x, 10));
-  if (!y || !m || !dayNum) return day;
-  return `${String(dayNum).padStart(2, '0')}/${String(m).padStart(2, '0')}/${String(y).slice(2)}`;
-}
-
-/** Uma barra por dia (quando o intervalo é curto). */
-function aggregateClimateDaily(rows: ClimateListResponse['data']): ClimaRow[] {
-  const map = new Map<string, { temps: number[]; precs: number[]; hums: number[] }>();
-  for (const r of rows) {
-    const day = dayKeyFromRowDate(r.date);
-    if (!day) continue;
-    if (!map.has(day)) map.set(day, { temps: [], precs: [], hums: [] });
-    const b = map.get(day)!;
-    const t = num(r.avgTemperature);
-    if (t != null) b.temps.push(t);
-    const p = num(r.precipitation);
-    if (p != null) b.precs.push(p);
-    const h = num(r.humidity);
-    if (h != null) b.hums.push(h);
+function buildYearMonthKeysRange(startYear: string, endYear: string): string[] {
+  const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
+  const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
+  const out: string[] = [];
+  for (let y = ys; y <= ye; y += 1) {
+    out.push(...buildYearMonthKeys(String(y)));
   }
-  const avg = (arr: number[]) => (arr.length ? arr.reduce((a, x) => a + x, 0) / arr.length : 0);
-  const keys = [...map.keys()].sort();
-  return keys.map((day) => {
-    const b = map.get(day)!;
-    return {
-      mes: labelFromDayKey(day),
-      temperatura: Math.round(avg(b.temps) * 10) / 10,
-      precipitacao: Math.round(avg(b.precs) * 10) / 10,
-      umidade: Math.round(avg(b.hums) * 10) / 10,
-    };
-  });
+  return out;
 }
 
-function aggregateClimateMonthly(rows: ClimateListResponse['data']): ClimaRow[] {
-  const map = new Map<string, { temps: number[]; precs: number[]; hums: number[] }>();
-  for (const r of rows) {
-    const ym = (r.date || '').slice(0, 7);
-    if (ym.length < 7) continue;
-    if (!map.has(ym)) map.set(ym, { temps: [], precs: [], hums: [] });
-    const b = map.get(ym)!;
-    const t = num(r.avgTemperature);
-    if (t != null) b.temps.push(t);
-    const p = num(r.precipitation);
-    if (p != null) b.precs.push(p);
-    const h = num(r.humidity);
-    if (h != null) b.hums.push(h);
+function aggregateClimateByMonth(
+  tempSeries: Awaited<ReturnType<typeof getClimateSeriesByUf>>,
+  precipSeries: Awaited<ReturnType<typeof getClimateSeriesByUf>>,
+  humSeries: Awaited<ReturnType<typeof getClimateSeriesByUf>>,
+  startYear: string,
+  endYear: string
+): ClimaRow[] {
+  const monthly = new Map<string, { temps: number[]; hums: number[]; precipSum: number }>();
+  for (const ym of buildYearMonthKeysRange(startYear, endYear)) {
+    monthly.set(ym, { temps: [], hums: [], precipSum: 0 });
   }
+
+  for (const row of tempSeries.serieTemporal) {
+    const ym = String(row.date || '').slice(0, 7);
+    const v = num(row.value);
+    if (!monthly.has(ym) || v == null) continue;
+    monthly.get(ym)!.temps.push(v);
+  }
+  for (const row of humSeries.serieTemporal) {
+    const ym = String(row.date || '').slice(0, 7);
+    const v = num(row.value);
+    if (!monthly.has(ym) || v == null) continue;
+    monthly.get(ym)!.hums.push(v);
+  }
+  for (const row of precipSeries.serieTemporal) {
+    const ym = String(row.date || '').slice(0, 7);
+    const v = num(row.value);
+    if (!monthly.has(ym) || v == null) continue;
+    monthly.get(ym)!.precipSum += v;
+  }
+
   const avg = (arr: number[]) => (arr.length ? arr.reduce((a, x) => a + x, 0) / arr.length : 0);
-  const keys = [...map.keys()].sort();
-  return keys.map((ym) => {
-    const b = map.get(ym)!;
+  return buildYearMonthKeysRange(startYear, endYear).map((ym) => {
+    const b = monthly.get(ym)!;
     return {
       mes: mesLabelFromYm(ym),
       temperatura: Math.round(avg(b.temps) * 10) / 10,
-      precipitacao: Math.round(avg(b.precs) * 10) / 10,
+      precipitacao: Math.round(b.precipSum * 10) / 10,
       umidade: Math.round(avg(b.hums) * 10) / 10,
     };
   });
 }
 
-/** Ordena safras tipo `2023/24`, `2024/25`. */
-function compareSafras(a: string, b: string): number {
-  const startYear = (s: string) => {
-    const m = /^(\d{4})\//.exec(String(s).trim());
-    return m ? parseInt(m[1], 10) : 0;
-  };
-  return startYear(a) - startYear(b) || a.localeCompare(b, 'pt-BR');
-}
-
-function normalizeSeasonForApi(raw: string): string {
-  const season = String(raw || '').trim();
-  if (/^\d{2}\/\d{2}$/.test(season)) return `20${season}`;
-  return season;
-}
-
-/** Agrupa por safra SIDRA (`season`); fallback: ano agrícola. */
-function aggregateProductivityBySeason(rows: ProductivityListResponse['data'], cropFilter: string): ProdRow[] {
+/** Agrupa por mês-ano (`periodRef`) no formato `YYYY-MM`. */
+function aggregateProductivityByMonthYear(
+  rows: ProductivityListResponse['data'],
+  cropFilter: string,
+  startYear: string,
+  endYear: string
+): ProdRow[] {
   const map = new Map<string, number[]>();
   for (const r of rows) {
-    if (cropFilter && r.cropType && r.cropType !== cropFilter) continue;
+    if (cropFilter && cropFilter !== 'ALL' && r.cropType && r.cropType !== cropFilter) continue;
     const p = num(r.productivity);
     if (p == null) continue;
-    const key = (r.season && String(r.season).trim()) || String(r.year);
+    const key = String(r.periodRef || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(key)) continue;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(p);
   }
-  return [...map.entries()]
-    .sort((a, b) => compareSafras(a[0], b[0]))
-    .map(([k, vals]) => ({
-      mes: k,
-      produtividade: Math.round((vals.reduce((x, y) => x + y, 0) / vals.length) * 100) / 100,
-    }));
+  return buildYearMonthKeysRange(startYear, endYear).map((ym) => {
+    const vals = map.get(ym) || [];
+    if (!vals.length) {
+      return {
+        mes: mesLabelFromYm(ym),
+        produtividade: null,
+        produtividadeNum: null,
+      };
+    }
+    const avg = Math.round((vals.reduce((x, y) => x + y, 0) / vals.length) * 100) / 100;
+    return {
+      mes: mesLabelFromYm(ym),
+      produtividade: avg,
+      produtividadeNum: avg,
+    };
+  });
 }
 
 const CULTURA_FALLBACK_OPTIONS = [
+  { value: 'ALL', label: 'Todas as culturas' },
   { value: 'soja', label: 'Soja' },
   { value: 'milho', label: 'Milho' },
   { value: 'trigo', label: 'Trigo' },
 ];
 
 export function SeriesTemporais() {
-  const seasonOptions = useMemo(() => getProductivitySeasonOptions(), []);
-  const [local, setLocal] = useState('Palmas');
-  const [cultura, setCultura] = useState('soja');
+  const [uf, setUf] = useState('TO');
+  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([
+    { value: 'ALL', label: 'Brasil (todos)' },
+    { value: 'TO', label: 'TO' },
+  ]);
+  const yearOptions = useMemo(() => getProductivityYearOptions(), []);
+  const [cultura, setCultura] = useState('ALL');
   const [culturaOptions, setCulturaOptions] =
     useState<Array<{ value: string; label: string }>>(CULTURA_FALLBACK_OPTIONS);
-  /** Intervalo de calendário só para a API de clima (registos diários). */
-  const [dataInicioClima, setDataInicioClima] = useState('2026-01-01');
-  const [dataFimClima, setDataFimClima] = useState('2026-04-16');
-  /** Safra selecionada para cruzar clima histórico e produtividade. */
-  const [selectedSeason, setSelectedSeason] = useState('24/25');
+  const [startYear, setStartYear] = useState(yearOptions[Math.min(2, yearOptions.length - 1)]?.value ?? String(new Date().getFullYear() - 2));
+  const [endYear, setEndYear] = useState(yearOptions[0]?.value ?? String(new Date().getFullYear()));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dadosProdutividade, setDadosProdutividade] = useState<ProdRow[]>([]);
   const [dadosClimaticos, setDadosClimaticos] = useState<ClimaRow[]>([]);
   const [dadosComparativos, setDadosComparativos] = useState<CompRow[]>([]);
-  /** Explica por que o gráfico pode parecer “um ponto só”: agregação mensal vs diária. */
-  const [climaSerieModo, setClimaSerieModo] = useState<'diaria' | 'mensal'>('mensal');
-
-  const { options: municipioSelectOptions, loading: municipiosLoading, error: municipiosError } =
-    useIbgeMunicipioSelectOptions();
-
-  useEffect(() => {
-    if (!municipioSelectOptions.length) return;
-    const valid = new Set(municipioSelectOptions.map((o) => o.value));
-    if (valid.has(local)) return;
-    const mapped = LOCAL_SERIES[local];
-    if (mapped && valid.has(mapped.place)) {
-      setLocal(mapped.place);
-      return;
-    }
-    if (valid.has('Palmas')) setLocal('Palmas');
-  }, [municipioSelectOptions, local]);
-
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await listProductivityCropTypes({ state: 'TO' });
+        const res = await listProductivityCropTypes(uf === 'ALL' ? undefined : { state: uf });
         if (cancelled || !res.success || !res.data?.length) return;
         const uniq = [...new Set(res.data.map((x) => String(x || '').trim()).filter(Boolean))];
         if (!uniq.length) return;
         uniq.sort((a, b) =>
           labelForProductivityCropType(a).localeCompare(labelForProductivityCropType(b), 'pt-BR')
         );
-        const opts = uniq.map((v) => ({ value: v, label: labelForProductivityCropType(v) }));
+        const opts = [
+          { value: 'ALL', label: 'Todas as culturas' },
+          ...uniq.map((v) => ({ value: v, label: labelForProductivityCropType(v) })),
+        ];
         setCulturaOptions(opts);
         setCultura((c) =>
           opts.some((o) => o.value === c)
             ? c
-            : opts.find((o) => o.value === 'soja')?.value ?? opts[0]?.value ?? 'soja'
+            : opts.find((o) => o.value === 'ALL')?.value ?? opts.find((o) => o.value === 'soja')?.value ?? opts[0]?.value ?? 'ALL'
         );
       } catch {
         /* mantém fallback estático */
@@ -228,71 +185,136 @@ export function SeriesTemporais() {
     return () => {
       cancelled = true;
     };
+  }, [uf]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await listClimateUfs();
+        if (!cancelled && data.length) {
+          const onlyUfs = data.filter((x) => /^[A-Z]{2}$/.test(String(x.value || '').trim().toUpperCase()));
+          if (onlyUfs.length) {
+            setUfOptions([{ value: 'ALL', label: 'Brasil (todos)' }, ...onlyUfs]);
+            if (uf !== 'ALL' && !onlyUfs.some((x) => x.value === uf)) {
+              setUf('ALL');
+            }
+          }
+        }
+      } catch {
+        /* fallback em memória */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const carregar = useCallback(async () => {
-    const loc = resolveSeriesPlace(local);
-    if (!loc) {
-      setError('Município inválido.');
-      return;
+  async function loadSeriesVariable(variavel: ClimateSeriesVariable) {
+    if (uf !== 'ALL' && !/^[A-Z]{2}$/.test(uf)) {
+      throw new Error('Selecione uma UF válida para consultar a série temporal.');
     }
+    const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
+    const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
+    const start = `${ys}-01-01`;
+    const end = `${ye}-12-31`;
+    return getClimateSeriesByUf({
+      uf,
+      start,
+      end,
+      variavel,
+      limit: 1000,
+      offset: 0,
+    });
+  }
+
+  const carregar = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const selectedSeasonTrim = selectedSeason.trim();
-      const selectedSeasonApi = normalizeSeasonForApi(selectedSeasonTrim);
-      const [cRows, pRows] = await Promise.all([
-        listAllClimateRecordsInRange({
-          state: loc.uf,
-          place: loc.place,
-          startDate: dataInicioClima,
-          endDate: dataFimClima,
-        }),
+      const [tempSeries, precipSeries, humSeries, pRows] = await Promise.all([
+        loadSeriesVariable('temperatura_media'),
+        loadSeriesVariable('precipitacao'),
+        loadSeriesVariable('umidade'),
         (async (): Promise<ProductivityListResponse['data']> => {
-          if (selectedSeasonApi) {
+          if (uf === 'ALL') return [];
+          const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
+          const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
+          const allRows: ProductivityListResponse['data'] = [];
+          for (let y = ys; y <= ye; y += 1) {
             const prodRes = await listProductivityRecords({
-              state: loc.uf,
-              cropType: cultura,
-              municipality: loc.place,
-              season: selectedSeasonApi,
+              state: uf,
+              cropType: cultura === 'ALL' ? undefined : cultura,
+              year: String(y),
               limit: 500,
             });
-            return prodRes.success && Array.isArray(prodRes.data) ? prodRes.data : [];
+            if (prodRes.success && Array.isArray(prodRes.data)) allRows.push(...prodRes.data);
           }
-          return listAllProductivityRecords({
-            state: loc.uf,
-            cropType: cultura,
-            municipality: loc.place,
-          });
+          return allRows;
         })(),
       ]);
-      const spanDays = daysInclusive(dataInicioClima, dataFimClima);
-      const useDaily = spanDays <= 120;
-      setClimaSerieModo(useDaily ? 'diaria' : 'mensal');
-      setDadosClimaticos(useDaily ? aggregateClimateDaily(cRows) : aggregateClimateMonthly(cRows));
-      setDadosProdutividade(aggregateProductivityBySeason(pRows, cultura));
-      if (selectedSeasonApi) {
-        const comparativoRes = await getClimateVsProductivity({
-          state: loc.uf,
-          municipality: loc.place,
-          cropType: cultura,
-          season: selectedSeasonTrim,
+      let climateMonthly = aggregateClimateByMonth(tempSeries, precipSeries, humSeries, startYear, endYear);
+      const monthsWithAnyClimate = climateMonthly.filter(
+        (m) => m.temperatura !== 0 || m.umidade !== 0 || m.precipitacao !== 0
+      ).length;
+      const shouldUseFallback = monthsWithAnyClimate < 3;
+      if (shouldUseFallback && (uf === 'ALL' || /^[A-Z]{2}$/.test(uf))) {
+        const byMonth = new Map<string, { t: number[]; h: number[]; p: number[] }>();
+        const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
+        const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
+        const targetUfs =
+          uf === 'ALL'
+            ? ufOptions.map((o) => String(o.value || '').trim().toUpperCase()).filter((v) => /^[A-Z]{2}$/.test(v))
+            : [uf];
+
+        for (const stateUf of targetUfs) {
+          for (let y = ys; y <= ye; y += 1) {
+            const fallback = await getClimateVsProductivity({
+              state: stateUf,
+              cropType: cultura === 'ALL' ? undefined : cultura,
+              season: seasonFromYear(String(y)),
+            });
+            if (!(fallback.success && Array.isArray(fallback.data) && fallback.data.length)) continue;
+            for (const row of fallback.data) {
+              const ym = String(row.month || '').trim();
+              if (!/^\d{4}-\d{2}$/.test(ym)) continue;
+              if (!byMonth.has(ym)) byMonth.set(ym, { t: [], h: [], p: [] });
+              const b = byMonth.get(ym)!;
+              const t = Number(row.avgTemperature ?? NaN);
+              const h = Number(row.avgHumidity ?? NaN);
+              const p = Number(row.climate ?? NaN);
+              if (Number.isFinite(t)) b.t.push(t);
+              if (Number.isFinite(h)) b.h.push(h);
+              if (Number.isFinite(p)) b.p.push(p);
+            }
+          }
+        }
+        climateMonthly = buildYearMonthKeysRange(startYear, endYear).map((ym) => {
+          const it = byMonth.get(ym);
+          const avg = (arr?: number[]) => (arr && arr.length ? arr.reduce((a, x) => a + x, 0) / arr.length : 0);
+          return {
+            mes: mesLabelFromYm(ym),
+            temperatura: Math.round(avg(it?.t) * 10) / 10,
+            umidade: Math.round(avg(it?.h) * 10) / 10,
+            precipitacao: Math.round(avg(it?.p) * 10) / 10,
+          };
         });
-        const comparativoData = comparativoRes.success && Array.isArray(comparativoRes.data)
-          ? comparativoRes.data
-          : [];
-        setDadosComparativos(
-          comparativoData
-            .filter((row) => row.climate != null && row.productivity != null)
-            .map((row) => ({
-              mes: row.mes || row.month || row.season,
-              clima: Number(row.climate),
-              produtividade: Number(row.productivity),
-            }))
-        );
-      } else {
-        setDadosComparativos([]);
       }
+      setDadosClimaticos(climateMonthly);
+
+      const prodMonthly = aggregateProductivityByMonthYear(pRows, cultura, startYear, endYear);
+      setDadosProdutividade(prodMonthly);
+
+      const prodByMes = new Map(prodMonthly.map((r) => [r.mes, r.produtividadeNum ?? r.produtividade ?? null]));
+      setDadosComparativos(
+        climateMonthly
+          .map((row) => ({
+            mes: row.mes,
+            clima: row.precipitacao,
+            produtividade: Number(prodByMes.get(row.mes) ?? 0),
+          }))
+          .filter((row) => row.clima > 0 || row.produtividade > 0)
+      );
     } catch (e) {
       setDadosClimaticos([]);
       setDadosProdutividade([]);
@@ -301,7 +323,7 @@ export function SeriesTemporais() {
     } finally {
       setLoading(false);
     }
-  }, [local, cultura, dataInicioClima, dataFimClima, selectedSeason]);
+  }, [cultura, startYear, endYear, uf, ufOptions]);
 
   useEffect(() => {
     void carregar();
@@ -314,7 +336,7 @@ export function SeriesTemporais() {
           Séries Temporais
         </h1>
         <p className="text-muted-foreground">
-          Tocantins — período de calendário para o clima; safra (SIDRA) para produtividade no município
+          Série mensal por UF e ano, combinando clima e produtividade no mesmo recorte temporal.
         </p>
       </div>
 
@@ -322,14 +344,11 @@ export function SeriesTemporais() {
         <CardBody>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Select
-              label="Município (TO)"
-              value={local}
-              onChange={(e) => setLocal(e.target.value)}
-              options={municipioSelectOptions}
-              disabled={municipiosLoading}
-              error={municipiosError ?? undefined}
+              label="UF"
+              value={uf}
+              onChange={(e) => setUf(e.target.value)}
+              options={ufOptions}
             />
-
             <Select
               label="Cultura (produtividade)"
               value={cultura}
@@ -339,31 +358,22 @@ export function SeriesTemporais() {
           </div>
 
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input
-              label="Clima — data início"
-              type="date"
-              value={dataInicioClima}
-              onChange={(e) => setDataInicioClima(e.target.value)}
+            <Select
+              label="Ano inicial"
+              value={startYear}
+              onChange={(e) => setStartYear(e.target.value)}
+              options={yearOptions}
             />
-
-            <Input
-              label="Clima — data fim"
-              type="date"
-              value={dataFimClima}
-              onChange={(e) => setDataFimClima(e.target.value)}
+            <Select
+              label="Ano final"
+              value={endYear}
+              onChange={(e) => setEndYear(e.target.value)}
+              options={yearOptions}
             />
           </div>
-
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Select
-              label="Produtividade — safra (SIDRA)"
-              value={selectedSeason}
-              onChange={(e) => setSelectedSeason(e.target.value)}
-              options={seasonOptions.map(({ value, label }) => ({ value, label }))}
-            />
+          <div className="mt-2 grid grid-cols-1 md:grid-cols-1 gap-4">
             <p className="text-sm text-muted-foreground self-end pb-2 md:col-span-1">
-              A safra selecionada atualiza automaticamente o gráfico de clima vs produtividade com o clima histórico do
-              ano base da safra (ex.: 24/25 usa clima de 2024).
+              O intervalo de anos filtra clima e produtividade para os gráficos abaixo.
             </p>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -379,8 +389,7 @@ export function SeriesTemporais() {
         <CardHeader>
           <CardTitle>Produtividade ao Longo do Tempo</CardTitle>
           <CardDescription>
-            Média por safra no município e cultura selecionados
-            {selectedSeason.trim() ? ` (safra ${selectedSeason.trim()})` : ' (todas as safras com dados)'}
+            Média mensal de produtividade na UF/cultura para o intervalo selecionado
           </CardDescription>
         </CardHeader>
         <CardBody>
@@ -423,9 +432,7 @@ export function SeriesTemporais() {
         <CardHeader>
           <CardTitle>Variáveis Climáticas</CardTitle>
           <CardDescription>
-            {climaSerieModo === 'diaria'
-              ? 'Valores por dia (até 120 dias no filtro); períodos maiores usam média mensal.'
-              : 'Médias mensais no período (vários dias no mesmo mês viram um único ponto por mês).'}
+            Série mensal de clima no intervalo selecionado
           </CardDescription>
         </CardHeader>
         <CardBody>
@@ -462,7 +469,7 @@ export function SeriesTemporais() {
         <CardHeader>
           <CardTitle>Clima vs Produtividade</CardTitle>
           <CardDescription>
-            Safra selecionada: chuva mensal do ano base da safra × produtividade média da mesma safra no município
+            Chuva mensal e produtividade mensal juntas para a UF/cultura/intervalo selecionados
           </CardDescription>
         </CardHeader>
         <CardBody>
@@ -470,7 +477,7 @@ export function SeriesTemporais() {
             <EmptyState
               icon={Calendar}
               title="Sem dados comparativos"
-              description="Selecione uma safra válida e verifique dados climáticos históricos e produtividade para a cultura escolhida."
+              description="Verifique se existem dados de clima e produtividade para esta UF, cultura e intervalo de anos."
             />
           ) : (
             <ResponsiveContainer width="100%" height={300}>
