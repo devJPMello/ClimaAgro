@@ -17,11 +17,14 @@
     "purge:seed": "node src/scripts/purgeInventedSeedData.js",
     "import:ibge1612": "node src/scripts/importIbgeSidra1612Csv.js",
     "sync:productivity-ibge": "node src/scripts/syncProductivityFromIbgeSidra1612.js",
+    "migrate:climate-uf": "node src/scripts/migrateClimateUfColumn.js",
+    "reset:state-level-data": "node src/scripts/resetStateLevelData.js",
     "migrate:productivity-label": "node src/scripts/migrateProductivityProductLabel.js",
     "migrate:productivity-municipality": "node src/scripts/migrateProductivityMunicipalityColumns.js",
     "migrate:productivity-crop-type-varchar": "node src/scripts/migrateCropTypeEnumToVarchar.js",
     "geo:ensure-tocantins-municipios": "node src/scripts/ensureTocantinsMunicipiosGeoData.js",
-    "geo:geocode-tocantins": "node src/scripts/geocodeTocantinsMunicipiosGeoData.js"
+    "geo:geocode-tocantins": "node src/scripts/geocodeTocantinsMunicipiosGeoData.js",
+    "geo:ensure-brazil-states": "node src/scripts/ensureBrazilStatesGeoData.js"
   },
   "keywords": ["clima", "agricultura", "api", "nodejs"],
   "author": "ClimaAgro Team",

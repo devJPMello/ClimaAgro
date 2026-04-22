@@ -53,6 +53,7 @@ app.use('/api/geo', require('./routes/geo'));
 app.use('/api/productivity', require('./routes/productivity'));
 app.use('/api/ibge-sidra-1612', require('./routes/ibgeSidra1612'));
 app.use('/api/climate', require('./routes/climate'));
+app.use('/api/clima', require('./routes/climate'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/superset', require('./routes/superset'));
 app.use('/api/inmet-adapter', require('./routes/inmetAdapter'));

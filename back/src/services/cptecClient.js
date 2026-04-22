@@ -16,12 +16,23 @@ function stripAccents(s) {
 }
 
 async function fetchText(path) {
-  const client = createUpstreamAxios({ baseURL: getBaseUrl() });
-  const res = await axiosWithRetries(client, {
-    method: 'GET',
-    url: path,
-    responseType: 'arraybuffer'
+  const client = createUpstreamAxios({
+    baseURL: getBaseUrl(),
+    // Serviço público INPE costuma demorar ou responder 5xx; 25s falha em massa em horários de pico.
+    timeoutMs: Number(process.env.CPTEC_TIMEOUT_MS || 60000)
   });
+  const res = await axiosWithRetries(
+    client,
+    {
+      method: 'GET',
+      url: path,
+      responseType: 'arraybuffer'
+    },
+    {
+      retries: Number(process.env.CPTEC_HTTP_RETRIES || 4),
+      retryDelayMs: Number(process.env.CPTEC_RETRY_DELAY_MS || 1500)
+    }
+  );
   if (res.status < 200 || res.status >= 300) {
     const err = new Error(`CPTEC HTTP ${res.status}`);
     err.details = Buffer.from(res.data || []).toString('utf8').slice(0, 400);

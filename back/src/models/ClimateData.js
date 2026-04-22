@@ -17,6 +17,12 @@ const ClimateData = sequelize.define('ClimateData', {
       key: 'id'
     }
   },
+  // UF do dado climático (ALL não é persistido; agregação é em query)
+  uf: {
+    type: DataTypes.STRING(2),
+    allowNull: true,
+    field: 'uf'
+  },
   // Data da medição
   date: {
     type: DataTypes.DATEONLY,
@@ -163,6 +169,12 @@ const ClimateData = sequelize.define('ClimateData', {
     },
     {
       fields: ['date']
+    },
+    {
+      fields: ['uf']
+    },
+    {
+      fields: ['uf', 'date']
     },
     {
       fields: ['year']

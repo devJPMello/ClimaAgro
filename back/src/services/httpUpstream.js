@@ -37,10 +37,13 @@ async function axiosWithRetries(client, config, { retries = 2, retryDelayMs = 60
       throw err;
     } catch (e) {
       lastErr = e;
+      const msg = String(e.message || '');
       const retryable =
         e.code === 'ECONNABORTED' ||
         e.code === 'ETIMEDOUT' ||
         e.code === 'ECONNRESET' ||
+        /timeout of \d+ms exceeded/i.test(msg) ||
+        msg.includes('socket hang up') ||
         (e.response && (e.response.status === 429 || e.response.status >= 500));
       if (attempt < retries && retryable) {
         await sleep(retryDelayMs * (attempt + 1));

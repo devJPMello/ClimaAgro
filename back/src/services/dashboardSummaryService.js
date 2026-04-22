@@ -35,18 +35,331 @@ function extractStatesFromUiLocal(local) {
     .filter((x) => /^[A-Z]{2}$/.test(x));
 }
 
+/** UFs exibidas no dashboard principal (resumo sem query `state`). Ordem fixa. */
+const DASHBOARD_PRINCIPAL_UFS = ['MT', 'TO', 'GO', 'SP', 'MG'];
+
+function ufFromDerivedAlertLocal(local) {
+  const parts = String(local || '')
+    .split(' - ')
+    .map((x) => x.trim());
+  const last = (parts[parts.length - 1] || '').toUpperCase();
+  return /^[A-Z]{2}$/.test(last) ? last : null;
+}
+
+/** Alerta entra no recorte do dashboard principal (MT, TO, GO, SP, MG)? Usado só para o KPI total. */
+function principalDashboardAlertRelevant(item, principalSet, cityStateToId) {
+  const ufsFromPrefix = extractStatesFromUiLocal(item.local);
+  if (ufsFromPrefix.some((st) => principalSet.has(st))) return true;
+
+  const cities = extractCitiesFromUiLocal(item.local);
+  for (const city of cities) {
+    for (const st of DASHBOARD_PRINCIPAL_UFS) {
+      if (cityStateToId.has(`${normalizeCityKey(city)}|${st}`)) return true;
+    }
+  }
+  if (cities.length > 0) return false;
+
+  const uDer = ufFromDerivedAlertLocal(item.local);
+  if (uDer && principalSet.has(uDer)) return true;
+
+  const localCity = String(item.local || '')
+    .split(' - ')[0]
+    .trim();
+  if (!localCity) return false;
+  for (const st of DASHBOARD_PRINCIPAL_UFS) {
+    if (cityStateToId.has(`${normalizeCityKey(localCity)}|${st}`)) return true;
+  }
+  return false;
+}
+
+/**
+ * Dashboard principal: uma linha por UF prioritária (malha estadual em `geo_data`).
+ */
+async function buildDashboardPrincipalStates({ models }) {
+  const { ClimateData, GeoData, Productivity, OfficialAlert } = models;
+  const principalSet = new Set(DASHBOARD_PRINCIPAL_UFS);
+
+  const stateRows = [];
+  for (const sig of DASHBOARD_PRINCIPAL_UFS) {
+    const row = await GeoData.findOne({
+      where: { category: 'state', isActive: true, state: sig },
+      attributes: ['id', 'name', 'state'],
+      order: [['name', 'ASC']]
+    });
+    if (row) stateRows.push(row);
+  }
+
+  if (stateRows.length === 0) {
+    return {
+      kpis: [
+        { title: 'Temperatura média', value: '—', metric: 'temperature', color: 'bg-primary' },
+        { title: 'Precipitação acumulada (30d)', value: '—', metric: 'precipitation', color: 'bg-chart-2' },
+        { title: 'Alertas (7d)', value: '0', metric: 'alerts', color: 'bg-severity-high' },
+        { title: 'Produtividade média', value: '—', metric: 'productivity', color: 'bg-severity-low' }
+      ],
+      regioes: []
+    };
+  }
+
+  const now = new Date();
+  const d7 = new Date(now);
+  d7.setDate(d7.getDate() - 7);
+  const d14 = new Date(now);
+  d14.setDate(d14.getDate() - 14);
+  const d30 = new Date(now);
+  d30.setDate(d30.getDate() - 30);
+  const dPrev7End = new Date(now);
+  dPrev7End.setDate(dPrev7End.getDate() - 7);
+  const dPrev7Start = new Date(now);
+  dPrev7Start.setDate(dPrev7Start.getDate() - 14);
+
+  const start7 = d7.toISOString().split('T')[0];
+  const start30 = d30.toISOString().split('T')[0];
+  const prevStart = dPrev7Start.toISOString().split('T')[0];
+  const prevEnd = dPrev7End.toISOString().split('T')[0];
+  const since14Str = d14.toISOString().split('T')[0];
+
+  const climateGeoIds = stateRows.map((r) => r.id);
+  const inClimateIds = { geoDataId: { [Op.in]: climateGeoIds } };
+
+  const kpiTempWhere = { date: { [Op.gte]: start7 }, ...inClimateIds };
+  const kpiTempPrevWhere = { date: { [Op.between]: [prevStart, prevEnd] }, ...inClimateIds };
+  const kpiRainWhere = { date: { [Op.gte]: start30 }, ...inClimateIds };
+
+  const [kpiTemp] = await ClimateData.findAll({
+    attributes: [[fn('AVG', col('avg_temperature')), 'v']],
+    where: kpiTempWhere,
+    raw: true
+  });
+  const [kpiTempPrev] = await ClimateData.findAll({
+    attributes: [[fn('AVG', col('avg_temperature')), 'v']],
+    where: kpiTempPrevWhere,
+    raw: true
+  });
+  const [kpiRain] = await ClimateData.findAll({
+    attributes: [[fn('COALESCE', fn('SUM', col('precipitation')), 0), 'v']],
+    where: kpiRainWhere,
+    raw: true
+  });
+
+  const alertClimateBlocks = await Promise.all(
+    DASHBOARD_PRINCIPAL_UFS.map((st) =>
+      alertSvc.loadClimateForAlerts({ ClimateData, GeoData, state: st, days: 7 })
+    )
+  );
+  const alertClimateRows = alertClimateBlocks.flat();
+
+  const officialRows = await alertSvc.loadOfficialAlertsForUi({ OfficialAlert, days: 7 });
+  const liveNormalized = await alertSvc.fetchLiveOfficialProductsForRead(7);
+  const dbExternalIds = new Set(officialRows.map((r) => String(r.externalId || '')));
+  const liveOnlyNormalized = liveNormalized.filter((x) => !dbExternalIds.has(x.externalId));
+
+  const officialFromDb = await alertSvc.buildOfficialAlertUiItems(officialRows, null, null, GeoData);
+  const officialFromLive = await alertSvc.buildOfficialAlertUiItems(
+    alertSvc.normalizedListToOfficialRowLikes(liveOnlyNormalized),
+    null,
+    null,
+    GeoData
+  );
+  const includeCptecQualitative = process.env.ENABLE_CPTEC_QUALITATIVE_ALERTS === 'true';
+  const cptecOutlook = includeCptecQualitative
+    ? alertSvc.deriveCptecOutlookAlertsFromClimateRows(alertClimateRows)
+    : [];
+  const metarWind = alertSvc.deriveMetarWindAlertsFromClimateRows(alertClimateRows);
+  const derivedClimate = alertSvc.deriveAlertsFromClimateRows(alertClimateRows);
+  const allAlertItems = [...officialFromDb, ...officialFromLive, ...cptecOutlook, ...metarWind, ...derivedClimate];
+
+  const muns = await GeoData.findAll({
+    where: { category: 'municipality', isActive: true, state: { [Op.in]: DASHBOARD_PRINCIPAL_UFS } },
+    attributes: ['id', 'name', 'state']
+  });
+  const cityStateToId = new Map();
+  for (const m of muns) {
+    cityStateToId.set(`${normalizeCityKey(m.name)}|${String(m.state).toUpperCase()}`, m.id);
+  }
+
+  const alertMap = Object.fromEntries(stateRows.map((x) => [x.id, 0]));
+  const stateIdByUf = new Map(stateRows.map((s) => [String(s.state).toUpperCase(), s.id]));
+
+  for (const item of allAlertItems) {
+    const ufsFromPrefix = extractStatesFromUiLocal(item.local);
+    if (ufsFromPrefix.length) {
+      for (const st of ufsFromPrefix) {
+        if (principalSet.has(st)) {
+          const sid = stateIdByUf.get(st);
+          if (sid) alertMap[sid] += 1;
+        }
+      }
+      continue;
+    }
+    const cities = extractCitiesFromUiLocal(item.local);
+    if (cities.length) {
+      for (const city of cities) {
+        let matched = false;
+        for (const st of DASHBOARD_PRINCIPAL_UFS) {
+          if (cityStateToId.has(`${normalizeCityKey(city)}|${st}`)) {
+            const sid = stateIdByUf.get(st);
+            if (sid) alertMap[sid] += 1;
+            matched = true;
+            break;
+          }
+        }
+        if (matched) continue;
+      }
+      continue;
+    }
+    const uDer = ufFromDerivedAlertLocal(item.local);
+    if (uDer && principalSet.has(uDer)) {
+      const sid = stateIdByUf.get(uDer);
+      if (sid) alertMap[sid] += 1;
+      continue;
+    }
+    const localCity = String(item.local || '')
+      .split(' - ')[0]
+      .trim();
+    if (localCity) {
+      for (const st of DASHBOARD_PRINCIPAL_UFS) {
+        if (cityStateToId.has(`${normalizeCityKey(localCity)}|${st}`)) {
+          const sid = stateIdByUf.get(st);
+          if (sid) alertMap[sid] += 1;
+          break;
+        }
+      }
+    }
+  }
+
+  const totalAlerts = allAlertItems.filter((item) =>
+    principalDashboardAlertRelevant(item, principalSet, cityStateToId)
+  ).length;
+
+  let latestYear = await Productivity.max('year', { where: { state: { [Op.in]: DASHBOARD_PRINCIPAL_UFS } } });
+  if (latestYear == null) latestYear = await Productivity.max('year');
+  latestYear = latestYear != null ? Number(latestYear) : new Date().getFullYear();
+
+  const [kpiProd] = await Productivity.findAll({
+    attributes: [[fn('AVG', col('productivity')), 'v']],
+    where: { state: { [Op.in]: DASHBOARD_PRINCIPAL_UFS }, year: latestYear },
+    raw: true
+  });
+
+  const tNow = n(kpiTemp?.v, 1);
+  const tPrev = n(kpiTempPrev?.v, 1);
+  let tempChange = null;
+  if (tNow != null && tPrev != null && tPrev !== 0) {
+    tempChange = n(((tNow - tPrev) / tPrev) * 100, 1);
+  }
+  const rainSum = n(kpiRain?.v, 0) ?? 0;
+
+  const geoIdsForClimate = stateRows.map((r) => r.id);
+  const climateByGeoId = new Map();
+  if (geoIdsForClimate.length) {
+    const statRows = await ClimateData.findAll({
+      attributes: [
+        'geoDataId',
+        [fn('AVG', col('avg_temperature')), 'avgT'],
+        [fn('COALESCE', fn('SUM', col('precipitation')), 0), 'sumP'],
+        [fn('AVG', col('humidity')), 'avgH'],
+        [fn('AVG', col('wind_speed')), 'avgW']
+      ],
+      where: {
+        geoDataId: { [Op.in]: geoIdsForClimate },
+        date: { [Op.gte]: since14Str }
+      },
+      group: ['geoDataId'],
+      raw: true
+    });
+    for (const row of statRows) {
+      climateByGeoId.set(String(row.geoDataId), row);
+    }
+  }
+
+  const prodAggRows = await Promise.all(
+    stateRows.map(async (s) => {
+      const [aggProd] = await Productivity.findAll({
+        attributes: [[fn('AVG', col('productivity')), 'v']],
+        where: { state: s.state, year: latestYear },
+        raw: true
+      });
+      return { uf: String(s.state).toUpperCase(), aggProd };
+    })
+  );
+  const prodMap = new Map(prodAggRows.map((x) => [x.uf, x.aggProd]));
+
+  const regioes = [];
+  for (const s of stateRows) {
+    const st = climateByGeoId.get(String(s.id));
+    const t = n(st?.avgT, 1);
+    const p = n(st?.sumP, 1) ?? 0;
+    const h = n(st?.avgH, 1);
+    const w = n(st?.avgW, 1);
+    const ufKey = String(s.state).toUpperCase();
+    const aggProd = prodMap.get(ufKey);
+    const prodN = n(aggProd?.v, 2);
+
+    regioes.push({
+      uf: ufKey,
+      estado: s.name,
+      temperatura: t != null ? `${t}°C` : '—',
+      temperaturaNum: t,
+      umidade: h != null ? `${h}%` : '—',
+      umidadeNum: h,
+      vento: w != null ? `${w} km/h` : '—',
+      ventoNum: w,
+      precipitacao: `${p}mm`,
+      precipitacaoNum: p,
+      produtividade: prodN != null && aggProd?.v != null ? `${n(aggProd.v, 1)} t/ha` : '—',
+      produtividadeNum: prodN,
+      alertas: alertMap[s.id] || 0
+    });
+  }
+
+  const prodAvg = n(kpiProd?.v, 1);
+
+  const kpis = [
+    {
+      title: 'Temperatura média',
+      value: tNow != null ? `${tNow}°C` : '—',
+      change: tempChange != null ? tempChange : undefined,
+      metric: 'temperature',
+      color: 'bg-primary'
+    },
+    {
+      title: 'Precipitação acumulada (30d)',
+      value: `${rainSum}mm`,
+      metric: 'precipitation',
+      color: 'bg-chart-2'
+    },
+    {
+      title: 'Alertas (7d)',
+      value: String(totalAlerts),
+      metric: 'alerts',
+      color: 'bg-severity-high'
+    },
+    {
+      title: 'Produtividade média',
+      value: prodAvg != null ? `${prodAvg} t/ha` : '—',
+      metric: 'productivity',
+      color: 'bg-severity-low'
+    }
+  ];
+
+  return { kpis, regioes };
+}
+
 /**
  * Monta o JSON esperado pelo `DashboardSummaryDto` do new_front.
- * @param {{ models: object, state?: string }} opts — `state`: sigla UF; se omitido, usa `DEFAULT_APP_UF` (padrão TO).
+ * @param {{ models: object, state?: string }} opts — `state`: sigla UF (ex.: TO) para visão municipal daquela UF;
+ *   se omitido, resumo principal com MT, TO, GO, SP e MG (nível estadual).
  */
 async function buildDashboardSummary({ models, state: stateParam }) {
   const { ClimateData, GeoData, Productivity, OfficialAlert } = models;
 
-  const defaultUf = (process.env.DEFAULT_APP_UF || 'TO').toString().trim().toUpperCase().slice(0, 2) || 'TO';
-  const uf =
-    stateParam != null && String(stateParam).trim() !== ''
-      ? String(stateParam).toUpperCase().slice(0, 2)
-      : defaultUf;
+  const trimmed =
+    stateParam != null && String(stateParam).trim() !== '' ? String(stateParam).trim().toUpperCase().slice(0, 2) : '';
+  if (!trimmed) {
+    return buildDashboardPrincipalStates({ models });
+  }
+  const uf = trimmed;
 
   const now = new Date();
   const d7 = new Date(now);

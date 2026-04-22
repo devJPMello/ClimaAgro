@@ -35,17 +35,21 @@ async function syncCptecForStates({ ClimateData, GeoData, transaction }) {
 
   const useMetar = process.env.ENABLE_CPTEC_METAR !== 'false';
 
+  // Não carregar `geom` — polígonos estaduais são pesados e o primeiro SELECT parece “travar”.
   const states = await GeoData.findAll({
     where: { category: 'state', isActive: true },
+    attributes: ['id', 'state', 'name'],
     transaction
   });
 
   const results = { upserted: 0, metarMerged: 0, errors: [] };
   const today = brDateOnly();
+  console.log(`[sync:climate] CPTEC: ${states.length} UF(s)…`);
 
   for (const g of states) {
     const uf = (g.state || '').toUpperCase();
     if (!uf) continue;
+    console.log(`[sync:climate] CPTEC → ${uf}`);
     const cityQ = STATE_CAPITAL[uf];
     const icao = STATE_ICAO[uf];
     if (!cityQ) {
@@ -81,6 +85,7 @@ async function syncCptecForStates({ ClimateData, GeoData, transaction }) {
         const [row] = await ClimateData.findOrCreate({
           where: { geoDataId: g.id, date: dateStr },
           defaults: {
+            uf,
             year: y,
             month: m,
             day: d,
@@ -105,6 +110,7 @@ async function syncCptecForStates({ ClimateData, GeoData, transaction }) {
         const mergedMd = mergeMetadata(row.metadata, md);
         await row.update(
           {
+            uf,
             avgTemperature: avg,
             maxTemperature: f.maxima,
             minTemperature: f.minima,
@@ -221,6 +227,7 @@ async function syncCptecForTocantinsMunicipalities({ ClimateData, GeoData, trans
         const [row] = await ClimateData.findOrCreate({
           where: { geoDataId: g.id, date: dateStr },
           defaults: {
+            uf,
             year: y,
             month: m,
             day: d,
@@ -245,6 +252,7 @@ async function syncCptecForTocantinsMunicipalities({ ClimateData, GeoData, trans
         const mergedMd = mergeMetadata(row.metadata, md);
         await row.update(
           {
+            uf,
             avgTemperature: avg,
             maxTemperature: f.maxima,
             minTemperature: f.minima,
@@ -397,6 +405,7 @@ async function syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, t
         const [row] = await ClimateData.findOrCreate({
           where: { geoDataId: g.id, date: r.date },
           defaults: {
+            uf: 'TO',
             year: y,
             month: m,
             day: d,
@@ -422,6 +431,7 @@ async function syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, t
         // eslint-disable-next-line no-await-in-loop
         await row.update(
           {
+            uf: 'TO',
             avgTemperature: avgT ?? row.avgTemperature,
             maxTemperature: r.maxTemperature ?? row.maxTemperature,
             minTemperature: r.minTemperature ?? row.minTemperature,
@@ -447,6 +457,171 @@ async function syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, t
 
     // eslint-disable-next-line no-await-in-loop
     await sleep(interCityDelayMs);
+  }
+
+  return results;
+}
+
+/**
+ * Open-Meteo diário por UF (geometria estadual em geo_data/category=state).
+ * Usa centroide do polígono estadual para obter uma série representativa por estado.
+ */
+async function syncOpenMeteoForStates({ sequelize, ClimateData, GeoData, transaction }) {
+  if (process.env.ENABLE_OPEN_METEO_SYNC === 'false') {
+    return { skipped: true, reason: 'ENABLE_OPEN_METEO_SYNC=false' };
+  }
+
+  const daysBack = Number(process.env.OPEN_METEO_PAST_DAYS || 7);
+  const daysForward = Number(process.env.OPEN_METEO_FORECAST_DAYS || 7);
+  const interStateDelayMs = Number(process.env.OPEN_METEO_SYNC_DELAY_MS || 120);
+  const results = {
+    upserted: 0,
+    skippedStates: 0,
+    statesProcessed: 0,
+    errors: [],
+    scope: 'brasil'
+  };
+
+  const states = await GeoData.findAll({
+    where: { category: 'state', isActive: true },
+    order: [['state', 'ASC']],
+    attributes: ['id', 'state', 'name'],
+    transaction
+  });
+
+  console.log(`[sync:climate] Open-Meteo: ${states.length} UF(s), centroide via SQL…`);
+
+  for (const g of states) {
+    const uf = String(g.state || '').trim().toUpperCase().slice(0, 2);
+    if (!uf) {
+      results.skippedStates += 1;
+      continue;
+    }
+
+    console.log(`[sync:climate] Open-Meteo → ${uf}`);
+
+    let lat = null;
+    let lon = null;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const [rows] = await sequelize.query(
+        `
+        SELECT
+          ST_Y(ST_Centroid(geom::geometry))::float AS lat,
+          ST_X(ST_Centroid(geom::geometry))::float AS lon
+        FROM geo_data
+        WHERE id = :geoDataId
+        LIMIT 1
+        `,
+        { replacements: { geoDataId: g.id }, transaction }
+      );
+      lat = Number(rows?.[0]?.lat);
+      lon = Number(rows?.[0]?.lon);
+    } catch (e) {
+      results.errors.push({ state: uf, message: `Falha ao calcular centroide: ${e.message || String(e)}` });
+    }
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      results.skippedStates += 1;
+      results.errors.push({ state: uf, message: 'Sem coordenadas válidas para consulta Open-Meteo.' });
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(interStateDelayMs);
+      continue;
+    }
+
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const payload = await openMeteo.fetchForecastDailyByCoords({
+        lat,
+        lon,
+        daysBack,
+        daysForward
+      });
+      const rows = openMeteo.dailyToRows(payload);
+      if (!rows.length) {
+        results.skippedStates += 1;
+        results.errors.push({ state: uf, message: 'Open-Meteo retornou série vazia.' });
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(interStateDelayMs);
+        continue;
+      }
+
+      results.statesProcessed += 1;
+      for (const r of rows) {
+        const y = parseInt(String(r.date).slice(0, 4), 10);
+        const m = parseInt(String(r.date).slice(5, 7), 10);
+        const d = parseInt(String(r.date).slice(8, 10), 10);
+        const avgT =
+          r.avgTemperature != null
+            ? r.avgTemperature
+            : r.maxTemperature != null && r.minTemperature != null
+              ? (r.maxTemperature + r.minTemperature) / 2
+              : r.maxTemperature ?? r.minTemperature;
+        const md = {
+          openMeteo: {
+            latitude: lat,
+            longitude: lon,
+            timezone: payload.timezone || process.env.OPEN_METEO_TIMEZONE || 'America/Sao_Paulo',
+            model: payload.generationtime_ms != null ? 'open-meteo' : 'open-meteo-forecast',
+            scope: 'state'
+          }
+        };
+
+        // eslint-disable-next-line no-await-in-loop
+        const [row] = await ClimateData.findOrCreate({
+          where: { geoDataId: g.id, date: r.date },
+          defaults: {
+            uf,
+            year: y,
+            month: m,
+            day: d,
+            avgTemperature: avgT,
+            maxTemperature: r.maxTemperature,
+            minTemperature: r.minTemperature,
+            precipitation: r.precipitation,
+            humidity: r.humidity,
+            windSpeed: r.windSpeed,
+            windDirection: r.windDirection,
+            atmosphericPressure: r.atmosphericPressure,
+            dataSource: 'outros',
+            weatherStation: `Open-Meteo ${uf}`,
+            stationCode: `OPENMETEO-UF:${uf}`,
+            dataQuality: 85,
+            status: 'preliminar',
+            metadata: md
+          },
+          transaction
+        });
+
+        const mergedMd = mergeMetadata(row.metadata, md);
+        // eslint-disable-next-line no-await-in-loop
+        await row.update(
+          {
+            uf,
+            avgTemperature: avgT ?? row.avgTemperature,
+            maxTemperature: r.maxTemperature ?? row.maxTemperature,
+            minTemperature: r.minTemperature ?? row.minTemperature,
+            precipitation: r.precipitation ?? row.precipitation,
+            humidity: r.humidity ?? row.humidity,
+            windSpeed: r.windSpeed ?? row.windSpeed,
+            windDirection: r.windDirection ?? row.windDirection,
+            atmosphericPressure: r.atmosphericPressure ?? row.atmosphericPressure,
+            dataSource: 'outros',
+            weatherStation: `Open-Meteo ${uf}`,
+            stationCode: `OPENMETEO-UF:${uf}`,
+            metadata: mergedMd,
+            status: 'preliminar'
+          },
+          { transaction }
+        );
+        results.upserted += 1;
+      }
+    } catch (e) {
+      results.errors.push({ state: uf, message: e.message || String(e) });
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    await sleep(interStateDelayMs);
   }
 
   return results;
@@ -571,6 +746,7 @@ async function syncInmetFromConfiguredUrl({ sequelize, ClimateData, GeoData, tra
       const [row, created] = await ClimateData.findOrCreate({
         where: { geoDataId: geoId, date: n.date },
         defaults: {
+          uf: null,
           year: y,
           month: m,
           day: d,
@@ -592,6 +768,7 @@ async function syncInmetFromConfiguredUrl({ sequelize, ClimateData, GeoData, tra
       if (!created) {
         await row.update(
           {
+            uf: row.uf || null,
             avgTemperature: avgT ?? row.avgTemperature,
             maxTemperature: n.maxTemperature ?? row.maxTemperature,
             minTemperature: n.minTemperature ?? row.minTemperature,
@@ -615,25 +792,27 @@ async function syncInmetFromConfiguredUrl({ sequelize, ClimateData, GeoData, tra
   return results;
 }
 
+/**
+ * Sincronização sem transação única envolvendo HTTP externo.
+ * Uma transação longa (CPTEC + Open-Meteo por UF) deixa a conexão idle-in-transaction
+ * e provedores como Neon encerram o cliente — rollback falha com "not queryable".
+ */
 async function runClimateSync({ sequelize, models }) {
   const { ClimateData, GeoData, OfficialAlert } = models;
-  const t = await sequelize.transaction();
   try {
-    const scope = (process.env.CLIMATE_SYNC_SCOPE || 'tocantins').toLowerCase().trim();
+    const scope = (process.env.CLIMATE_SYNC_SCOPE || 'brasil').toLowerCase().trim();
+    console.log(`[sync:climate] Escopo: ${scope}`);
     const cptecRes =
       scope === 'brasil'
-        ? await syncCptecForStates({ ClimateData, GeoData, transaction: t })
-        : await syncCptecForTocantinsMunicipalities({ ClimateData, GeoData, transaction: t });
-    const openMeteoRes = await syncOpenMeteoForTocantinsMunicipalities({
-      ClimateData,
-      GeoData,
-      transaction: t
-    });
-    const alertRes = await syncOfficialAlertsFromJson({ OfficialAlert, transaction: t });
-    await t.commit();
+        ? await syncCptecForStates({ ClimateData, GeoData, transaction: undefined })
+        : await syncCptecForTocantinsMunicipalities({ ClimateData, GeoData, transaction: undefined });
+    const openMeteoRes =
+      scope === 'brasil'
+        ? await syncOpenMeteoForStates({ sequelize, ClimateData, GeoData, transaction: undefined })
+        : await syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, transaction: undefined });
+    const alertRes = await syncOfficialAlertsFromJson({ OfficialAlert, transaction: undefined });
     return { ok: true, cptec: cptecRes, openMeteo: openMeteoRes, officialAlerts: alertRes };
   } catch (e) {
-    await t.rollback();
     return { ok: false, error: e.message || String(e) };
   }
 }
@@ -642,6 +821,7 @@ module.exports = {
   runClimateSync,
   syncCptecForStates,
   syncCptecForTocantinsMunicipalities,
+  syncOpenMeteoForStates,
   syncOpenMeteoForTocantinsMunicipalities,
   syncInmetFromConfiguredUrl,
   syncOfficialAlertsFromJson
