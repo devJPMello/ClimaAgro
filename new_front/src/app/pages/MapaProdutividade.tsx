@@ -1,44 +1,71 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardBody, CardHeader, CardTitle } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { MapPin } from 'lucide-react';
 import { BrazilMap } from '../components/maps/BrazilMap';
 import { MapMetricLegend } from '../components/maps/MapMetricLegend';
-import { IbgeMunicipiosChoroplethMap } from '../components/maps/IbgeMunicipiosChoroplethMap';
-import { buildProductivityByIbgeCodarea, buildValuesByUfFromProductivityRows } from '../components/maps/brazilMapConfig';
-import { getDashboardSummary } from '../../lib/api/climateApi';
+import { buildValuesByUfFromProductivityRows } from '../components/maps/brazilMapConfig';
+import { listClimateUfs } from '../../lib/api/climateApi';
 import {
   listAllProductivityForYear,
+  listProductivityMonthYears,
   listProductivityProductLabels,
-  listProductivityRecords,
 } from '../../lib/api/productivityApi';
-import { buildProductivityCropSelectOptions, getProductivitySeasonOptions } from '../../lib/filters/appFilters';
+import { buildProductivityCropSelectOptions } from '../../lib/filters/appFilters';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { EmptyState } from '../components/ui/EmptyState';
 
-type Indicador = { label: string; valor: string; variacao?: string; positivo?: boolean; descricao?: string };
+type Indicador = { label: string; valor: string; descricao?: string };
 
 type CropSelectOption = { value: string; label: string };
+type MonthYearOption = { value: string; label: string };
 
-const EMPTY_MUNICIPAL_CHOROPLETH = {
-  valuesByCodarea: {} as Record<string, number>,
-  nameByCodarea: {} as Record<string, string>,
-};
+function buildMonthYearOptions(monthsBack = 24): MonthYearOption[] {
+  const fmt = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' });
+  const out: MonthYearOption[] = [];
+  const now = new Date();
+  for (let i = 0; i < monthsBack; i += 1) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    out.push({
+      value: `${y}-${m}`,
+      label: fmt.format(d).replace(/^\w/, (c) => c.toUpperCase()),
+    });
+  }
+  return out;
+}
+
+function monthYearLabel(ym: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym);
+  if (!m) return ym;
+  const y = Number(m[1]);
+  const mm = Number(m[2]);
+  const d = new Date(y, Math.max(0, mm - 1), 1);
+  return new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' })
+    .format(d)
+    .replace(/^\w/, (c) => c.toUpperCase());
+}
 
 export function MapaProdutividade() {
-  const seasonOptions = useMemo(() => getProductivitySeasonOptions(), []);
+  const fallbackMesAnoOptions = useMemo(() => buildMonthYearOptions(48), []);
+  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([
+    { value: 'ALL', label: 'Brasil (todos)' },
+  ]);
+  const [mesAnoOptions, setMesAnoOptions] = useState<MonthYearOption[]>(fallbackMesAnoOptions);
   const cropOptionsRes = useAsyncResource<CropSelectOption[]>(async () => {
-    const res = await listProductivityProductLabels({ state: 'TO' });
+    const res = await listProductivityProductLabels();
     const fromDb = res.success && Array.isArray(res.data) ? res.data : [];
     return buildProductivityCropSelectOptions(fromDb);
   }, []);
 
   const [cultura, setCultura] = usePersistedState<string>('climaagro.pref.mapaProdutividade.cultura', '');
-  const [safra, setSafra] = usePersistedState<string>(
-    'climaagro.pref.mapaProdutividade.safra',
-    seasonOptions.find((o) => o.value === '2024/25')?.value ?? seasonOptions[0]?.value ?? '2024/25'
+  const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaProdutividade.uf', 'ALL');
+  const [mesAno, setMesAno] = usePersistedState<string>(
+    'climaagro.pref.mapaProdutividade.mesAno',
+    fallbackMesAnoOptions[0]?.value ?? ''
   );
 
   useEffect(() => {
@@ -47,30 +74,63 @@ export function MapaProdutividade() {
     if (!opts.some((o) => o.value === cultura)) setCultura('');
   }, [cropOptionsRes.data, cultura, setCultura]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await listClimateUfs();
+        if (!cancelled && data.length) setUfOptions(data);
+      } catch {
+        // Mantém fallback local no select
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await listProductivityMonthYears();
+        const fromDb = res.success && Array.isArray(res.data) ? res.data.filter((x) => /^\d{4}-\d{2}$/.test(x)) : [];
+        if (cancelled || !fromDb.length) return;
+        const opts = fromDb.map((v) => ({ value: v, label: monthYearLabel(v) }));
+        setMesAnoOptions(opts);
+        if (!opts.some((o) => o.value === mesAno)) {
+          setMesAno(opts[0].value);
+        }
+      } catch {
+        // fallback local já definido
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mesAno, setMesAno]);
+
   const productLabelForApi = useMemo(() => cultura.trim(), [cultura]);
 
   const { status, data, error, reload } = useAsyncResource(
     async () => {
-      const summary = await getDashboardSummary({ state: 'TO' });
-      const seasonTrim = safra.trim();
-      const hasCropSeason = Boolean(productLabelForApi) && seasonTrim.length > 0;
-      let items: Awaited<ReturnType<typeof listAllProductivityForYear>>;
-      if (hasCropSeason) {
-        items = await listAllProductivityForYear({
-          state: 'TO',
-          season: seasonTrim,
-          productLabel: productLabelForApi,
-        });
-      } else {
-        const productivity = await listProductivityRecords({
-          state: 'TO',
-          season: seasonTrim || undefined,
-          limit: 100,
-        });
-        items = productivity.success && Array.isArray(productivity.data) ? productivity.data : [];
-      }
-      const valuesByUfProdutividade = hasCropSeason ? buildValuesByUfFromProductivityRows(items) : undefined;
-      const productivityMunicipioMap = hasCropSeason ? buildProductivityByIbgeCodarea(items) : null;
+      const mesAnoTrim = mesAno.trim();
+      const targetUfs =
+        uf === 'ALL'
+          ? ufOptions.map((o) => o.value).filter((v) => /^[A-Z]{2}$/.test(v))
+          : [/^[A-Z]{2}$/.test(uf) ? uf : null].filter(Boolean) as string[];
+
+      const responses = await Promise.all(
+        targetUfs.map((stateUf) =>
+          listAllProductivityForYear({
+            state: stateUf,
+            mesAno: mesAnoTrim || undefined,
+            productLabel: productLabelForApi || undefined,
+          })
+        )
+      );
+      const items = responses.flat();
+      const valuesByUfProdutividade = buildValuesByUfFromProductivityRows(items);
       const nums = items.map((x) => Number(x.productivity)).filter((x) => Number.isFinite(x));
       const numsAboveZero = nums.filter((x) => x > 0);
       const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
@@ -78,13 +138,13 @@ export function MapaProdutividade() {
       const minAboveZero = numsAboveZero.length ? Math.min(...numsAboveZero) : null;
       const zeroProdCount = items.filter((x) => Number(x.productivity) === 0).length;
       const indicators: Indicador[] =
-        cultura === ''
+        productLabelForApi === ''
           ? []
           : [
               {
                 label: 'Produtividade média',
                 valor: avg != null ? `${avg.toFixed(2)} t/ha` : '—',
-                descricao: avg == null ? 'Sem registros na tabela productivity para esta cultura/safra.' : undefined,
+                descricao: avg == null ? 'Sem registros na tabela productivity para esta cultura/mês-ano.' : undefined,
               },
               { label: 'Maior produtividade', valor: max != null ? `${max.toFixed(2)} t/ha` : '—' },
               {
@@ -99,21 +159,20 @@ export function MapaProdutividade() {
               ...(zeroProdCount > 0
                 ? [
                     {
-                      label: 'Municípios com 0 t/ha',
+                      label: 'Registros com 0 t/ha',
                       valor: String(zeroProdCount),
                     },
                   ]
                 : []),
             ];
       return {
-        summary,
         indicators,
         mapRevision: Date.now(),
         valuesByUfProdutividade,
-        productivityMunicipioMap,
+        itemsCount: items.length,
       };
     },
-    [productLabelForApi, safra]
+    [productLabelForApi, mesAno, uf, ufOptions]
   );
 
   return (
@@ -123,7 +182,7 @@ export function MapaProdutividade() {
           Mapa de Produtividade
         </h1>
         <p className="text-muted-foreground">
-          Análise geoespacial de produtividade agrícola por região no Tocantins.
+          Análise geoespacial de produtividade agrícola por estado (UF).
         </p>
       </div>
 
@@ -132,18 +191,8 @@ export function MapaProdutividade() {
         data={data}
         error={error}
         onRetry={reload}
-        isEmpty={(payload) => payload.summary.regioes.length === 0}
-        empty={
-          <Card>
-            <CardBody>
-              <EmptyState
-                icon={MapPin}
-                title="Sem dados de produtividade"
-                description="Não há registros de produtividade disponíveis para os filtros selecionados."
-              />
-            </CardBody>
-          </Card>
-        }
+        isEmpty={() => false}
+        empty={<></>}
       >
         {(payload) => (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -173,7 +222,8 @@ export function MapaProdutividade() {
                     disabled={cropOptionsRes.status === 'loading'}
                     error={cropOptionsRes.error ?? undefined}
                   />
-                  <Select label="Safra" value={safra} onChange={(e) => setSafra(e.target.value)} options={seasonOptions} />
+                  <Select label="Estado (UF)" value={uf} onChange={(e) => setUf(e.target.value)} options={ufOptions} />
+                  <Select label="Mês-Ano" value={mesAno} onChange={(e) => setMesAno(e.target.value)} options={mesAnoOptions} />
                   <div className="pt-4 border-t border-border">
                     <MapMetricLegend metric="produtividade" />
                   </div>
@@ -184,44 +234,33 @@ export function MapaProdutividade() {
             <div className="lg:col-span-3 space-y-4">
               <Card className="relative">
                 <CardBody className="p-0">
-                  {!productLabelForApi ? (
-                    <IbgeMunicipiosChoroplethMap
-                      metric="produtividade"
-                      valuesByCodarea={EMPTY_MUNICIPAL_CHOROPLETH.valuesByCodarea}
-                      nameByCodarea={EMPTY_MUNICIPAL_CHOROPLETH.nameByCodarea}
-                      dataRevision={payload.mapRevision}
-                    />
-                  ) : payload.productivityMunicipioMap &&
-                    Object.keys(payload.productivityMunicipioMap.valuesByCodarea).length > 0 ? (
-                    <IbgeMunicipiosChoroplethMap
-                      metric="produtividade"
-                      valuesByCodarea={payload.productivityMunicipioMap.valuesByCodarea}
-                      nameByCodarea={payload.productivityMunicipioMap.nameByCodarea}
-                      dataRevision={payload.mapRevision}
-                    />
-                  ) : (
-                    <BrazilMap
-                      metric="produtividade"
-                      valuesByUf={payload.valuesByUfProdutividade}
-                      dataRevision={payload.mapRevision}
-                    />
-                  )}
+                  <BrazilMap
+                    metric="produtividade"
+                    valuesByUf={payload.valuesByUfProdutividade}
+                    dataRevision={payload.mapRevision}
+                  />
                 </CardBody>
               </Card>
 
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <MapPin className="w-4 h-4" />
                 <span>
-                  {!productLabelForApi ? (
-                    'Mapa do Tocantins com divisão municipal (IBGE). Selecione uma cultura e uma safra para colorir por produtividade (t/ha).'
-                  ) : payload.productivityMunicipioMap &&
-                    Object.keys(payload.productivityMunicipioMap.valuesByCodarea).length > 0 ? (
-                    'Mapa municipal: cada polígono é um município do Tocantins (IBGE); a cor segue a legenda (t/ha).'
-                  ) : (
-                    'Não foi possível casar municípios pela malha IBGE (falta de código IBGE nos registros); mapa por UF quando houver média.'
-                  )}
+                  Mapa estadual: agregação por UF para o mês-ano e cultura selecionados. Quando o filtro de estado está em
+                  Brasil, todas as UFs com dado são coloridas.
                 </span>
               </div>
+
+              {payload.itemsCount === 0 && (
+                <Card>
+                  <CardBody>
+                    <EmptyState
+                      icon={MapPin}
+                      title="Sem dados de produtividade"
+                      description="Não há registros para a cultura, estado e mês-ano escolhidos. Altere os filtros à esquerda."
+                    />
+                  </CardBody>
+                </Card>
+              )}
 
               {cultura && (
                 <Card>
@@ -235,9 +274,6 @@ export function MapaProdutividade() {
                         <p className="text-lg" style={{ fontFamily: 'var(--font-serif)' }}>
                           {ind.valor}
                         </p>
-                        {ind.variacao && (
-                          <p className={`text-sm ${ind.positivo ? 'text-severity-low' : 'text-destructive'}`}>{ind.variacao}</p>
-                        )}
                         {ind.descricao && <p className="text-xs text-muted-foreground">{ind.descricao}</p>}
                       </div>
                     ))}
