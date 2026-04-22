@@ -4,12 +4,18 @@ ETL — Tabela 1612 (SIDRA / IBGE) — Produção agrícola municipal (lavouras 
 Extrai as folhas principais do Excel exportado pelo IBGE, normaliza símbolos oficiais,
 converte valores numéricos e devolve um conjunto *tidy* (formato longo).
 
+Suporta:
+- Export completo SIDRA (nomes longos, ex. «Quantidade produzida», «Valor da produção»).
+- `TCC-IBGE.xlsx` (layout enxuto: Área plantada/colhida, «Produção (Toneladas)», Rendimento médio;
+  sem folha de valor da produção — essa variável é omitida).
+
 Requisitos: ver `requirements.txt` na mesma pasta.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import gzip
 import json
 import os
@@ -25,19 +31,227 @@ import pandas as pd
 # Configuração — folhas principais (exclui folhas de % e "Notas")
 # ---------------------------------------------------------------------------
 
-SHEET_FILTERS = [
-    # (rótulo da coluna Variavel — minúsculas padronizadas, predicado sobre o nome da folha)
-    ("area plantada (hectares)", lambda n: _sheet_match(n, "área plantada", "hectares")),
-    ("area colhida (hectares)", lambda n: _sheet_match(n, "área colhida", "hectares")),
+# (rótulo Variavel no CSV tidy, predicado(nome_folha), obrigatória?)
+VAR_PLANTED_KEY = "area plantada (hectares)"
+VAR_HARVESTED_KEY = "area colhida (hectares)"
+VAR_QTY_KEY = "quantidade produzida (toneladas)"
+VAR_YIELD_KEY = "rendimento medio da producao (quilogramas por hectare)"
+MONTH_NAME_TO_NUM = {
+    "janeiro": "01",
+    "fevereiro": "02",
+    "marco": "03",
+    "abril": "04",
+    "maio": "05",
+    "junho": "06",
+    "julho": "07",
+    "agosto": "08",
+    "setembro": "09",
+    "outubro": "10",
+    "novembro": "11",
+    "dezembro": "12",
+}
+
+# Código IBGE da UF (2 dígitos no início do código de município de 7 dígitos) → sigla
+IBGE_UF_NUM_TO_SIGLA: dict[int, str] = {
+    11: "RO",
+    12: "AC",
+    13: "AM",
+    14: "RR",
+    15: "PA",
+    16: "AP",
+    17: "TO",
+    21: "MA",
+    22: "PI",
+    23: "CE",
+    24: "RN",
+    25: "PB",
+    26: "PE",
+    27: "AL",
+    28: "SE",
+    29: "BA",
+    31: "MG",
+    32: "ES",
+    33: "RJ",
+    35: "SP",
+    41: "PR",
+    42: "SC",
+    43: "RS",
+    50: "MS",
+    51: "MT",
+    52: "GO",
+    53: "DF",
+}
+
+UF_SIGLA_TO_NOME_PT: dict[str, str] = {
+    "RO": "Rondônia",
+    "AC": "Acre",
+    "AM": "Amazonas",
+    "RR": "Roraima",
+    "PA": "Pará",
+    "AP": "Amapá",
+    "TO": "Tocantins",
+    "MA": "Maranhão",
+    "PI": "Piauí",
+    "CE": "Ceará",
+    "RN": "Rio Grande do Norte",
+    "PB": "Paraíba",
+    "PE": "Pernambuco",
+    "AL": "Alagoas",
+    "SE": "Sergipe",
+    "BA": "Bahia",
+    "MG": "Minas Gerais",
+    "ES": "Espírito Santo",
+    "RJ": "Rio de Janeiro",
+    "SP": "São Paulo",
+    "PR": "Paraná",
+    "SC": "Santa Catarina",
+    "RS": "Rio Grande do Sul",
+    "MS": "Mato Grosso do Sul",
+    "MT": "Mato Grosso",
+    "GO": "Goiás",
+    "DF": "Distrito Federal",
+}
+
+
+def _sigla_from_ibge_uf_id(uf_id: int) -> str | None:
+    return IBGE_UF_NUM_TO_SIGLA.get(int(uf_id))
+
+
+def infer_uf_sigla_from_territorio_cell(
+    raw: object,
+    *,
+    default_uf_id: int | None,
+    default_uf_nome: str,
+) -> str | None:
+    """Infere sigla UF a partir de código IBGE (7 dígitos), linha UF (2 dígitos) ou nome; fallback UF do ficheiro."""
+    cod = _municipio_codigo_from_cell(raw)
+    if cod:
+        prefix = int(cod[:2])
+        return IBGE_UF_NUM_TO_SIGLA.get(prefix)
+
+    k = _normalize_geo_key(raw)
+    if k.isdigit() and len(k) == 2:
+        sig = IBGE_UF_NUM_TO_SIGLA.get(int(k))
+        if sig:
+            return sig
+
+    nome = clean_municipio_label(raw)
+    if nome and default_uf_nome.strip() and nome.strip().lower() == default_uf_nome.strip().lower():
+        if default_uf_id is not None:
+            return _sigla_from_ibge_uf_id(int(default_uf_id))
+
+    for sigla, nome_of in UF_SIGLA_TO_NOME_PT.items():
+        if nome and nome.strip().lower() == nome_of.lower():
+            return sigla
+
+    if default_uf_id is not None:
+        return _sigla_from_ibge_uf_id(int(default_uf_id))
+
+    return None
+
+
+def aggregate_sidra_long_to_uf_level(
+    df: pd.DataFrame,
+    *,
+    default_uf_id: int | None,
+    default_uf_nome: str,
+) -> pd.DataFrame:
+    """
+    Agrega linhas municipais para uma linha por (Ano, UF, Produto, Variável).
+    Áreas, quantidades e valores: soma. Rendimento médio (kg/ha): recalculado a partir dos totais
+    (produção em t × 1000 / área em ha), coerente com a tabela SIDRA agregada.
+    """
+    if df.empty:
+        return df
+
+    work = df.copy()
+    work["_uf"] = work["Município"].map(
+        lambda m: infer_uf_sigla_from_territorio_cell(m, default_uf_id=default_uf_id, default_uf_nome=default_uf_nome)
+    )
+    work = work.dropna(subset=["_uf"])
+    if work.empty:
+        return pd.DataFrame(columns=["Ano", "Periodo", "Município", "Produto_Agrícola", "Variavel", "Valor"])
+
+    ext = work[work["Variavel"] != VAR_YIELD_KEY].copy()
+    summed = ext.groupby(["Ano", "Periodo", "_uf", "Produto_Agrícola", "Variavel"], as_index=False)["Valor"].sum()
+
+    out_rows: list[dict] = []
+    for (ano, periodo, uf_sigla, produto), sub in summed.groupby(["Ano", "Periodo", "_uf", "Produto_Agrícola"], sort=False):
+        vm: dict[str, float] = {}
+        for _, r in sub.iterrows():
+            vk = str(r["Variavel"]).strip()
+            v = r["Valor"]
+            if pd.notna(v):
+                vm[vk] = float(v)
+        nome_estado = UF_SIGLA_TO_NOME_PT.get(str(uf_sigla), str(uf_sigla))
+        ano_i = int(float(ano)) if pd.notna(ano) else ano
+        for vk, val in vm.items():
+            out_rows.append(
+                {
+                    "Ano": ano_i,
+                    "Periodo": periodo,
+                    "Município": nome_estado,
+                    "Produto_Agrícola": produto,
+                    "Variavel": vk,
+                    "Valor": val,
+                }
+            )
+        qty = vm.get(VAR_QTY_KEY)
+        pl = vm.get(VAR_PLANTED_KEY)
+        hc = vm.get(VAR_HARVESTED_KEY)
+        area = None
+        if pl is not None and pl > 0:
+            area = pl
+        elif hc is not None and hc > 0:
+            area = hc
+        elif pl is not None:
+            area = pl
+        elif hc is not None:
+            area = hc
+        if qty is not None and area is not None and area > 0 and qty >= 0:
+            y_kg_ha = (qty * 1000.0) / float(area)
+            out_rows.append(
+                {
+                    "Ano": ano_i,
+                    "Periodo": periodo,
+                    "Município": nome_estado,
+                    "Produto_Agrícola": produto,
+                    "Variavel": VAR_YIELD_KEY,
+                    "Valor": y_kg_ha,
+                }
+            )
+
+    out = pd.DataFrame(out_rows)
+    if out.empty:
+        return pd.DataFrame(columns=["Ano", "Periodo", "Município", "Produto_Agrícola", "Variavel", "Valor"])
+    return out
+
+
+SHEET_SPECS: list[tuple[str, Callable[[str], bool], bool]] = [
+    ("area plantada (hectares)", lambda n: _sheet_match(n, "área plantada", "hectares"), True),
+    ("area colhida (hectares)", lambda n: _sheet_match(n, "área colhida", "hectares"), True),
     (
         "quantidade produzida (toneladas)",
-        lambda n: _sheet_main_var_no_percent(n, "quantidade produzida"),
+        lambda n: _sheet_main_var_no_percent(n, "quantidade produzida")
+        or (
+            "percentual" not in n.casefold()
+            and "toneladas" in n.casefold()
+            and ("produção" in n.casefold() or "producao" in n.casefold())
+        ),
+        True,
     ),
     (
         "rendimento medio da producao (quilogramas por hectare)",
-        lambda n: _sheet_main_var_no_percent(n, "rendimento médio"),
+        lambda n: _sheet_main_var_no_percent(n, "rendimento médio")
+        or _sheet_main_var_no_percent(n, "rendimento medio")
+        or (
+            "percentual" not in n.casefold()
+            and "rendimento" in n.casefold()
+            and ("quilograma" in n.casefold() or "quilo" in n.casefold())
+        ),
+        True,
     ),
-    ("valor da producao (mil reais)", lambda n: _sheet_match(n, "valor da produção", "mil reais")),
+    ("valor da producao (mil reais)", lambda n: _sheet_match(n, "valor da produção", "mil reais"), False),
 ]
 
 
@@ -57,15 +271,17 @@ def _sheet_main_var_no_percent(name: str, phrase: str) -> bool:
 
 
 def _resolve_sheets(xl: pd.ExcelFile) -> list[tuple[str, str]]:
-    """Devolve lista (nome_folha_excel, variavel_normalizada)."""
+    """Devolve lista (nome_folha_excel, variavel_normalizada). Folhas opcionais ausentes são ignoradas."""
     out: list[tuple[str, str]] = []
-    for variavel_label, pred in SHEET_FILTERS:
+    for variavel_label, pred, required in SHEET_SPECS:
         hit = next((s for s in xl.sheet_names if pred(s)), None)
         if hit is None:
-            raise ValueError(
-                f"Não foi encontrada folha compatível com variável '{variavel_label}'. "
-                f"Folhas disponíveis: {xl.sheet_names}"
-            )
+            if required:
+                raise ValueError(
+                    f"Não foi encontrada folha compatível com variável '{variavel_label}'. "
+                    f"Folhas disponíveis: {xl.sheet_names}"
+                )
+            continue
         out.append((hit, variavel_label))
     return out
 
@@ -225,7 +441,7 @@ def wide_to_long(
     Converte tabela larga para longo: Ano, Município, Produto_Agrícola, Variavel, Valor.
     """
     if df.empty:
-        return pd.DataFrame(columns=["Ano", "Município", "Produto_Agrícola", "Variavel", "Valor"])
+        return pd.DataFrame(columns=["Ano", "Periodo", "Município", "Produto_Agrícola", "Variavel", "Valor"])
 
     # Alinhar metadados de colunas à largura real do DataFrame (IBGE vs pandas)
     n = min(len(df.columns), len(year_row), len(prod_row))
@@ -245,18 +461,54 @@ def wide_to_long(
     col_index = {name: i for i, name in enumerate(df.columns)}
     melted["_col_idx"] = melted["_prod_header"].map(col_index)
 
+    def _parse_year_and_period_from_cell(y: object) -> tuple[float, str | None]:
+        if y is None or (isinstance(y, float) and np.isnan(y)):
+            return np.nan, None
+        ys = str(y).strip()
+        if ys.isdigit() and len(ys) == 4:
+            return float(ys), None
+        ys_norm = (
+            ys.casefold()
+            .replace("ç", "c")
+            .replace("á", "a")
+            .replace("à", "a")
+            .replace("ã", "a")
+            .replace("â", "a")
+            .replace("é", "e")
+            .replace("ê", "e")
+            .replace("í", "i")
+            .replace("ó", "o")
+            .replace("ô", "o")
+            .replace("õ", "o")
+            .replace("ú", "u")
+        )
+        m_month = re.search(r"(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+(19\d{2}|20\d{2})", ys_norm)
+        if m_month:
+            mm = MONTH_NAME_TO_NUM.get(m_month.group(1))
+            yy = m_month.group(2)
+            if mm:
+                return float(yy), f"{yy}-{mm}"
+        m2 = re.search(r"(19\d{2}|20\d{2})", ys)
+        if m2:
+            yy = m2.group(1)
+            return float(yy), None
+        return np.nan, None
+
     def year_for_idx(i: int) -> float:
         if i is None or (isinstance(i, float) and np.isnan(i)):
             return np.nan
-        y = yr.iloc[int(i)]
-        if pd.isna(y):
-            return np.nan
-        ys = str(y).strip()
-        if ys.isdigit() and len(ys) == 4:
-            return float(ys)
-        return np.nan
+        cell = yr.iloc[int(i)]
+        return _parse_year_and_period_from_cell(cell)[0]
+
+    def period_for_idx(i: int) -> str:
+        if i is None or (isinstance(i, float) and np.isnan(i)):
+            return ""
+        cell = yr.iloc[int(i)]
+        _, period = _parse_year_and_period_from_cell(cell)
+        return period or ""
 
     melted["ano"] = melted["_col_idx"].map(year_for_idx)  # coluna temporária
+    melted["periodo"] = melted["_col_idx"].map(period_for_idx)
 
     def product_for_colname(cname: str) -> str:
         i = col_index.get(str(cname).strip())
@@ -271,7 +523,8 @@ def wide_to_long(
     melted["Valor"] = ibge_text_to_number(melted["valor"])
 
     melted.rename(columns={"ano": "Ano"}, inplace=True)
-    out = melted[["Ano", "Município", "Produto_Agrícola", "Variavel", "Valor"]].copy()
+    melted.rename(columns={"periodo": "Periodo"}, inplace=True)
+    out = melted[["Ano", "Periodo", "Município", "Produto_Agrícola", "Variavel", "Valor"]].copy()
     return out
 
 
@@ -279,8 +532,10 @@ def run_etl(
     input_xlsx: Path,
     output_csv: Path,
     *,
-    ibge_uf: int | None = 17,
+    uf_codigo_ibge: int = 17,
     uf_nome: str = "Tocantins",
+    por_municipios: bool = False,
+    buscar_nomes_api: bool = True,
 ) -> pd.DataFrame:
     input_xlsx = input_xlsx.resolve()
     output_csv = output_csv.resolve()
@@ -304,9 +559,9 @@ def run_etl(
 
     result = pd.concat(parts, ignore_index=True)
 
-    if ibge_uf is not None:
+    if por_municipios and buscar_nomes_api:
         try:
-            codigo_para_nome = fetch_municipio_codigo_para_nome(ibge_uf)
+            codigo_para_nome = fetch_municipio_codigo_para_nome(uf_codigo_ibge)
         except (URLError, OSError, json.JSONDecodeError, ValueError) as e:
             raise RuntimeError(
                 "Não foi possível obter nomes dos municípios na API do IBGE. "
@@ -314,14 +569,21 @@ def run_etl(
             ) from e
         result = substituir_codigos_municipio_por_nome(
             result,
-            uf_id=ibge_uf,
+            uf_id=uf_codigo_ibge,
             uf_nome=uf_nome,
             codigo_para_nome=codigo_para_nome,
         )
 
+    if not por_municipios:
+        result = aggregate_sidra_long_to_uf_level(
+            result,
+            default_uf_id=uf_codigo_ibge,
+            default_uf_nome=uf_nome,
+        )
+
     # Ordenação estável para diff/reprodutibilidade
     result = result.sort_values(
-        ["Variavel", "Município", "Ano", "Produto_Agrícola"],
+        ["Variavel", "Município", "Periodo", "Ano", "Produto_Agrícola"],
         ignore_index=True,
     )
     result.to_csv(output_csv, index=False, encoding="utf-8-sig")
@@ -359,12 +621,25 @@ def main() -> None:
     parser.add_argument(
         "--sem-nomes-municipios",
         action="store_true",
-        help="Não consulta a API do IBGE; mantém códigos na coluna Município.",
+        help="Não consulta a API do IBGE; mantém códigos na coluna Município (só com --por-municipio).",
+    )
+    parser.add_argument(
+        "--por-municipio",
+        action="store_true",
+        help="Saída granular por município (comportamento antigo). Por omissão agrega por UF.",
     )
     args = parser.parse_args()
 
-    ibge_uf = None if args.sem_nomes_municipios or args.ibge_uf == 0 else args.ibge_uf
-    df = run_etl(args.input, args.output, ibge_uf=ibge_uf, uf_nome=args.uf_nome)
+    uf_codigo = 17 if args.ibge_uf == 0 else int(args.ibge_uf)
+    buscar_nomes = args.por_municipio and not args.sem_nomes_municipios
+    df = run_etl(
+        args.input,
+        args.output,
+        uf_codigo_ibge=uf_codigo,
+        uf_nome=args.uf_nome,
+        por_municipios=args.por_municipio,
+        buscar_nomes_api=buscar_nomes,
+    )
     print(f"Linhas escritas: {len(df)} -> {args.output}")
 
 
