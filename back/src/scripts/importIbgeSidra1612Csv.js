@@ -15,6 +15,7 @@ require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
 const { sequelize, models } = require('../config/database');
 const { IbgeSidra1612Row, GeoData } = models;
+const { normalizeMunicipalityKey } = require('../utils/municipalityNameMatch');
 
 sequelize.options.logging = false;
 
@@ -33,13 +34,34 @@ function resolveCsvPath() {
   return DEFAULT_CSV;
 }
 
-/** Cada linha de dados tem exatamente 4 vírgulas (5 colunas), sem vírgulas nos campos. */
 function parseDataLine(line) {
   const s = line.replace(/\r$/, '').trim();
   if (!s) return null;
-  const parts = s.split(',');
-  if (parts.length !== 5) return null;
-  return parts;
+  const parts = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
+    if (ch === '"') {
+      const next = s[i + 1];
+      if (inQuotes && next === '"') {
+        cur += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === ',' && !inQuotes) {
+      parts.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  parts.push(cur);
+  if (parts.length !== 6) return null;
+  return parts.map((p) => String(p).trim());
 }
 
 function parseYear(raw) {
@@ -55,17 +77,32 @@ function parseValor(raw) {
   return Number.isFinite(n) ? n : null;
 }
 
-async function loadGeoDataIdByMunicipioName() {
+function parsePeriod(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return null;
+  return /^\d{4}-\d{2}$/.test(t) ? t : null;
+}
+
+async function loadGeoDataIdByStateName() {
   const rows = await GeoData.findAll({
-    where: { state: 'TO', category: 'municipality', isActive: true },
-    attributes: ['id', 'name'],
+    where: { category: 'state', isActive: true },
+    attributes: ['id', 'name', 'state', 'ibgeCode'],
   });
   const map = new Map();
   for (const r of rows) {
-    const key = String(r.name || '')
-      .trim()
-      .toLowerCase();
-    if (key) map.set(key, r.id);
+    const keys = new Set();
+    const name = String(r.name || '').trim();
+    const uf = String(r.state || '').trim().toUpperCase();
+    const ibgeCode = String(r.ibgeCode || '').replace(/\D/g, '').slice(0, 2);
+    if (name) {
+      keys.add(name.toLowerCase());
+      keys.add(normalizeMunicipalityKey(name));
+    }
+    if (uf) keys.add(uf);
+    if (ibgeCode) keys.add(ibgeCode);
+    for (const key of keys) {
+      if (key) map.set(key, r.id);
+    }
   }
   return map;
 }
@@ -87,7 +124,7 @@ async function main() {
     console.log('🗑️  Tabela ibge_sidra_1612 truncada (--replace).');
   }
 
-  const geoByName = await loadGeoDataIdByMunicipioName();
+  const geoByName = await loadGeoDataIdByStateName();
   const raw = fs.readFileSync(csvPath, { encoding: 'utf8' });
   const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -113,16 +150,20 @@ async function main() {
       skipped += 1;
       continue;
     }
-    const municipalityName = parts[1].trim();
-    const productLabel = parts[2].trim();
-    const variableKey = parts[3].trim();
-    const valueNumeric = parseValor(parts[4]);
+    const periodRef = parsePeriod(parts[1]);
+    const municipalityName = parts[2].trim();
+    const productLabel = parts[3].trim();
+    const variableKey = parts[4].trim();
+    const valueNumeric = parseValor(parts[5]);
 
-    const geoKey = municipalityName.toLowerCase();
-    const geoDataId = geoByName.get(geoKey) || null;
+    const geoDataId =
+      geoByName.get(municipalityName.toLowerCase()) ||
+      geoByName.get(normalizeMunicipalityKey(municipalityName)) ||
+      null;
 
     batch.push({
       year,
+      periodRef,
       municipalityName,
       productLabel,
       variableKey,

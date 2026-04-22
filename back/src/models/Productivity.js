@@ -49,6 +49,12 @@ const Productivity = sequelize.define('Productivity', {
     allowNull: false,
     field: 'year'
   },
+  // Referência mensal opcional (YYYY-MM) quando fonte é mensal
+  periodRef: {
+    type: DataTypes.STRING(7),
+    allowNull: true,
+    field: 'period_ref'
+  },
   // Safra (ex: 2024/25)
   season: {
     type: DataTypes.STRING(10),
@@ -181,14 +187,17 @@ const Productivity = sequelize.define('Productivity', {
       fields: ['season']
     },
     {
+      fields: ['period_ref']
+    },
+    {
       fields: ['crop_type']
     },
     {
       fields: ['year', 'crop_type']
     },
     {
-      name: 'productivity_state_munkey_year_product_uidx',
-      fields: ['state', 'municipality_key', 'year', 'product_label'],
+      name: 'productivity_state_munkey_year_period_product_uidx',
+      fields: ['state', 'municipality_key', 'year', 'period_ref', 'product_label'],
       unique: true
     },
     {

@@ -1,7 +1,8 @@
 /**
  * Monta/atualiza registos na tabela `productivity` a partir de `ibge_sidra_1612`.
- * Chave única: (state, municipality_key, year, product_label) — não exige geo_data;
- * geo_data_id é preenchido quando existir município correspondente em geo_data.
+ * Chave única: (state, municipality_key, year, product_label).
+ * Neste fluxo por UF, `municipality_name` guarda o nome do estado e
+ * `municipality_key` usa o padrão `uf:XX`.
  *
  * Uso:
  *   node src/scripts/syncProductivityFromIbgeSidra1612.js
@@ -9,7 +10,6 @@
  */
 const path = require('path');
 const { Op } = require('sequelize');
-const axios = require('axios');
 
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
@@ -44,6 +44,31 @@ function parseYearArg() {
   return Number.isFinite(y) ? y : null;
 }
 
+function parsePeriodArg() {
+  const hit = process.argv.find((a) => a.startsWith('--period='));
+  if (!hit) return null;
+  const p = String(hit.split('=')[1] || '').trim();
+  return /^\d{4}-\d{2}$/.test(p) ? p : null;
+}
+
+async function ensureMonthlyUniqueConstraint() {
+  // Remove constraint/index antigo (anual) que bloqueia múltiplos meses no mesmo ano.
+  await sequelize.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'productivity_state_munkey_year_product_uidx'
+      ) THEN
+        ALTER TABLE productivity DROP CONSTRAINT productivity_state_munkey_year_product_uidx;
+      END IF;
+    END $$;
+  `);
+  await sequelize.query(`
+    DROP INDEX IF EXISTS productivity_state_munkey_year_product_uidx;
+  `);
+}
+
 function seasonFromYear(y) {
   const next = y + 1;
   return `${y}/${String(next).slice(-2)}`;
@@ -55,84 +80,75 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Mapas: chave por nome (minúsculas e sem acento) → geo_data.id; código IBGE 7 dígitos → id. */
-async function loadGeoLookupTocantins() {
+/** Mapas de estados (nome/UF/código IBGE) → metadados em geo_data. */
+async function loadGeoLookupStates() {
   const rows = await GeoData.findAll({
-    where: { state: 'TO', category: 'municipality', isActive: true },
-    attributes: ['id', 'name', 'ibgeCode'],
+    where: { category: 'state', isActive: true },
+    attributes: ['id', 'name', 'state', 'ibgeCode'],
     raw: true,
   });
-  const byKey = new Map();
-  const byIbge = new Map();
+  const byAnyKey = new Map();
   for (const r of rows) {
-    const id = r.id;
+    const payload = {
+      geoId: r.id,
+      uf: String(r.state || '')
+        .trim()
+        .toUpperCase()
+        .slice(0, 2),
+      stateName: String(r.name || '').trim(),
+      ibge2: String(r.ibgeCode || '').replace(/\D/g, '').slice(0, 2) || null,
+    };
+    if (!payload.uf || !payload.stateName) continue;
     const name = String(r.name || '').trim();
-    if (name) {
-      byKey.set(name.toLowerCase(), id);
-      byKey.set(normalizeMunicipalityKey(name), id);
-    }
-    const code = String(r.ibgeCode || '').replace(/\D/g, '');
-    if (code.length >= 7) {
-      byIbge.set(code.slice(0, 7), id);
-    }
+    if (name) byAnyKey.set(name.toLowerCase(), payload);
+    if (name) byAnyKey.set(normalizeMunicipalityKey(name), payload);
+    byAnyKey.set(payload.uf, payload);
+    if (payload.ibge2) byAnyKey.set(payload.ibge2, payload);
   }
-  return { byKey, byIbge };
+  return { byAnyKey };
 }
 
-/** Nome oficial IBGE (normalizado) → código 7 dígitos — cobre casos em que o texto SIDRA não coincide com `geo_data.name`. */
-async function loadIbgeNomeToCodigoTocantins() {
-  const url = 'https://servicodados.ibge.gov.br/api/v1/localidades/estados/17/municipios';
-  const { data } = await axios.get(url, {
-    timeout: 60000,
-    headers: { Accept: 'application/json' },
-    validateStatus: (s) => s === 200,
-  });
-  const map = new Map();
-  if (!Array.isArray(data)) return map;
-  for (const m of data) {
-    const nome = String(m.nome || '').trim();
-    const id = String(m.id || '');
-    if (!nome || id.length < 7) continue;
-    map.set(normalizeMunicipalityKey(nome), id.slice(0, 7));
-  }
-  return map;
-}
-
-function resolveGeoDataId(municipalityName, lookup, nomeToIbge) {
-  const raw = String(municipalityName || '').trim();
+function resolveStateContext(stateNameOrUf, lookup) {
+  const raw = String(stateNameOrUf || '').trim();
   if (!raw) return null;
-  const { byKey, byIbge } = lookup;
-  let id = byKey.get(raw.toLowerCase()) || byKey.get(normalizeMunicipalityKey(raw));
-  if (id) return id;
-  const cod = nomeToIbge.get(normalizeMunicipalityKey(raw));
-  if (cod) id = byIbge.get(cod);
-  return id || null;
+  const { byAnyKey } = lookup;
+  return byAnyKey.get(raw.toUpperCase()) || byAnyKey.get(raw.toLowerCase()) || byAnyKey.get(normalizeMunicipalityKey(raw)) || null;
 }
 
-/** Agrupa linhas SIDRA por (município, ano, produto) com mapa variável → valor. */
-function groupByMunicipalityYearProduct(sidraRows) {
+/** Agrupa linhas SIDRA por (estado, periodo, ano, produto) com mapa variável → valor. */
+function groupByStateYearProduct(sidraRows, geoLookup) {
   const groups = new Map();
   for (const r of sidraRows) {
-    const mun = String(r.municipalityName || '').trim();
+    const stateName = String(r.municipalityName || '').trim();
     const y = parseInt(String(r.year), 10);
+    const periodRef = String(r.periodRef || '').trim();
     const prod = String(r.productLabel || '').trim();
     const vk = String(r.variableKey || '').trim();
-    if (!mun || !Number.isFinite(y) || y < 1970) continue;
-    if (mun.toLowerCase() === 'tocantins') continue;
+    if (!stateName || !Number.isFinite(y) || y < 1970) continue;
     const crop = mapProductLabelToCropType(prod);
     if (!crop) continue;
+    const stateCtx = resolveStateContext(stateName, geoLookup);
+    if (!stateCtx || !stateCtx.uf) continue;
 
-    const key = `${mun.toLowerCase()}|${y}|${prod.toLowerCase()}`;
+    const key = `${stateCtx.uf}|${periodRef || '-'}|${y}|${prod.toLowerCase()}`;
     if (!groups.has(key)) {
-      groups.set(key, { municipalityName: mun, year: y, productLabel: prod, cropType: crop, vars: {} });
+      groups.set(key, {
+        state: stateCtx.uf,
+        stateName: stateCtx.stateName,
+        year: y,
+        periodRef: periodRef || null,
+        productLabel: prod,
+        cropType: crop,
+        geoId: stateCtx.geoId,
+        vars: {},
+      });
     }
     groups.get(key).vars[vk] = r.valueNumeric;
   }
   return groups;
 }
 
-function buildProductivityPayload(rep, ctx) {
-  const { geoId, ibge7 } = ctx;
+function buildProductivityPayload(rep) {
   const planted = plantedHectares(rep.vars);
   const qty = num(rep.vars[VAR_QTY]);
   let yieldKgHa = num(rep.vars[VAR_YIELD_KG_HA]);
@@ -144,8 +160,8 @@ function buildProductivityPayload(rep, ctx) {
   }
   const productivity = productivityTHa != null && productivityTHa >= 0 ? productivityTHa : 0;
   const label = String(rep.productLabel || '').trim() || rep.cropType;
-  const munName = String(rep.municipalityName || '').trim() || '—';
-  const mKey = normalizeMunicipalityKey(munName) || 'unknown';
+  const stateName = String(rep.stateName || '').trim() || rep.state;
+  const mKey = `uf:${rep.state}`;
 
   const roundedPa = Math.round(plantedArea * 100) / 100;
   const roundedQty = Math.round(totalProduction * 100) / 100;
@@ -154,17 +170,17 @@ function buildProductivityPayload(rep, ctx) {
 
   const baseObs = `SIDRA 1612 · ${rep.productLabel}`;
   const zeroExplanation =
-    ' IBGE/SIDRA: sem área plantada ou colhida e sem produção reportada neste município e neste ano (valores 0). ' +
-    'Isto não significa que a cultura não seja cultivada noutros municípios do Tocantins — apenas que, neste município, não há registo de cultivo desta cultura para o ano.';
+    ' IBGE/SIDRA: sem área plantada ou colhida e sem produção reportada nesta UF e neste ano (valores 0).';
 
   return {
-    geoDataId: geoId || null,
-    state: 'TO',
-    municipalityName: munName,
+    geoDataId: rep.geoId || null,
+    state: rep.state,
+    municipalityName: stateName,
     municipalityKey: mKey,
-    municipalityIbgeCode: ibge7 && ibge7.length === 7 ? ibge7 : null,
+    municipalityIbgeCode: null,
     year: rep.year,
-    season: seasonFromYear(rep.year),
+    season: rep.periodRef || seasonFromYear(rep.year),
+    periodRef: rep.periodRef || null,
     cropType: rep.cropType,
     productLabel: label,
     productivity: roundedProd,
@@ -181,37 +197,32 @@ function buildProductivityPayload(rep, ctx) {
 
 async function main() {
   const filterYear = parseYearArg();
+  const filterPeriod = parsePeriodArg();
 
   await sequelize.authenticate();
-  await Productivity.sync({ alter: false });
-  await IbgeSidra1612Row.sync({ alter: false });
+  await Productivity.sync({ alter: true });
+  await IbgeSidra1612Row.sync({ alter: true });
+  await ensureMonthlyUniqueConstraint();
 
-  const geoLookup = await loadGeoLookupTocantins();
-  let nomeToIbge = new Map();
-  try {
-    nomeToIbge = await loadIbgeNomeToCodigoTocantins();
-  } catch (e) {
-    console.warn('⚠️  API IBGE (nomes municípios) indisponível — só matching por geo_data local:', e.message || e);
-  }
+  const geoLookup = await loadGeoLookupStates();
 
   const where = { year: { [Op.gt]: 0 } };
   if (filterYear != null) Object.assign(where, { year: filterYear });
+  if (filterPeriod != null) Object.assign(where, { periodRef: filterPeriod });
 
   const sidraRows = await IbgeSidra1612Row.findAll({
     where,
     raw: true,
-    attributes: ['year', 'municipalityName', 'productLabel', 'variableKey', 'valueNumeric'],
+    attributes: ['year', 'periodRef', 'municipalityName', 'productLabel', 'variableKey', 'valueNumeric'],
   });
 
-  const productGroups = groupByMunicipalityYearProduct(sidraRows);
+  const productGroups = groupByStateYearProduct(sidraRows, geoLookup);
 
   const payloads = [];
   let withZeroIndicators = 0;
 
   for (const rep of productGroups.values()) {
-    const geoId = resolveGeoDataId(rep.municipalityName, geoLookup, nomeToIbge);
-    const ibge7 = nomeToIbge.get(normalizeMunicipalityKey(rep.municipalityName)) || null;
-    const p = buildProductivityPayload(rep, { geoId, ibge7 });
+    const p = buildProductivityPayload(rep);
     if (p.plantedArea === 0 && p.totalProduction === 0 && p.productivity === 0) {
       withZeroIndicators += 1;
     }
@@ -225,7 +236,7 @@ async function main() {
     await Productivity.bulkCreate(chunk, {
       validate: true,
       hooks: false,
-      conflictAttributes: ['state', 'municipalityKey', 'year', 'productLabel'],
+      conflictAttributes: ['state', 'municipalityKey', 'year', 'periodRef', 'productLabel'],
       updateOnDuplicate: [
         'geoDataId',
         'municipalityName',
@@ -235,6 +246,7 @@ async function main() {
         'plantedArea',
         'totalProduction',
         'season',
+        'periodRef',
         'observations',
         'dataReliability',
         'status',
@@ -245,14 +257,15 @@ async function main() {
     upserted += chunk.length;
   }
 
-  console.log('✅ productivity ← ibge_sidra_1612 (upsert por state+municipality_key+year+product_label).');
+  console.log('✅ productivity ← ibge_sidra_1612 (upsert por UF+periodo+produto).');
   console.log(`   Produtos SIDRA agrupados: ${productGroups.size}`);
-  console.log(`   Registos finais (município×ano×produto): ${productGroups.size}`);
+  console.log(`   Registos finais (UF×periodo×produto): ${productGroups.size}`);
   console.log(`   Gravados/atualizados: ${upserted}`);
   console.log(
     `   Com 0 ha / 0 t / 0 t/ha (nota explicativa em observations): ${withZeroIndicators}`
   );
   if (filterYear != null) console.log(`   Filtro ano: ${filterYear}`);
+  if (filterPeriod != null) console.log(`   Filtro periodo: ${filterPeriod}`);
 
   await sequelize.close();
   process.exit(0);

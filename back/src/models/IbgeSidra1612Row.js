@@ -18,6 +18,11 @@ const IbgeSidra1612Row = sequelize.define(
       allowNull: false,
       field: 'year',
     },
+    periodRef: {
+      type: DataTypes.STRING(7),
+      allowNull: true,
+      field: 'period_ref',
+    },
     municipalityName: {
       type: DataTypes.STRING(200),
       allowNull: false,
@@ -50,12 +55,13 @@ const IbgeSidra1612Row = sequelize.define(
     timestamps: true,
     indexes: [
       { fields: ['year'] },
+      { fields: ['period_ref'] },
       { fields: ['municipality_name'] },
       { fields: ['variable_key'] },
       {
         unique: true,
-        fields: ['year', 'municipality_name', 'product_label', 'variable_key'],
-        name: 'ibge_sidra_1612_year_mun_prod_var_uidx',
+        fields: ['year', 'period_ref', 'municipality_name', 'product_label', 'variable_key'],
+        name: 'ibge_sidra_1612_year_period_mun_prod_var_uidx',
       },
     ],
   }
