@@ -32,3 +32,26 @@ export interface DashboardSummaryDto {
   kpis: DashboardKpiDto[];
   regioes: DashboardRegionRowDto[];
 }
+
+export type ClimateSeriesVariable =
+  | 'temperatura_media'
+  | 'temperatura_maxima'
+  | 'temperatura_minima'
+  | 'precipitacao'
+  | 'umidade'
+  | 'vento'
+  | 'pressao';
+
+export interface ClimateSeriesResponseDto {
+  success: boolean;
+  metadata: {
+    uf: string;
+    periodo: { start: string; end: string };
+    variavel: ClimateSeriesVariable;
+    fonte: string;
+    unidade: string;
+  };
+  serieTemporal: Array<{ date: string; uf: string; value: number | null }>;
+  estatisticas: { media: number | null; min: number | null; max: number | null };
+  pagination: { limit: number; offset: number; returned: number };
+}

@@ -99,7 +99,7 @@ export function Perfil() {
     error: statsError,
     reload: reloadStats,
   } = useAsyncResource<ProfileStatsDto>(async () => {
-    const [exportsPayload, alertsPayload] = await Promise.all([listReportExports(), listClimateAlerts({ state: 'TO' })]);
+    const [exportsPayload, alertsPayload] = await Promise.all([listReportExports(), listClimateAlerts()]);
     return {
       relatoriosExportados: exportsPayload.items.length,
       alertasDisponiveis: alertsPayload.items.length,

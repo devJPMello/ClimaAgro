@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardBody } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
@@ -8,41 +8,41 @@ import { AlertTriangle, Filter, Download } from 'lucide-react';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { listClimateAlerts } from '../../lib/api/alertsApi';
+import { listClimateUfs } from '../../lib/api/climateApi';
 import type { ClimateAlertDto, ClimateAlertListDto } from '../../lib/api/contracts/alerts';
-import { TO_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
-import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
-
-function norm(s: string) {
-  return s
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
 
 export function Alertas() {
   const [severidadeFiltro, setSeveridadeFiltro] = usePersistedState('climaagro.pref.alertas.severidade', 'todos');
   const [tipoFiltro, setTipoFiltro] = usePersistedState('climaagro.pref.alertas.tipo', 'todos');
-  const [regiaoFiltro, setRegiaoFiltro] = usePersistedState('climaagro.pref.alertas.cidade', 'todos');
-  const { options: munOptions, loading: munLoading, error: munError } = useIbgeMunicipioSelectOptions();
-  const muniSelectOptions = useMemo(() => [{ value: 'todos', label: 'Todos' }, ...munOptions], [munOptions]);
+  const [ufFiltro, setUfFiltro] = usePersistedState('climaagro.pref.alertas.uf', 'ALL');
+  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([
+    { value: 'ALL', label: 'Brasil (todos)' },
+  ]);
 
   useEffect(() => {
-    if (regiaoFiltro === 'todos') return;
-    if (munOptions.some((o) => o.value === regiaoFiltro)) return;
-    const legacy = TO_CITY_VALUE_TO_NAME[regiaoFiltro as keyof typeof TO_CITY_VALUE_TO_NAME];
-    if (legacy && munOptions.some((o) => o.value === legacy)) setRegiaoFiltro(legacy);
-  }, [regiaoFiltro, munOptions, setRegiaoFiltro]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await listClimateUfs();
+        if (!cancelled && data.length) setUfOptions(data);
+      } catch {
+        // mantém fallback ALL
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const cityFilterLabel = regiaoFiltro !== 'todos' ? regiaoFiltro : undefined;
   const { status, data, error, reload } = useAsyncResource(
-    () => listClimateAlerts({ state: 'TO', city: cityFilterLabel }),
-    [regiaoFiltro]
+    () => listClimateAlerts({ state: ufFiltro === 'ALL' ? undefined : ufFiltro }),
+    [ufFiltro]
   );
 
   const filtros = useMemo(
-    () => ({ severidadeFiltro, tipoFiltro, regiaoFiltro }),
-    [severidadeFiltro, tipoFiltro, regiaoFiltro],
+    () => ({ severidadeFiltro, tipoFiltro }),
+    [severidadeFiltro, tipoFiltro],
   );
 
   const filterItems = (items: ClimateAlertDto[]) =>
@@ -50,7 +50,6 @@ export function Alertas() {
       if (filtros.severidadeFiltro !== 'todos' && alerta.severidade !== filtros.severidadeFiltro) return false;
       if (filtros.tipoFiltro !== 'todos' && !alerta.tipo.toLowerCase().includes(filtros.tipoFiltro.toLowerCase()))
         return false;
-      if (cityFilterLabel && !norm(alerta.local).includes(norm(cityFilterLabel))) return false;
       return true;
     });
 
@@ -73,7 +72,7 @@ export function Alertas() {
           Alertas Climáticos
         </h1>
         <p className="text-muted-foreground">
-          Tocantins — monitoramento por município
+          Monitoramento por UF — escolha um estado ou visão Brasil inteiro.
         </p>
       </div>
 
@@ -82,22 +81,13 @@ export function Alertas() {
         data={data}
         error={error}
         onRetry={reload}
-        isEmpty={(d) => d.items.length === 0}
-        empty={
-          <Card>
-            <CardBody>
-              <EmptyState
-                icon={AlertTriangle}
-                title="Nenhum alerta no momento"
-                description="Quando houver alertas climáticos, eles aparecerão aqui."
-              />
-            </CardBody>
-          </Card>
-        }
+        isEmpty={() => false}
+        empty={<></>}
       >
         {(payload) => {
           const alertasFiltrados = filterItems(payload.items);
           const contagemSeveridade = contagem(payload.items);
+          const semDadosApi = payload.items.length === 0;
 
           return (
             <>
@@ -187,12 +177,10 @@ export function Alertas() {
                       />
 
                       <Select
-                        label="Município"
-                        value={regiaoFiltro}
-                        onChange={(e) => setRegiaoFiltro(e.target.value)}
-                        options={muniSelectOptions}
-                        disabled={munLoading}
-                        error={munError ?? undefined}
+                        label="UF"
+                        value={ufFiltro}
+                        onChange={(e) => setUfFiltro(e.target.value)}
+                        options={ufOptions}
                       />
                     </div>
 
@@ -210,7 +198,17 @@ export function Alertas() {
                 </CardBody>
               </Card>
 
-              {alertasFiltrados.length > 0 ? (
+              {semDadosApi ? (
+                <Card>
+                  <CardBody>
+                    <EmptyState
+                      icon={AlertTriangle}
+                      title="Nenhum alerta nesta seleção"
+                      description="Não há alertas nos últimos dias para a UF escolhida. Altere a UF acima (ex.: Brasil (todos)) ou os filtros de severidade / tipo."
+                    />
+                  </CardBody>
+                </Card>
+              ) : alertasFiltrados.length > 0 ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   {alertasFiltrados.map((alerta) => (
                     <AlertCard key={alerta.id} {...alerta} />
@@ -222,7 +220,7 @@ export function Alertas() {
                     <EmptyState
                       icon={AlertTriangle}
                       title="Nenhum alerta encontrado"
-                      description="Não há alertas que correspondam aos filtros selecionados. Tente ajustar os critérios de busca."
+                      description="Não há alertas que correspondam aos filtros de severidade ou tipo. Limpe os filtros ou escolha outra UF."
                     />
                   </CardBody>
                 </Card>

@@ -1,25 +1,19 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardBody, CardHeader, CardTitle } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { MapPin } from 'lucide-react';
 import { BrazilMap } from '../components/maps/BrazilMap';
-import { IbgeMunicipiosChoroplethMap } from '../components/maps/IbgeMunicipiosChoroplethMap';
 import { MapMetricLegend } from '../components/maps/MapMetricLegend';
 import type { BrazilMapMetric } from '../components/maps/brazilMapConfig';
-import { buildClimateMetricByIbgeCodarea, buildValuesByUfFromDashboard } from '../components/maps/brazilMapConfig';
-import { getDashboardSummary, listAllClimateRecordsInRange, type ClimateListResponse } from '../../lib/api/climateApi';
-import type { DashboardSummaryDto } from '../../lib/api/contracts/climate';
-import { TOCANTINS_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
+import { getClimateSeriesByUf, listClimateUfs } from '../../lib/api/climateApi';
 import { CLIMATE_PERIOD_OPTIONS } from '../../lib/filters/appFilters';
-import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { EmptyState } from '../components/ui/EmptyState';
 
-const MAP_METRIC: BrazilMapMetric = 'temperatura';
-
-type PeriodCityRow = {
+type PeriodStateRow = {
+  uf: string;
   estado: string;
   temperatura: string;
   temperaturaNum: number | null;
@@ -60,69 +54,83 @@ function calcPeriodRange(periodo: string): { startDate: string; endDate: string 
   return { startDate: iso(start), endDate: iso(end) };
 }
 
-function cityNameFromMapaPref(cidade: string): string | null {
-  if (cidade === 'todas') return null;
-  const legacy = TOCANTINS_CITY_VALUE_TO_NAME[cidade as keyof typeof TOCANTINS_CITY_VALUE_TO_NAME];
-  if (legacy) return legacy;
-  return cidade;
-}
+const MAP_METRIC_OPTIONS: Array<{ value: BrazilMapMetric; label: string }> = [
+  { value: 'temperatura', label: 'Temperatura' },
+  { value: 'umidade', label: 'Umidade' },
+  { value: 'precipitacao', label: 'Precipitação' },
+  { value: 'vento', label: 'Vento' },
+];
 
 export function MapaClimatico() {
-  const [cidade, setCidade] = usePersistedState<string>('climaagro.pref.mapaClimatico.cidade', 'todas');
+  const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaClimatico.uf', 'ALL');
+  const [metric, setMetric] = usePersistedState<BrazilMapMetric>('climaagro.pref.mapaClimatico.metric', 'temperatura');
   const [periodo, setPeriodo] = usePersistedState<string>('climaagro.pref.mapaClimatico.periodo', 'hoje');
-  const { options: munOptions, loading: munLoading, error: munError } = useIbgeMunicipioSelectOptions();
-  const cidadeOptions = useMemo(
-    () => [{ value: 'todas', label: 'Todas as cidades (TO)' }, ...munOptions],
-    [munOptions],
-  );
+  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([
+    { value: 'ALL', label: 'Brasil (todos)' },
+  ]);
 
   useEffect(() => {
-    if (cidade === 'todas') return;
-    if (munOptions.some((o) => o.value === cidade)) return;
-    const legacy = TOCANTINS_CITY_VALUE_TO_NAME[cidade as keyof typeof TOCANTINS_CITY_VALUE_TO_NAME];
-    if (legacy && munOptions.some((o) => o.value === legacy)) setCidade(legacy);
-  }, [cidade, munOptions, setCidade]);
-
-  const selectedCityName = cityNameFromMapaPref(cidade);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await listClimateUfs();
+        if (!cancelled && data.length) setUfOptions(data);
+      } catch {
+        // fallback local
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const { status, data, error, reload } = useAsyncResource(
     async () => {
       const range = calcPeriodRange(periodo);
-      const [summary, rows] = await Promise.all([
-        getDashboardSummary({ state: 'TO' }),
-        listAllClimateRecordsInRange({
-          state: 'TO',
-          startDate: range.startDate,
-          endDate: range.endDate,
-          place: selectedCityName || undefined,
-        }),
+      const [temp, hum, wind, precip] = await Promise.all([
+        getClimateSeriesByUf({ uf, start: range.startDate, end: range.endDate, variavel: 'temperatura_media', limit: 1000 }),
+        getClimateSeriesByUf({ uf, start: range.startDate, end: range.endDate, variavel: 'umidade', limit: 1000 }),
+        getClimateSeriesByUf({ uf, start: range.startDate, end: range.endDate, variavel: 'vento', limit: 1000 }),
+        getClimateSeriesByUf({ uf, start: range.startDate, end: range.endDate, variavel: 'precipitacao', limit: 1000 }),
       ]);
-      const climateMunicipioMap = buildClimateMetricByIbgeCodarea(rows, MAP_METRIC);
-      const byCity = new Map<string, { temps: number[]; hums: number[]; winds: number[]; precs: number[] }>();
-      for (const r of rows as Array<
-        ClimateListResponse['data'][number] & { geoData?: { name?: string }; windSpeed?: string | number | null }
-      >) {
-        const cityName = r.geoData?.name || selectedCityName || 'Tocantins';
-        if (!byCity.has(cityName)) byCity.set(cityName, { temps: [], hums: [], winds: [], precs: [] });
-        const bucket = byCity.get(cityName)!;
-        const t = toNum(r.avgTemperature);
-        if (t != null) bucket.temps.push(t);
-        const h = toNum(r.humidity);
-        if (h != null) bucket.hums.push(h);
-        const w = toNum(r.windSpeed);
-        if (w != null) bucket.winds.push(w);
-        const p = toNum(r.precipitation);
-        if (p != null) bucket.precs.push(p);
+      const buckets = new Map<string, { temps: number[]; hums: number[]; winds: number[]; precs: number[] }>();
+      const ensure = (stateUf: string) => {
+        if (!buckets.has(stateUf)) buckets.set(stateUf, { temps: [], hums: [], winds: [], precs: [] });
+        return buckets.get(stateUf)!;
+      };
+      for (const row of temp.serieTemporal) {
+        const value = toNum(row.value);
+        const rowUf = String(row.uf || '').toUpperCase();
+        if (!rowUf || value == null) continue;
+        ensure(rowUf).temps.push(value);
       }
-      const prodByCity = new Map(summary.regioes.map((x) => [x.estado, x]));
-      const periodRows: PeriodCityRow[] = [...byCity.entries()].map(([cityName, b]) => {
+      for (const row of hum.serieTemporal) {
+        const value = toNum(row.value);
+        const rowUf = String(row.uf || '').toUpperCase();
+        if (!rowUf || value == null) continue;
+        ensure(rowUf).hums.push(value);
+      }
+      for (const row of wind.serieTemporal) {
+        const value = toNum(row.value);
+        const rowUf = String(row.uf || '').toUpperCase();
+        if (!rowUf || value == null) continue;
+        ensure(rowUf).winds.push(value);
+      }
+      for (const row of precip.serieTemporal) {
+        const value = toNum(row.value);
+        const rowUf = String(row.uf || '').toUpperCase();
+        if (!rowUf || value == null) continue;
+        ensure(rowUf).precs.push(value);
+      }
+
+      const periodRows: PeriodStateRow[] = [...buckets.entries()].map(([rowUf, b]) => {
         const t = avg(b.temps);
         const h = avg(b.hums);
         const w = avg(b.winds);
         const p = b.precs.length ? b.precs.reduce((a, x) => a + x, 0) : null;
-        const prod = prodByCity.get(cityName);
         return {
-          estado: cityName,
+          uf: rowUf,
+          estado: rowUf,
           temperatura: t != null ? `${t.toFixed(1)}°C` : '—',
           temperaturaNum: t,
           umidade: h != null ? `${h.toFixed(1)}%` : '—',
@@ -131,66 +139,55 @@ export function MapaClimatico() {
           ventoNum: w,
           precipitacao: p != null ? `${p.toFixed(1)}mm` : '—',
           precipitacaoNum: p,
-          produtividade: prod?.produtividade ?? '—',
-          produtividadeNum: prod?.produtividadeNum ?? null,
-          alertas: prod?.alertas ?? 0,
+          produtividade: '—',
+          produtividadeNum: null,
+          alertas: 0,
         };
       });
       return {
-        summary,
         periodRows,
         mapRevision: Date.now(),
-        climateMunicipioMap,
       };
     },
-    [periodo, selectedCityName]
+    [periodo, uf]
   );
 
-  const selectedCityRow = useMemo(() => {
+  const selectedStateRow = useMemo(() => {
     const rows = data?.periodRows ?? [];
-    if (!selectedCityName || !rows.length) return null;
-    return (
-      rows.find((r) => r.estado === selectedCityName) ||
-      rows.find((r) => r.estado.toLowerCase() === selectedCityName.toLowerCase()) ||
-      null
-    );
-  }, [data?.periodRows, selectedCityName]);
+    if (uf === 'ALL' || !rows.length) return null;
+    return rows.find((r) => r.uf === uf) || null;
+  }, [data?.periodRows, uf]);
 
   const valuesByUf = useMemo(() => {
     const periodRows = data?.periodRows ?? [];
     if (!periodRows.length) return undefined;
-    if (selectedCityRow) {
+    if (selectedStateRow) {
       const valueByMetric: Record<BrazilMapMetric, number | null | undefined> = {
-        temperatura: selectedCityRow.temperaturaNum,
-        umidade: selectedCityRow.umidadeNum,
-        precipitacao: selectedCityRow.precipitacaoNum,
-        vento: selectedCityRow.ventoNum,
-        produtividade: selectedCityRow.produtividadeNum,
+        temperatura: selectedStateRow.temperaturaNum,
+        umidade: selectedStateRow.umidadeNum,
+        precipitacao: selectedStateRow.precipitacaoNum,
+        vento: selectedStateRow.ventoNum,
+        produtividade: selectedStateRow.produtividadeNum,
       };
-      const v = valueByMetric[MAP_METRIC];
+      const v = valueByMetric[metric];
       if (v != null && !Number.isNaN(Number(v))) {
-        return { TO: Number(v) };
+        return { [selectedStateRow.uf]: Number(v) };
       }
     }
-    return buildValuesByUfFromDashboard(
-      periodRows.map((r) => ({
-        uf: 'TO',
-        estado: r.estado,
-        temperatura: r.temperatura,
-        temperaturaNum: r.temperaturaNum,
-        umidade: r.umidade,
-        umidadeNum: r.umidadeNum,
-        vento: r.vento,
-        ventoNum: r.ventoNum,
-        precipitacao: r.precipitacao,
-        precipitacaoNum: r.precipitacaoNum,
-        produtividade: r.produtividade,
-        produtividadeNum: r.produtividadeNum,
-        alertas: r.alertas,
-      })),
-      MAP_METRIC
-    );
-  }, [data?.periodRows, selectedCityRow]);
+    const out: Partial<Record<string, number>> = {};
+    for (const row of periodRows) {
+      const valueByMetric: Record<BrazilMapMetric, number | null | undefined> = {
+        temperatura: row.temperaturaNum,
+        umidade: row.umidadeNum,
+        precipitacao: row.precipitacaoNum,
+        vento: row.ventoNum,
+        produtividade: row.produtividadeNum,
+      };
+      const value = valueByMetric[metric];
+      if (value != null && !Number.isNaN(Number(value))) out[row.uf] = Number(value);
+    }
+    return out;
+  }, [data?.periodRows, selectedStateRow, metric]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -199,7 +196,7 @@ export function MapaClimatico() {
           Mapa Climático
         </h1>
         <p className="text-muted-foreground">
-          Visualização geoespacial de dados climáticos no Tocantins.
+          Visualização geoespacial de dados climáticos por estado (UF).
         </p>
       </div>
 
@@ -208,18 +205,8 @@ export function MapaClimatico() {
         data={data}
         error={error}
         onRetry={reload}
-        isEmpty={(payload) => payload.summary.kpis.length === 0 || payload.periodRows.length === 0}
-        empty={
-          <Card>
-            <CardBody>
-              <EmptyState
-                icon={MapPin}
-                title="Sem dados climáticos para o filtro"
-                description="Não há registros para a cidade/período selecionados. Ajuste os filtros e tente novamente."
-              />
-            </CardBody>
-          </Card>
-        }
+        isEmpty={() => false}
+        empty={<></>}
       >
         {(payload) => (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -229,16 +216,15 @@ export function MapaClimatico() {
               </CardHeader>
               <CardBody className="space-y-4">
                 <Select
-                  label="Cidade (TO)"
-                  value={cidade}
-                  onChange={(e) => setCidade(e.target.value)}
-                  options={cidadeOptions}
-                  disabled={munLoading}
-                  error={munError ?? undefined}
+                  label="UF"
+                  value={uf}
+                  onChange={(e) => setUf(e.target.value)}
+                  options={ufOptions}
                 />
+                <Select label="Métrica" value={metric} onChange={(e) => setMetric(e.target.value as BrazilMapMetric)} options={MAP_METRIC_OPTIONS} />
                 <Select label="Período" value={periodo} onChange={(e) => setPeriodo(e.target.value)} options={CLIMATE_PERIOD_OPTIONS} />
                 <div className="pt-4 border-t border-border">
-                  <MapMetricLegend metric={MAP_METRIC} />
+                  <MapMetricLegend metric={metric} />
                 </div>
               </CardBody>
             </Card>
@@ -246,58 +232,55 @@ export function MapaClimatico() {
             <div className="lg:col-span-3 space-y-4">
               <Card className="relative">
                 <CardBody className="p-0">
-                  {payload.climateMunicipioMap &&
-                  Object.keys(payload.climateMunicipioMap.valuesByCodarea).length > 0 ? (
-                    <IbgeMunicipiosChoroplethMap
-                      metric={MAP_METRIC}
-                      valuesByCodarea={payload.climateMunicipioMap.valuesByCodarea}
-                      nameByCodarea={payload.climateMunicipioMap.nameByCodarea}
-                      dataRevision={payload.mapRevision}
-                    />
-                  ) : (
-                    <BrazilMap metric={MAP_METRIC} valuesByUf={valuesByUf} dataRevision={payload.mapRevision} />
-                  )}
+                  <BrazilMap metric={metric} valuesByUf={valuesByUf} dataRevision={payload.mapRevision} />
                 </CardBody>
               </Card>
+
+              {payload.periodRows.length === 0 && (
+                <Card>
+                  <CardBody>
+                    <EmptyState
+                      icon={MapPin}
+                      title="Sem dados climáticos para o filtro"
+                      description="Não há registros para a UF ou o período selecionados. Ajuste os filtros à esquerda e tente novamente."
+                    />
+                  </CardBody>
+                </Card>
+              )}
 
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <MapPin className="w-4 h-4" />
                 <span>
-                  {payload.climateMunicipioMap &&
-                  Object.keys(payload.climateMunicipioMap.valuesByCodarea).length > 0
-                    ? 'Malha municipal (IBGE): temperatura média no período por município; cores conforme legenda.'
-                    : selectedCityName
-                      ? `Sem código IBGE nos registros de clima: mapa por UF com o valor agregado de ${selectedCityName} no período.`
-                      : 'Sem código IBGE nos registros de clima: mapa em TO com a média das cidades disponíveis no período.'}
+                  Mapa estadual: agregação por UF no período selecionado (temperatura, umidade e vento por média; precipitação por acumulado).
                 </span>
               </div>
 
-              {selectedCityRow && (
+              {selectedStateRow && (
                 <Card>
                   <CardHeader>
-                    <CardTitle>Leitura da cidade selecionada</CardTitle>
+                    <CardTitle>Leitura da UF selecionada</CardTitle>
                   </CardHeader>
                   <CardBody>
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
                       <div>
-                        <p className="text-muted-foreground">Cidade</p>
-                        <p>{selectedCityRow.estado}</p>
+                        <p className="text-muted-foreground">UF</p>
+                        <p>{selectedStateRow.uf}</p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Temperatura</p>
-                        <p>{selectedCityRow.temperatura}</p>
+                        <p>{selectedStateRow.temperatura}</p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Umidade</p>
-                        <p>{selectedCityRow.umidade ?? '—'}</p>
+                        <p>{selectedStateRow.umidade ?? '—'}</p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Precipitação</p>
-                        <p>{selectedCityRow.precipitacao}</p>
+                        <p>{selectedStateRow.precipitacao}</p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Vento</p>
-                        <p>{selectedCityRow.vento ?? '—'}</p>
+                        <p>{selectedStateRow.vento ?? '—'}</p>
                       </div>
                     </div>
                   </CardBody>

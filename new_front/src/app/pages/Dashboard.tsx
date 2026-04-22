@@ -67,7 +67,8 @@ export function Dashboard() {
           Dashboard
         </h1>
         <p className="text-muted-foreground">
-          Visão geral do monitoramento climático e produtividade agrícola no Tocantins.
+          Visão geral do clima e da produtividade nos estados MT, TO, GO, SP e MG (últimos dias e último ano com
+          dados na base).
         </p>
       </div>
 
@@ -103,8 +104,8 @@ export function Dashboard() {
               <CardHeader>
                 <CardTitle>Resumo por localidade</CardTitle>
                 <CardDescription>
-                  Cinco principais municípios — clima (últimos 14 dias) e produtividade média no último ano
-                  agrícola com dados na base
+                  Cinco estados prioritários — clima agregado na malha estadual (últimos 14 dias) e produtividade
+                  média no último ano agrícola com dados na base
                 </CardDescription>
               </CardHeader>
               <CardBody>
@@ -112,7 +113,7 @@ export function Dashboard() {
                   <table className="w-full">
                     <thead>
                       <tr className="text-left border-b border-border">
-                        <th className="pb-3 text-sm text-muted-foreground">Local</th>
+                        <th className="pb-3 text-sm text-muted-foreground">Estado</th>
                         <th className="pb-3 text-sm text-muted-foreground">Temperatura</th>
                         <th className="pb-3 text-sm text-muted-foreground">Precipitação</th>
                         <th className="pb-3 text-sm text-muted-foreground">Produtividade</th>
@@ -122,7 +123,9 @@ export function Dashboard() {
                     <tbody>
                       {summary.regioes.map((regiao, index) => (
                         <tr key={index} className="border-b border-border last:border-0">
-                          <td className="py-4 text-sm">{regiao.estado}</td>
+                          <td className="py-4 text-sm">
+                            {regiao.uf ? `${regiao.estado} (${regiao.uf})` : regiao.estado}
+                          </td>
                           <td className="py-4 text-sm">{regiao.temperatura}</td>
                           <td className="py-4 text-sm">{regiao.precipitacao}</td>
                           <td className="py-4 text-sm">{regiao.produtividade}</td>

@@ -5,6 +5,10 @@ import { Button } from '../ui/Button';
 import 'leaflet/dist/leaflet.css';
 import type { BrazilMapMetric } from './brazilMapConfig';
 import { fillColorForMetric, formatPopupValueForMetric, resolveValueForFeature } from './brazilMapConfig';
+import {
+  IBGE_BRASIL_UFS_GEOJSON_URL,
+  normalizeBrazilStatesFeatureCollection,
+} from '../../../lib/geo/brazilStatesMalha';
 
 interface BrazilMapProps {
   metric: BrazilMapMetric;
@@ -21,18 +25,43 @@ export function BrazilMap({ metric, height = 600, valuesByUf, dataRevision = 0 }
   const [error, setError] = useState<string | null>(null);
 
   const loadGeojson = async () => {
+    const envUrl = (import.meta.env.VITE_BRAZIL_STATES_GEOJSON_URL as string | undefined)?.trim();
+    const tryUrls = [
+      ...(envUrl ? [envUrl] : []),
+      IBGE_BRASIL_UFS_GEOJSON_URL,
+      '/data/brazil-states.geojson',
+    ];
+
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch('/data/brazil-states.geojson');
-      if (!response.ok) {
-        throw new Error(`Falha ao carregar mapa (${response.status})`);
+      let lastStatus = 0;
+      for (const url of tryUrls) {
+        const controller = new AbortController();
+        const t = window.setTimeout(() => controller.abort(), 60_000);
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const response = await fetch(url, { signal: controller.signal });
+          lastStatus = response.status;
+          if (!response.ok) continue;
+          // eslint-disable-next-line no-await-in-loop
+          const data = await response.json();
+          if (!data || data.type !== 'FeatureCollection' || !Array.isArray(data.features)) {
+            continue;
+          }
+          setGeojsonData(normalizeBrazilStatesFeatureCollection(data));
+          return;
+        } catch {
+          // tenta próxima URL
+        } finally {
+          window.clearTimeout(t);
+        }
       }
-      const data = await response.json();
-      if (!data || data.type !== 'FeatureCollection' || !Array.isArray(data.features)) {
-        throw new Error('Formato GeoJSON inválido');
-      }
-      setGeojsonData(data);
+      throw new Error(
+        lastStatus
+          ? `Não foi possível carregar a malha dos estados (último HTTP ${lastStatus}). Verifique a rede ou defina VITE_BRAZIL_STATES_GEOJSON_URL.`
+          : 'Não foi possível carregar a malha dos estados. Verifique a rede ou defina VITE_BRAZIL_STATES_GEOJSON_URL.'
+      );
     } catch (err) {
       setGeojsonData(null);
       setError(err instanceof Error ? err.message : 'Falha ao carregar dados do mapa');
