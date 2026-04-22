@@ -17,7 +17,7 @@ function validateRequest(req, res, next) {
 
 /**
  * GET /api/ibge-sidra-1612/product-labels
- * Produtos (`product_label`) distintos na tabela `ibge_sidra_1612` para municípios da UF.
+ * Produtos (`product_label`) distintos na tabela `ibge_sidra_1612` para UFs.
  * Inclui `cropType` mapeado como na sincronização com `productivity`.
  */
 router.get(
@@ -27,21 +27,21 @@ router.get(
   async (req, res) => {
     try {
       const raw = req.query.state != null ? String(req.query.state).trim().toUpperCase().slice(0, 2) : '';
-      const uf = /^[A-Z]{2}$/.test(raw) ? raw : 'TO';
+      const uf = /^[A-Z]{2}$/.test(raw) ? raw : null;
       const rows = await sequelize.query(
         `
         SELECT DISTINCT TRIM(i.product_label) AS "productLabel"
         FROM ibge_sidra_1612 i
         INNER JOIN geo_data g
           ON LOWER(TRIM(g.name)) = LOWER(TRIM(i.municipality_name))
-          AND g.state = :uf
-          AND g.category = 'municipality'
+          AND g.category = 'state'
           AND g.is_active = true
         WHERE TRIM(i.product_label) <> ''
           AND LOWER(TRIM(i.product_label)) <> 'total'
+          AND (:uf::text IS NULL OR g.state = :uf)
         ORDER BY 1 ASC
         `,
-        { replacements: { uf }, type: QueryTypes.SELECT }
+        { replacements: { uf: uf || null }, type: QueryTypes.SELECT }
       );
       const data = rows
         .map((r) => ({

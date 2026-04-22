@@ -1,10 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const { sequelize, models } = require('../config/database');
+const { Op, fn, col, literal } = require('sequelize');
 const { ClimateData, GeoData, OfficialAlert } = models;
 const { buildDashboardSummary } = require('../services/dashboardSummaryService');
 const { runClimateSync } = require('../services/climateSyncService');
 const alertSvc = require('../services/climateAlertsUiService');
+const { BRAZIL_UFS, normalizeUf } = require('../utils/brazilUfs');
 
 function requireClimateSyncToken(req, res, next) {
   const secret = process.env.CLIMATE_SYNC_SECRET;
@@ -22,6 +24,46 @@ function requireClimateSyncToken(req, res, next) {
 }
 const { validationResult } = require('express-validator');
 const { body, query, param } = require('express-validator');
+
+const CLIMATE_VARIABLE_COLUMN_MAP = {
+  temperatura_media: 'avg_temperature',
+  temperatura_maxima: 'max_temperature',
+  temperatura_minima: 'min_temperature',
+  precipitacao: 'precipitation',
+  umidade: 'humidity',
+  vento: 'wind_speed',
+  pressao: 'atmospheric_pressure'
+};
+
+function parsePositiveInt(rawValue, fallback) {
+  const parsed = parseInt(String(rawValue ?? fallback), 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+async function listAvailableUfsFromClimate() {
+  const rows = await ClimateData.findAll({
+    attributes: [[literal('DISTINCT COALESCE("ClimateData"."uf", "geoData"."state")'), 'uf']],
+    include: [{
+      model: GeoData,
+      as: 'geoData',
+      attributes: [],
+      where: { isActive: true },
+      required: true
+    }],
+    where: {
+      [Op.or]: [
+        { uf: { [Op.ne]: null } },
+        { '$geoData.state$': { [Op.ne]: null } }
+      ]
+    },
+    raw: true
+  });
+
+  return rows
+    .map((row) => String(row.uf || '').trim().toUpperCase())
+    .filter((uf) => BRAZIL_UFS.includes(uf))
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
 
 // Middleware de validação
 const validateRequest = (req, res, next) => {
@@ -210,7 +252,7 @@ router.get('/stats', [
 // GET /api/climate/dashboard-summary — contrato alinhado ao new_front (DashboardSummaryDto)
 // Query opcional: ?state=TO — KPIs e tabela apenas para essa UF (se existir em geo_data).
 router.get('/dashboard-summary', [
-  query('state').optional().isString().isLength({ min: 2, max: 2 }),
+  query('state').optional({ values: 'falsy' }).isString().isLength({ min: 2, max: 2 }),
   validateRequest
 ], async (req, res) => {
   try {
@@ -220,6 +262,134 @@ router.get('/dashboard-summary', [
     console.error('Erro ao montar dashboard-summary:', error);
     res.status(500).json({
       message: 'Erro ao montar resumo do dashboard',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// GET /api/climate/ufs - UFs disponíveis para consulta climática
+router.get('/ufs', async (req, res) => {
+  try {
+    const data = await listAvailableUfsFromClimate();
+    res.json({
+      success: true,
+      data: [{ value: 'ALL', label: 'Brasil (todos)' }, ...data.map((uf) => ({ value: uf, label: uf }))]
+    });
+  } catch (error) {
+    console.error('Erro ao listar UFs climáticas:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao listar UFs',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// GET /api/climate/series - Série padronizada por UF (ou ALL)
+router.get('/series', [
+  query('uf').optional().isString(),
+  query('start').exists().isISO8601(),
+  query('end').exists().isISO8601(),
+  query('variavel').exists().isString(),
+  query('limit').optional().isInt({ min: 1, max: 1000 }),
+  query('offset').optional().isInt({ min: 0 }),
+  validateRequest
+], async (req, res) => {
+  try {
+    const uf = normalizeUf(req.query.uf || 'ALL');
+    if (!uf) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parâmetro uf inválido. Use ALL ou uma UF válida (ex.: SP).'
+      });
+    }
+
+    const start = String(req.query.start).slice(0, 10);
+    const end = String(req.query.end).slice(0, 10);
+    if (start > end) {
+      return res.status(400).json({
+        success: false,
+        message: 'Intervalo inválido: start deve ser menor ou igual a end.'
+      });
+    }
+
+    const variavel = String(req.query.variavel || '').trim().toLowerCase();
+    const variableColumn = CLIMATE_VARIABLE_COLUMN_MAP[variavel];
+    if (!variableColumn) {
+      return res.status(400).json({
+        success: false,
+        message: `Variável inválida. Use: ${Object.keys(CLIMATE_VARIABLE_COLUMN_MAP).join(', ')}.`
+      });
+    }
+
+    const limit = parsePositiveInt(req.query.limit, 365);
+    const offset = parsePositiveInt(req.query.offset, 0);
+    const geoStateExpr = literal('COALESCE("ClimateData"."uf", "geoData"."state")');
+    const where = { date: { [Op.between]: [start, end] } };
+    if (uf !== 'ALL') {
+      where[Op.and] = [sequelize.where(fn('COALESCE', col('ClimateData.uf'), col('geoData.state')), uf)];
+    }
+
+    const rows = await ClimateData.findAll({
+      attributes: [
+        'date',
+        [geoStateExpr, 'uf'],
+        [fn('AVG', col(`ClimateData.${variableColumn}`)), 'value']
+      ],
+      include: [{
+        model: GeoData,
+        as: 'geoData',
+        attributes: [],
+        where: { isActive: true },
+        required: true
+      }],
+      where,
+      group: ['date', geoStateExpr],
+      order: [['date', 'ASC']],
+      limit,
+      offset,
+      raw: true
+    });
+
+    const values = rows.map((row) => Number(row.value)).filter((value) => Number.isFinite(value));
+    const avgValue = values.length ? values.reduce((acc, v) => acc + v, 0) / values.length : null;
+    const minValue = values.length ? Math.min(...values) : null;
+    const maxValue = values.length ? Math.max(...values) : null;
+
+    if (uf !== 'ALL' && rows.length === 0) {
+      console.warn(`[climate/series] Sem dados para UF=${uf} no período ${start}..${end} e variável=${variavel}.`);
+    }
+
+    return res.json({
+      success: true,
+      metadata: {
+        uf,
+        periodo: { start, end },
+        variavel,
+        fonte: 'climate_data',
+        unidade: variavel === 'precipitacao' ? 'mm' : variavel === 'umidade' ? '%' : 'SI'
+      },
+      serieTemporal: rows.map((row) => ({
+        date: row.date,
+        uf: String(row.uf || '').toUpperCase(),
+        value: row.value != null ? Number(row.value) : null
+      })),
+      estatisticas: {
+        media: avgValue != null ? Number(avgValue.toFixed(4)) : null,
+        min: minValue != null ? Number(minValue.toFixed(4)) : null,
+        max: maxValue != null ? Number(maxValue.toFixed(4)) : null
+      },
+      pagination: {
+        limit,
+        offset,
+        returned: rows.length
+      }
+    });
+  } catch (error) {
+    console.error('Erro em /api/climate/series:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Erro interno ao consultar série climática',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
@@ -359,6 +529,7 @@ router.get('/:id', [
 // POST /api/climate - Criar novos dados climáticos
 router.post('/', [
   body('geoDataId').isUUID(),
+  body('uf').optional().isString().isLength({ min: 2, max: 2 }),
   body('date').isISO8601(),
   body('dataSource').isIn(['inmet', 'cptec', 'nasa', 'noaa', 'usuario', 'satelite', 'outros']),
   body('avgTemperature').optional().isDecimal(),
@@ -386,6 +557,11 @@ router.post('/', [
     climateData.year = date.getFullYear();
     climateData.month = date.getMonth() + 1;
     climateData.day = date.getDate();
+    if (climateData.uf) climateData.uf = String(climateData.uf).trim().toUpperCase().slice(0, 2);
+    if (!climateData.uf) {
+      const geo = await GeoData.findByPk(climateData.geoDataId, { attributes: ['state'] });
+      if (geo?.state) climateData.uf = String(geo.state).trim().toUpperCase().slice(0, 2);
+    }
     
     // Verificar se já existe dados para a mesma região e data
     const existing = await ClimateData.findOne({

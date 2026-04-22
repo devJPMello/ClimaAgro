@@ -38,6 +38,17 @@ function monthLabelFromYm(ym) {
   return `${names[m - 1]}/${String(y).slice(2)}`;
 }
 
+function isoDateUtcToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function clampIsoDateToToday(isoDate) {
+  const today = isoDateUtcToday();
+  const d = String(isoDate || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return today;
+  return d > today ? today : d;
+}
+
 // GET /api/productivity/climate-vs-productivity - Série comparativa por safra
 router.get('/climate-vs-productivity', [
   query('season').exists().isString().matches(/^(\d{2}|\d{4})\/(\d{2}|\d{4})$/),
@@ -57,8 +68,11 @@ router.get('/climate-vs-productivity', [
     if (!baseYear) {
       return res.status(400).json({ success: false, message: 'Safra inválida.' });
     }
-    const startDate = `${baseYear}-01-01`;
-    const endDate = `${baseYear}-12-31`;
+    let startDate = `${baseYear}-01-01`;
+    let endDate = `${baseYear}-12-31`;
+    // Open-Meteo archive só aceita datas até "hoje".
+    endDate = clampIsoDateToToday(endDate);
+    if (startDate > endDate) startDate = endDate;
 
     const productivityWhere = {
       season: rawSeason === normalizedSeason ? rawSeason : { [Op.in]: [rawSeason, normalizedSeason] },
@@ -80,40 +94,40 @@ router.get('/climate-vs-productivity', [
       attributes: ['productivity', 'municipalityName', 'season', 'cropType', 'state']
     });
 
-    if (!productivityRows.length) {
-      return res.json({
-        success: true,
-        data: [],
-        meta: { season: rawSeason, baseYear, startDate, endDate }
-      });
-    }
-
     const firstWithGeo = productivityRows.find((row) => row.geoData && row.geoData.id);
-    const municipalityName = municipality || String(productivityRows[0].municipalityName || '');
-    if (!firstWithGeo?.geoData?.id) {
-      return res.status(404).json({
-        success: false,
-        message: `Geometria não encontrada para ${municipalityName}/${state}.`
-      });
-    }
-
-    const centroidRows = await sequelize.query(
-      `
-      SELECT
-        ST_Y(ST_Centroid(geom))::float AS lat,
-        ST_X(ST_Centroid(geom))::float AS lon
-      FROM geo_data
-      WHERE id = :geoDataId
-      LIMIT 1
-      `,
-      {
-        replacements: { geoDataId: firstWithGeo.geoData.id },
-        type: QueryTypes.SELECT
-      }
-    );
+    const municipalityName = municipality || String(productivityRows[0]?.municipalityName || '');
+    const centroidRows = firstWithGeo?.geoData?.id
+      ? await sequelize.query(
+          `
+          SELECT
+            ST_Y(ST_Centroid(geom))::float AS lat,
+            ST_X(ST_Centroid(geom))::float AS lon
+          FROM geo_data
+          WHERE id = :geoDataId
+          LIMIT 1
+          `,
+          {
+            replacements: { geoDataId: firstWithGeo.geoData.id },
+            type: QueryTypes.SELECT
+          }
+        )
+      : await sequelize.query(
+          `
+          SELECT
+            ST_Y(ST_Centroid(geom::geometry))::float AS lat,
+            ST_X(ST_Centroid(geom::geometry))::float AS lon
+          FROM geo_data
+          WHERE category = 'state' AND state = :state
+          LIMIT 1
+          `,
+          {
+            replacements: { state },
+            type: QueryTypes.SELECT
+          }
+        );
     const coords = centroidRows[0];
     if (!coords || !Number.isFinite(Number(coords.lat)) || !Number.isFinite(Number(coords.lon))) {
-      return res.status(404).json({ success: false, message: 'Coordenadas não encontradas para o município.' });
+      return res.status(404).json({ success: false, message: 'Coordenadas não encontradas para a UF.' });
     }
 
     const climatePayload = await fetchHistoricalDailyByCoords({
@@ -127,11 +141,13 @@ router.get('/climate-vs-productivity', [
     const tempArray = Array.isArray(daily.temperature_2m_mean) ? daily.temperature_2m_mean : [];
     const humidityArray = Array.isArray(daily.relative_humidity_2m_mean) ? daily.relative_humidity_2m_mean : [];
 
-    const avgProductivity = mean(
-      productivityRows
-        .map((row) => Number(row.productivity))
-        .filter((value) => Number.isFinite(value))
-    );
+    const avgProductivity = productivityRows.length
+      ? mean(
+          productivityRows
+            .map((row) => Number(row.productivity))
+            .filter((value) => Number.isFinite(value))
+        )
+      : null;
 
     const dayKeys = Array.isArray(daily.time) ? daily.time : [];
     const monthBuckets = new Map();
@@ -173,7 +189,7 @@ router.get('/climate-vs-productivity', [
         baseYear,
         startDate,
         endDate,
-        municipality: municipalityName,
+        municipality: municipalityName || undefined,
         state
       }
     });
@@ -190,7 +206,9 @@ router.get('/climate-vs-productivity', [
 // GET /api/productivity - Listar dados de produtividade com filtros
 router.get('/', [
   query('year').optional().isInt({ min: 2000, max: 2030 }),
+  query('mesAno').optional().matches(/^\d{4}-\d{2}$/),
   query('season').optional().matches(/^\d{4}\/\d{2}$/),
+  query('period').optional().matches(/^\d{4}-\d{2}$/),
   query('cropType').optional({ checkFalsy: true }).trim().isString().isLength({ min: 1, max: 80 }),
   query('productLabel').optional().isString().isLength({ min: 1, max: 300 }),
   query('region').optional().isString(),
@@ -201,12 +219,14 @@ router.get('/', [
   validateRequest
 ], async (req, res) => {
   try {
-    const { year, season, cropType, productLabel, region, state, municipality, limit = 50, offset = 0 } = req.query;
+    const { year, mesAno, season, period, cropType, productLabel, region, state, municipality, limit = 50, offset = 0 } = req.query;
     
     const whereClause = {};
     const includeWhere = { isActive: true };
     
-    if (season) whereClause.season = String(season);
+    if (mesAno) whereClause.periodRef = String(mesAno);
+    else if (period) whereClause.periodRef = String(period);
+    else if (season) whereClause.season = String(season);
     else if (year) whereClause.year = year;
     if (cropType) whereClause.cropType = cropType;
     if (productLabel && String(productLabel).trim()) {
@@ -324,6 +344,42 @@ router.get('/product-labels', [
     res.json({ success: true, data });
   } catch (error) {
     console.error('Erro ao listar product-labels:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro interno do servidor',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// GET /api/productivity/month-years — períodos mensais distintos (YYYY-MM), opcionalmente por UF
+router.get('/month-years', [
+  query('state').optional().isString().isLength({ min: 2, max: 2 }),
+  validateRequest
+], async (req, res) => {
+  try {
+    const raw = req.query.state != null ? String(req.query.state).trim().toUpperCase().slice(0, 2) : '';
+    const uf = /^[A-Z]{2}$/.test(raw) ? raw : null;
+    const rows = await sequelize.query(
+      `
+      SELECT DISTINCT p.period_ref AS "monthYear"
+      FROM productivity p
+      WHERE p.period_ref IS NOT NULL
+        AND p.period_ref <> ''
+        AND (:uf::text IS NULL OR p.state = :uf)
+      ORDER BY p.period_ref DESC
+      `,
+      {
+        replacements: { uf },
+        type: QueryTypes.SELECT
+      }
+    );
+    const data = rows
+      .map((r) => String(r.monthYear || '').trim())
+      .filter((x) => /^\d{4}-\d{2}$/.test(x));
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Erro ao listar month-years:', error);
     res.status(500).json({
       success: false,
       message: 'Erro interno do servidor',
