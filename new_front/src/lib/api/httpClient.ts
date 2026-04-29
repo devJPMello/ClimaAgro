@@ -2,6 +2,15 @@ import { ApiError } from './errors';
 
 const DEFAULT_TIMEOUT_MS = 25_000;
 const MAX_RETRIES = 2;
+const DEFAULT_GET_CACHE_TTL_MS = 30_000;
+
+type CachedGetEntry = {
+  expiresAt: number;
+  value: unknown;
+};
+
+const getResponseCache = new Map<string, CachedGetEntry>();
+const inFlightGetRequests = new Map<string, Promise<unknown>>();
 
 /** Garante sufixo `/api` (rotas Express estão em `/api/...`). Aceita `http://host:5000` ou `http://host:5000/api`. */
 function normalizeApiBaseUrl(raw: string): string {
@@ -62,6 +71,37 @@ export interface HttpClientOptions {
   timeoutMs?: number;
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  /** TTL de cache em ms para GET (0 desativa para a chamada). */
+  cacheTtlMs?: number;
+  /** Força novo request e ignora cache/inflight desta chamada. */
+  forceRefresh?: boolean;
+}
+
+function stableHeadersKey(headers: Record<string, string>): string {
+  const entries = Object.entries(headers).sort(([a], [b]) => a.localeCompare(b));
+  return entries.map(([k, v]) => `${k}:${v}`).join('|');
+}
+
+function cloneCachedValue<T>(value: T): T {
+  try {
+    return structuredClone(value);
+  } catch {
+    return JSON.parse(JSON.stringify(value)) as T;
+  }
+}
+
+function getRequestCacheKey(method: HttpMethod, url: string, headers: Record<string, string>): string {
+  return `${method}::${url}::${stableHeadersKey(headers)}`;
+}
+
+function readGetCache<T>(key: string): T | null {
+  const hit = getResponseCache.get(key);
+  if (!hit) return null;
+  if (Date.now() > hit.expiresAt) {
+    getResponseCache.delete(key);
+    return null;
+  }
+  return cloneCachedValue(hit.value as T);
 }
 
 async function fetchWithTimeout(
@@ -87,7 +127,15 @@ export async function httpRequest<T>(
   path: string,
   options: HttpClientOptions & { body?: unknown; retry?: boolean } = {}
 ): Promise<T> {
-  const { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, signal, body, retry = method === 'GET' } = options;
+  const {
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    headers = {},
+    signal,
+    body,
+    retry = method === 'GET',
+    cacheTtlMs = DEFAULT_GET_CACHE_TTL_MS,
+    forceRefresh = false,
+  } = options;
   const url = resolveUrl(path);
 
   const init: RequestInit = {
@@ -103,45 +151,79 @@ export async function httpRequest<T>(
     init.body = typeof body === 'string' ? body : JSON.stringify(body);
   }
 
-  let attempt = 0;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    try {
-      const response = await fetchWithTimeout(url, init, timeoutMs);
-      const parsed = await parseBody(response);
-
-      if (!response.ok) {
-        const msg =
-          typeof parsed === 'object' && parsed !== null && 'message' in parsed
-            ? String((parsed as { message: unknown }).message)
-            : response.statusText || 'Erro na requisição';
-        throw new ApiError(msg || `HTTP ${response.status}`, response.status, parsed);
-      }
-
-      return parsed as T;
-    } catch (e) {
-      if (e instanceof ApiError && retry && method === 'GET' && (e.status === 429 || e.status >= 500)) {
-        if (attempt < MAX_RETRIES) {
-          attempt += 1;
-          await sleep(400 * attempt);
-          continue;
-        }
-      }
-      if (e instanceof DOMException && e.name === 'AbortError') {
-        throw new ApiError('Tempo esgotado. Tente novamente.', 0);
-      }
-      if (
-        e instanceof TypeError &&
-        /failed to fetch|network|load failed/i.test(String((e as Error).message))
-      ) {
-        throw new ApiError(
-          'Não foi possível conectar à API. Em dev, suba o backend (porta 5000) e use `npm run dev` no front para o proxy /api.',
-          0
-        );
-      }
-      throw e;
-    }
+  const requestCacheKey = getRequestCacheKey(method, url, init.headers as Record<string, string>);
+  const useGetCache = method === 'GET' && cacheTtlMs > 0;
+  if (useGetCache && !forceRefresh) {
+    const cached = readGetCache<T>(requestCacheKey);
+    if (cached != null) return cached;
+    const inFlight = inFlightGetRequests.get(requestCacheKey);
+    if (inFlight) return (await inFlight) as T;
   }
+
+  let attempt = 0;
+  const execute = async (): Promise<T> => {
+  // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        const response = await fetchWithTimeout(url, init, timeoutMs);
+        const parsed = await parseBody(response);
+
+        if (!response.ok) {
+          const msg =
+            typeof parsed === 'object' && parsed !== null && 'message' in parsed
+              ? String((parsed as { message: unknown }).message)
+              : response.statusText || 'Erro na requisição';
+          throw new ApiError(msg || `HTTP ${response.status}`, response.status, parsed);
+        }
+
+        return parsed as T;
+      } catch (e) {
+        if (e instanceof ApiError && retry && method === 'GET' && (e.status === 429 || e.status >= 500)) {
+          if (attempt < MAX_RETRIES) {
+            attempt += 1;
+            await sleep(400 * attempt);
+            continue;
+          }
+        }
+        if (e instanceof DOMException && e.name === 'AbortError') {
+          throw new ApiError('Tempo esgotado. Tente novamente.', 0);
+        }
+        if (
+          e instanceof TypeError &&
+          /failed to fetch|network|load failed/i.test(String((e as Error).message))
+        ) {
+          throw new ApiError(
+            'Não foi possível conectar à API. Em dev, suba o backend (porta 5000) e use `npm run dev` no front para o proxy /api.',
+            0
+          );
+        }
+        throw e;
+      }
+    }
+  };
+
+  if (useGetCache) {
+    const task = execute()
+      .then((result) => {
+        getResponseCache.set(requestCacheKey, {
+          expiresAt: Date.now() + cacheTtlMs,
+          value: cloneCachedValue(result),
+        });
+        return result;
+      })
+      .finally(() => {
+        inFlightGetRequests.delete(requestCacheKey);
+      });
+    inFlightGetRequests.set(requestCacheKey, task);
+    return task;
+  }
+
+  const result = await execute();
+  if (method !== 'GET') {
+    // Escritas invalidam leituras para evitar UI stale.
+    getResponseCache.clear();
+  }
+  return result;
 }
 
 export const httpClient = {

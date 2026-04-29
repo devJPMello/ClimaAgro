@@ -24,6 +24,23 @@ npm run sync:climate
 
 3. Confira no banco: `climate_data` com `data_source` = `cptec` ou `outros` (Open-Meteo), e `metadata` com blocos CPTEC/METAR/Open-Meteo.
 
+### Sincronização automática (sem `npm run sync:climate`)
+
+Também é possível deixar o backend sincronizando automaticamente por intervalo (ex.: 12h) ou em horário fixo diário:
+
+```bash
+ENABLE_CLIMATE_AUTO_SYNC=true
+CLIMATE_AUTO_SYNC_EVERY_HOURS=12
+CLIMATE_AUTO_SYNC_HOUR=3
+CLIMATE_AUTO_SYNC_MINUTE=0
+CLIMATE_AUTO_SYNC_RUN_ON_BOOT=false
+```
+
+- `ENABLE_CLIMATE_AUTO_SYNC`: liga/desliga o agendamento.
+- `CLIMATE_AUTO_SYNC_EVERY_HOURS`: intervalo em horas. Se `> 0`, tem prioridade sobre o horário diário.
+- `CLIMATE_AUTO_SYNC_HOUR` e `CLIMATE_AUTO_SYNC_MINUTE`: usados quando `CLIMATE_AUTO_SYNC_EVERY_HOURS=0` (ou ausente), para rodar 1x por dia.
+- `CLIMATE_AUTO_SYNC_RUN_ON_BOOT=true`: roda uma sincronização extra ao subir o backend.
+
 ### Adapter local INMET (somente alertas RSS/CAP)
 
 Para avisos meteorológicos oficiais:

@@ -5,7 +5,8 @@ require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const { connectDB } = require('./config/database');
+const { connectDB, sequelize, models } = require('./config/database');
+const { startClimateAutoSyncScheduler } = require('./services/climateSyncScheduler');
 
 const app = express();
 
@@ -105,6 +106,7 @@ app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📊 API: http://localhost:${PORT}/api  ·  health: http://localhost:${PORT}/api/health`);
+  startClimateAutoSyncScheduler({ sequelize, models });
 });
 
 module.exports = app;

@@ -240,17 +240,18 @@ export function SeriesTemporais() {
           if (uf === 'ALL') return [];
           const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
           const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
-          const allRows: ProductivityListResponse['data'] = [];
-          for (let y = ys; y <= ye; y += 1) {
-            const prodRes = await listProductivityRecords({
-              state: uf,
-              cropType: cultura === 'ALL' ? undefined : cultura,
-              year: String(y),
-              limit: 500,
-            });
-            if (prodRes.success && Array.isArray(prodRes.data)) allRows.push(...prodRes.data);
-          }
-          return allRows;
+          const years = Array.from({ length: ye - ys + 1 }, (_, idx) => String(ys + idx));
+          const responses = await Promise.all(
+            years.map((year) =>
+              listProductivityRecords({
+                state: uf,
+                cropType: cultura === 'ALL' ? undefined : cultura,
+                year,
+                limit: 500,
+              })
+            )
+          );
+          return responses.flatMap((prodRes) => (prodRes.success && Array.isArray(prodRes.data) ? prodRes.data : []));
         })(),
       ]);
       let climateMonthly = aggregateClimateByMonth(tempSeries, precipSeries, humSeries, startYear, endYear);
@@ -267,26 +268,31 @@ export function SeriesTemporais() {
             ? ufOptions.map((o) => String(o.value || '').trim().toUpperCase()).filter((v) => /^[A-Z]{2}$/.test(v))
             : [uf];
 
-        for (const stateUf of targetUfs) {
-          for (let y = ys; y <= ye; y += 1) {
-            const fallback = await getClimateVsProductivity({
-              state: stateUf,
-              cropType: cultura === 'ALL' ? undefined : cultura,
-              season: seasonFromYear(String(y)),
-            });
-            if (!(fallback.success && Array.isArray(fallback.data) && fallback.data.length)) continue;
-            for (const row of fallback.data) {
-              const ym = String(row.month || '').trim();
-              if (!/^\d{4}-\d{2}$/.test(ym)) continue;
-              if (!byMonth.has(ym)) byMonth.set(ym, { t: [], h: [], p: [] });
-              const b = byMonth.get(ym)!;
-              const t = Number(row.avgTemperature ?? NaN);
-              const h = Number(row.avgHumidity ?? NaN);
-              const p = Number(row.climate ?? NaN);
-              if (Number.isFinite(t)) b.t.push(t);
-              if (Number.isFinite(h)) b.h.push(h);
-              if (Number.isFinite(p)) b.p.push(p);
-            }
+        const fallbackResponses = await Promise.all(
+          targetUfs.flatMap((stateUf) =>
+            Array.from({ length: ye - ys + 1 }, (_, idx) => String(ys + idx)).map((y) =>
+              getClimateVsProductivity({
+                state: stateUf,
+                cropType: cultura === 'ALL' ? undefined : cultura,
+                season: seasonFromYear(y),
+              })
+            )
+          )
+        );
+
+        for (const fallback of fallbackResponses) {
+          if (!(fallback.success && Array.isArray(fallback.data) && fallback.data.length)) continue;
+          for (const row of fallback.data) {
+            const ym = String(row.month || '').trim();
+            if (!/^\d{4}-\d{2}$/.test(ym)) continue;
+            if (!byMonth.has(ym)) byMonth.set(ym, { t: [], h: [], p: [] });
+            const b = byMonth.get(ym)!;
+            const t = Number(row.avgTemperature ?? NaN);
+            const h = Number(row.avgHumidity ?? NaN);
+            const p = Number(row.climate ?? NaN);
+            if (Number.isFinite(t)) b.t.push(t);
+            if (Number.isFinite(h)) b.h.push(h);
+            if (Number.isFinite(p)) b.p.push(p);
           }
         }
         climateMonthly = buildYearMonthKeysRange(startYear, endYear).map((ym) => {
