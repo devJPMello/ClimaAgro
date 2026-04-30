@@ -38,7 +38,7 @@ export const IBGE_UF_COD_TO_SIGLA: Record<string, string> = {
   '53': 'DF',
 };
 
-const UF_NOME: Record<string, string> = {
+export const UF_NOME: Record<string, string> = {
   RO: 'Rondônia',
   AC: 'Acre',
   AM: 'Amazonas',
