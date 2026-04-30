@@ -163,6 +163,7 @@ const ClimateData = require('../models/ClimateData');
 const OfficialAlert = require('../models/OfficialAlert');
 const ReportExport = require('../models/ReportExport');
 const IbgeSidra1612Row = require('../models/IbgeSidra1612Row');
+const ChatHistory = require('../models/ChatHistory');
 
 // Configurar associações entre modelos
 const setupAssociations = () => {
@@ -195,6 +196,7 @@ module.exports = {
     ClimateData,
     OfficialAlert,
     ReportExport,
-    IbgeSidra1612Row
+    IbgeSidra1612Row,
+    ChatHistory
   }
 };

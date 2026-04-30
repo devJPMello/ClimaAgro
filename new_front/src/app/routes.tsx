@@ -9,6 +9,7 @@ import { MapaProdutividade } from "./pages/MapaProdutividade";
 import { SeriesTemporais } from "./pages/SeriesTemporais";
 import { Alertas } from "./pages/Alertas";
 import { ExportarRelatorios } from "./pages/ExportarRelatorios";
+import { IAgro } from "./pages/IAgro";
 import { Perfil } from "./pages/Perfil";
 import { NotFound } from "./pages/NotFound";
 import { RequireAuth, RequireGuest } from "./components/auth/RouteGuards";
@@ -48,6 +49,7 @@ export const router = createBrowserRouter([
       { path: "series-temporais", Component: SeriesTemporais },
       { path: "alertas", Component: Alertas },
       { path: "exportar", Component: ExportarRelatorios },
+      { path: "iagro", Component: IAgro },
       { path: "perfil", Component: Perfil },
       { path: "*", Component: NotFound },
     ],

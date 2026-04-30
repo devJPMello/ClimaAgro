@@ -38,6 +38,12 @@ const ChatHistory = sequelize.define(
       defaultValue: true,
       field: 'is_active',
     },
+    isFavorite: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'is_favorite',
+    },
   },
   {
     tableName: 'chat_history',
@@ -46,6 +52,7 @@ const ChatHistory = sequelize.define(
       { fields: ['thread_id'] },
       { fields: ['created_at'] },
       { fields: ['is_active'] },
+      { fields: ['is_favorite'] },
     ],
   }
 );
