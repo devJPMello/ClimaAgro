@@ -26,6 +26,13 @@ const KPI_ICONS: Record<DashboardMetricKey, LucideIcon> = {
   productivity: TrendingUp,
 };
 
+const KPI_COLORS: Record<DashboardMetricKey, string> = {
+  temperature: 'bg-primary',
+  precipitation: 'bg-blue-400',
+  alerts: 'bg-severity-high',
+  productivity: 'bg-severity-low',
+};
+
 const atalhos = [
   {
     title: 'Mapa Climático',
@@ -96,7 +103,7 @@ export function Dashboard() {
               {summary.kpis.map((kpi, index) => {
                 const Icon = KPI_ICONS[kpi.metric];
                 const { metric: _m, ...kpiProps } = kpi;
-                return <KPICard key={index} {...kpiProps} icon={Icon} />;
+                return <KPICard key={index} {...kpiProps} icon={Icon} color={KPI_COLORS[kpi.metric]} />;
               })}
             </div>
 
