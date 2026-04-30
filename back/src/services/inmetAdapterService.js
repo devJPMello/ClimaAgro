@@ -82,14 +82,17 @@ const UF_NAME_PATTERNS = [
   { uf: 'MT', pattern: /\bmato-grosso\b|\bmato grosso\b/i },
   { uf: 'MS', pattern: /\bmato-grosso do sul\b|\bmato grosso do sul\b/i },
   { uf: 'MG', pattern: /\bminas gerais\b/i },
-  { uf: 'PA', pattern: /\bpara\b/i },
+  // "PA" não pode casar a preposição "para" em frases genéricas (ex.: "alerta para...").
+  // Mantemos apenas contextos explícitos de estado.
+  { uf: 'PA', pattern: /\bestado do para\b|\bpara\s*\(pa\)\b|\bpa\s*-\s*para\b/i },
   { uf: 'PB', pattern: /\bparaiba\b/i },
   { uf: 'PR', pattern: /\bparana\b/i },
   { uf: 'PE', pattern: /\bpernambuco\b/i },
   { uf: 'PI', pattern: /\bpiaui\b/i },
   { uf: 'RJ', pattern: /\brio de janeiro\b/i },
   { uf: 'RN', pattern: /\brio grande do norte\b/i },
-  { uf: 'RS', pattern: /\brio grande do sul\b/i },
+  // Mesorregiões RS costumam usar "Rio-grandense" sem citar o nome completo do estado.
+  { uf: 'RS', pattern: /\brio grande do sul\b|\brio-?grandenses?\b/i },
   { uf: 'RO', pattern: /\brondonia\b/i },
   { uf: 'RR', pattern: /\broraima\b/i },
   { uf: 'SC', pattern: /\bsanta catarina\b/i },
@@ -118,9 +121,26 @@ const TO_CITY_PATTERNS = [
   { key: 'guarai', label: 'Guaraí', re: /\bguarai\b/i }
 ];
 
+function stripUrlsForStateScan(text) {
+  return String(text || '').replace(/https?:\/\/[^\s<>"']+/gi, ' ');
+}
+
+/** Evita falso "PA" por segmentos de URL (ex.: .../PA/...) ou códigos soltos no XML. */
+function hasStrictParaStateHint(text) {
+  const t = String(text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, ' ');
+  return (
+    /\bestado do para\b|\bpara\s*\(pa\)\b|\bpa\s*-\s*para\b/i.test(t) ||
+    /\bbel[eé]m\b.*\bpa\b|\bpa\b.*\bbel[eé]m\b/i.test(t)
+  );
+}
+
 function extractUfList(text) {
   if (!text) return [];
-  const t = String(text).normalize('NFD').replace(/[\u0300-\u036f]/g, ' ');
+  const raw = String(text).normalize('NFD').replace(/[\u0300-\u036f]/g, ' ');
+  // Siglas em caminhos de URL geram falsos positivos (ex.: "/PA/" ≠ Pará).
+  const t = stripUrlsForStateScan(raw).replace(/\s+/g, ' ');
   const states = new Set();
 
   const byCode = t.match(/\b(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/g);
@@ -134,6 +154,34 @@ function extractUfList(text) {
   if (TO_REGION_HINTS.some((re) => re.test(t))) states.add('TO');
 
   return [...states];
+}
+
+/**
+ * Combina UFs persistidas (JSON/ETL) com extração do texto do aviso.
+ * Corrige casos em que o armazenamento traz "PA" por engano mas o corpo cita RS (ex.: mesorregiões Rio-grandenses).
+ */
+function reconcileAlertStates(storedStates, fullText) {
+  const stored = normalizeStateCodes(Array.isArray(storedStates) ? storedStates : []);
+  const text = String(fullText || '');
+  const extracted = extractUfList(text);
+  let merged = [...new Set([...stored, ...extracted])];
+
+  const rsStrong =
+    /\brio\s+grande\s+do\s+sul\b|\brio-?grandenses?\b|\bgauch[oa]s?\b|\bserra\s+gauch/i.test(text);
+  if (rsStrong && merged.includes('PA') && !hasStrictParaStateHint(text)) {
+    merged = merged.filter((uf) => uf !== 'PA');
+  }
+  if (rsStrong && !merged.includes('RS')) merged.push('RS');
+
+  return [...new Set(merged)].sort();
+}
+
+function normalizeStateCodes(values) {
+  if (!Array.isArray(values)) return [];
+  const out = values
+    .map((x) => String(x || '').trim().toUpperCase())
+    .filter((x) => /^(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)$/.test(x));
+  return [...new Set(out)];
 }
 
 function extractTocantinsCities(text) {
@@ -422,7 +470,17 @@ function normalizeRssAndCapToAlertItems(items) {
     const validFrom = dateOnly(cap.onset || it.pubDate) || fmtDateOnlyBr(new Date());
     const validTo = dateOnly(cap.expires || cap.onset || it.pubDate) || validFrom;
     const recommendationText = stripTags(cap.instruction || '');
-    const states = extractUfList(`${title} ${description} ${recommendationText}`);
+    const explicitStates = normalizeStateCodes(
+      it.states ||
+      it.estados ||
+      cap.states ||
+      cap.estados ||
+      it.payload?.states ||
+      it.payload?.estados
+    );
+    const states = explicitStates.length
+      ? explicitStates
+      : extractUfList(`${title} ${description} ${recommendationText}`);
     const cidades = extractTocantinsCities(`${title} ${description} ${recommendationText}`);
     const cidadesFinal = cidades;
     const externalId = `${validFrom}:${title}:${idx}`.slice(0, 120);
@@ -439,6 +497,7 @@ function normalizeRssAndCapToAlertItems(items) {
         source: 'inmet-alert-rss-cap-adapter',
         link: it.link || null,
         pubDate: it.pubDate || null,
+        explicitStates,
         cities: cidadesFinal,
         cap: cap || null
       }
@@ -470,5 +529,7 @@ module.exports = {
   parseStationCodes,
   fmtDateOnlyBr,
   buildFeatureCollectionFromApitempo,
-  fetchAndNormalizeInmetAlerts
+  fetchAndNormalizeInmetAlerts,
+  extractUfList,
+  reconcileAlertStates
 };

@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const crypto = require('crypto');
 const inmetAlerts = require('./inmetAlertsClient');
+const { reconcileAlertStates } = require('./inmetAdapterService');
 const { isPrecipitationLikelyFromTempoCode } = require('../data/cptecRainTempoCodes');
 
 function fmtDateBR(isoDate) {
@@ -388,6 +389,22 @@ function capPolygonToWkt(polygonText) {
   return `POLYGON((${ring}))`;
 }
 
+function fullTextForOfficialAlertRow(r) {
+  const cap = r?.payload?.cap || {};
+  return [
+    r?.title,
+    r?.description,
+    cap.instruction,
+    cap.areaDesc,
+    cap.event,
+    r?.payload?.recomendacao,
+    r?.payload?.descricao,
+    r?.payload?.description
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 async function citiesByCapPolygon({ GeoData, polygonText, uf, cache }) {
   const wkt = capPolygonToWkt(polygonText);
   if (!wkt || !GeoData?.sequelize) return [];
@@ -418,8 +435,10 @@ async function buildOfficialAlertUiItems(rows, stateFilter, cityFilter, GeoData)
   const cache = new Map();
   const out = [];
   for (const r of rows) {
+    const statesEffective = reconcileAlertStates(r.states, fullTextForOfficialAlertRow(r));
+
     if (uf) {
-      const byUf = Array.isArray(r.states) && r.states.includes(uf);
+      const byUf = statesEffective.includes(uf);
       if (!byUf) continue;
     }
 
@@ -449,8 +468,8 @@ async function buildOfficialAlertUiItems(rows, stateFilter, cityFilter, GeoData)
         tipo: titleUi,
         local: cities.length
           ? `Cidades: ${cities.join(', ')}`
-          : Array.isArray(r.states) && r.states.length
-            ? `UF: ${r.states.join(', ')}`
+          : statesEffective.length
+            ? `UF: ${statesEffective.join(', ')}`
             : 'Brasil',
         valorAtual: (descUi || '—').slice(0, 160),
         limiar: `Vigência: ${r.validFrom} a ${r.validTo}`,

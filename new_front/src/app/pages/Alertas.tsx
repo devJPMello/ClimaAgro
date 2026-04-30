@@ -44,6 +44,13 @@ function fonteLabel(fonte?: string) {
   return 'Derivado';
 }
 
+function valorAtualComRisco(alerta: ClimateAlertDto): string {
+  const source = `${alerta.recomendacao || ''}\n${alerta.impactoEstimado || ''}`;
+  const m = source.match(/riscos?\s+potenciais?\s*:\s*([^\n.;]+)/i);
+  if (m?.[1]?.trim()) return m[1].trim();
+  return alerta.valorAtual;
+}
+
 /** Tenta extrair sigla UF do campo local (ex: "Palmas - TO" → "TO"). */
 function extractUf(local: string): string {
   const match = local.match(/[-–]\s*([A-Z]{2})\s*$/) ?? local.match(/\b([A-Z]{2})$/);
@@ -270,7 +277,7 @@ export function Alertas() {
                                   {SEVERITY_LABEL[alerta.severidade]}
                                 </Badge>
                               </td>
-                              <td className="px-4 py-3 text-foreground">{alerta.valorAtual}</td>
+                              <td className="px-4 py-3 text-foreground">{valorAtualComRisco(alerta)}</td>
                               <td className="px-4 py-3 text-muted-foreground text-xs">{fonteLabel(alerta.fonte)}</td>
                               <td className="px-4 py-3">
                                 <button
@@ -381,6 +388,7 @@ export function Alertas() {
         isOpen={selectedAlerta !== null}
         onClose={() => setSelectedAlerta(null)}
         title={selectedAlerta?.tipo ?? 'Detalhe do Alerta'}
+        size="xl"
       >
         {selectedAlerta && (
           <div className="space-y-4">
@@ -401,7 +409,7 @@ export function Alertas() {
             <div className="grid grid-cols-2 gap-4 pt-3 border-t border-border">
               <div>
                 <p className="text-xs text-muted-foreground mb-1">Valor Atual</p>
-                <p className="text-sm font-medium text-foreground">{selectedAlerta.valorAtual}</p>
+                <p className="text-sm font-medium text-foreground">{valorAtualComRisco(selectedAlerta)}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground mb-1">Limiar</p>
