@@ -1,43 +1,69 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Card, CardBody } from '../components/ui/Card';
+import { Card, CardBody, CardHeader, CardTitle } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
-import { Button } from '../components/ui/Button';
-import { AlertCard } from '../components/ui/AlertCard';
+import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
-import { AlertTriangle, Filter, Download } from 'lucide-react';
+import { Modal } from '../components/ui/Modal';
+import {
+  AlertTriangle, MapPin,
+  ChevronLeft, ChevronRight, Eye,
+} from 'lucide-react';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { listClimateAlerts } from '../../lib/api/alertsApi';
-import { listClimateUfs } from '../../lib/api/climateApi';
-import type { ClimateAlertDto, ClimateAlertListDto } from '../../lib/api/contracts/alerts';
+import type { ClimateAlertDto, ClimateAlertListDto, ClimateAlertSeverity } from '../../lib/api/contracts/alerts';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
+import { UF_NOME } from '../../lib/geo/brazilStatesMalha';
+
+const ALL_UF_OPTIONS = [
+  { value: 'ALL', label: 'Brasil (todos)' },
+  ...Object.entries(UF_NOME)
+    .sort(([, a], [, b]) => a.localeCompare(b, 'pt-BR'))
+    .map(([sigla, nome]) => ({ value: sigla, label: `${nome} (${sigla})` })),
+];
+
+const PAGE_SIZE = 6;
+
+const SEVERITY_LABEL: Record<ClimateAlertSeverity, string> = {
+  critical: 'Crítica',
+  high: 'Alta',
+  medium: 'Média',
+  low: 'Baixa',
+};
+
+const SEVERITY_ICON_COLOR: Record<ClimateAlertSeverity, string> = {
+  critical: 'text-severity-critical',
+  high: 'text-severity-high',
+  medium: 'text-severity-medium',
+  low: 'text-severity-low',
+};
+
+function fonteLabel(fonte?: string) {
+  if (fonte === 'inmet') return 'INMET';
+  if (fonte === 'cptec') return 'CPTEC';
+  return 'Derivado';
+}
+
+/** Tenta extrair sigla UF do campo local (ex: "Palmas - TO" → "TO"). */
+function extractUf(local: string): string {
+  const match = local.match(/[-–]\s*([A-Z]{2})\s*$/) ?? local.match(/\b([A-Z]{2})$/);
+  return match ? match[1] : local;
+}
 
 export function Alertas() {
   const [severidadeFiltro, setSeveridadeFiltro] = usePersistedState('climaagro.pref.alertas.severidade', 'todos');
   const [tipoFiltro, setTipoFiltro] = usePersistedState('climaagro.pref.alertas.tipo', 'todos');
   const [ufFiltro, setUfFiltro] = usePersistedState('climaagro.pref.alertas.uf', 'ALL');
-  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([
-    { value: 'ALL', label: 'Brasil (todos)' },
-  ]);
+  const [page, setPage] = useState(1);
+  const [selectedAlerta, setSelectedAlerta] = useState<ClimateAlertDto | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const data = await listClimateUfs();
-        if (!cancelled && data.length) setUfOptions(data);
-      } catch {
-        // mantém fallback ALL
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    setPage(1);
+  }, [severidadeFiltro, tipoFiltro, ufFiltro]);
 
   const { status, data, error, reload } = useAsyncResource(
     () => listClimateAlerts({ state: ufFiltro === 'ALL' ? undefined : ufFiltro }),
-    [ufFiltro]
+    [ufFiltro],
   );
 
   const filtros = useMemo(
@@ -60,10 +86,6 @@ export function Alertas() {
     low: items.filter((a) => a.severidade === 'low').length,
   });
 
-  const formatUpdated = (iso: string) => {
-    const d = new Date(iso);
-    return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('pt-BR');
-  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -86,156 +108,324 @@ export function Alertas() {
       >
         {(payload) => {
           const alertasFiltrados = filterItems(payload.items);
-          const contagemSeveridade = contagem(payload.items);
+          const cnt = contagem(payload.items);
           const semDadosApi = payload.items.length === 0;
+          const totalPages = Math.max(1, Math.ceil(alertasFiltrados.length / PAGE_SIZE));
+          const currentPage = Math.min(page, totalPages);
+          const paginados = alertasFiltrados.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
           return (
             <>
+              {/* KPIs */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Card>
-                  <CardBody>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground mb-1">Críticos</p>
-                        <p className="text-2xl text-severity-critical" style={{ fontFamily: 'var(--font-serif)' }}>
-                          {contagemSeveridade.critical}
-                        </p>
+                {(
+                  [
+                    { label: 'Críticos', key: 'critical' },
+                    { label: 'Altos', key: 'high' },
+                    { label: 'Médios', key: 'medium' },
+                    { label: 'Baixos', key: 'low' },
+                  ] as const
+                ).map(({ label, key }) => (
+                  <Card key={key}>
+                    <CardBody>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-muted-foreground mb-1">{label}</p>
+                          <p
+                            className={`text-2xl text-severity-${key}`}
+                            style={{ fontFamily: 'var(--font-serif)' }}
+                          >
+                            {cnt[key]}
+                          </p>
+                        </div>
+                        <AlertTriangle className={`w-8 h-8 text-severity-${key}`} />
                       </div>
-                      <AlertTriangle className="w-8 h-8 text-severity-critical" />
-                    </div>
-                  </CardBody>
-                </Card>
-                <Card>
-                  <CardBody>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground mb-1">Altos</p>
-                        <p className="text-2xl text-severity-high" style={{ fontFamily: 'var(--font-serif)' }}>
-                          {contagemSeveridade.high}
-                        </p>
-                      </div>
-                      <AlertTriangle className="w-8 h-8 text-severity-high" />
-                    </div>
-                  </CardBody>
-                </Card>
-                <Card>
-                  <CardBody>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground mb-1">Médios</p>
-                        <p className="text-2xl text-severity-medium" style={{ fontFamily: 'var(--font-serif)' }}>
-                          {contagemSeveridade.medium}
-                        </p>
-                      </div>
-                      <AlertTriangle className="w-8 h-8 text-severity-medium" />
-                    </div>
-                  </CardBody>
-                </Card>
-                <Card>
-                  <CardBody>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-muted-foreground mb-1">Baixos</p>
-                        <p className="text-2xl text-severity-low" style={{ fontFamily: 'var(--font-serif)' }}>
-                          {contagemSeveridade.low}
-                        </p>
-                      </div>
-                      <AlertTriangle className="w-8 h-8 text-severity-low" />
-                    </div>
-                  </CardBody>
-                </Card>
+                    </CardBody>
+                  </Card>
+                ))}
               </div>
 
+              {/* Tabela + Filtros */}
               <Card>
-                <CardBody>
-                  <div className="flex flex-col lg:flex-row gap-4">
-                    <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <Select
-                        label="Severidade"
-                        value={severidadeFiltro}
-                        onChange={(e) => setSeveridadeFiltro(e.target.value)}
-                        options={[
-                          { value: 'todos', label: 'Todas' },
-                          { value: 'critical', label: 'Crítica' },
-                          { value: 'high', label: 'Alta' },
-                          { value: 'medium', label: 'Média' },
-                          { value: 'low', label: 'Baixa' },
-                        ]}
-                      />
-
-                      <Select
-                        label="Tipo"
-                        value={tipoFiltro}
-                        onChange={(e) => setTipoFiltro(e.target.value)}
-                        options={[
-                          { value: 'todos', label: 'Todos' },
-                          { value: 'temperatura', label: 'Temperatura' },
-                          { value: 'umidade', label: 'Umidade' },
-                          { value: 'geada', label: 'Geada' },
-                          { value: 'vento', label: 'Vento' },
-                        ]}
-                      />
-
-                      <Select
-                        label="UF"
-                        value={ufFiltro}
-                        onChange={(e) => setUfFiltro(e.target.value)}
-                        options={ufOptions}
-                      />
-                    </div>
-
-                    <div className="flex items-end gap-2">
-                      <Button variant="secondary" type="button">
-                        <Filter className="w-4 h-4" />
-                        Filtrar
-                      </Button>
-                      <Button variant="ghost" type="button">
-                        <Download className="w-4 h-4" />
-                        Exportar
-                      </Button>
+                <CardHeader>
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <CardTitle>Lista de Alertas</CardTitle>
+                    <div className="flex items-end gap-3 flex-wrap">
+                      <div className="w-52">
+                        <Select
+                          label="Severidade"
+                          value={severidadeFiltro}
+                          onChange={(e) => setSeveridadeFiltro(e.target.value)}
+                          options={[
+                            { value: 'todos', label: 'Todas' },
+                            { value: 'critical', label: 'Crítica' },
+                            { value: 'high', label: 'Alta' },
+                            { value: 'medium', label: 'Média' },
+                            { value: 'low', label: 'Baixa' },
+                          ]}
+                        />
+                      </div>
+                      <div className="w-52">
+                        <Select
+                          label="Tipo"
+                          value={tipoFiltro}
+                          onChange={(e) => setTipoFiltro(e.target.value)}
+                          options={[
+                            { value: 'todos', label: 'Todos' },
+                            { value: 'temperatura', label: 'Temperatura' },
+                            { value: 'umidade', label: 'Umidade' },
+                            { value: 'geada', label: 'Geada' },
+                            { value: 'vento', label: 'Vento' },
+                          ]}
+                        />
+                      </div>
+                      <div className="w-64">
+                        <Select
+                          label="UF"
+                          value={ufFiltro}
+                          onChange={(e) => setUfFiltro(e.target.value)}
+                          options={ALL_UF_OPTIONS}
+                        />
+                      </div>
+                      {(severidadeFiltro !== 'todos' || tipoFiltro !== 'todos' || ufFiltro !== 'ALL') && (
+                        <button
+                          type="button"
+                          onClick={() => { setSeveridadeFiltro('todos'); setTipoFiltro('todos'); setUfFiltro('ALL'); }}
+                          className="text-xs text-primary hover:underline pb-2.5"
+                        >
+                          Limpar
+                        </button>
+                      )}
                     </div>
                   </div>
-                </CardBody>
-              </Card>
+                </CardHeader>
 
-              {semDadosApi ? (
-                <Card>
+                {semDadosApi ? (
                   <CardBody>
                     <EmptyState
                       icon={AlertTriangle}
                       title="Nenhum alerta nesta seleção"
-                      description="Não há alertas nos últimos dias para a UF escolhida. Altere a UF acima (ex.: Brasil (todos)) ou os filtros de severidade / tipo."
+                      description="Não há alertas nos últimos dias para a UF escolhida. Altere a UF ou os filtros."
                     />
                   </CardBody>
-                </Card>
-              ) : alertasFiltrados.length > 0 ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {alertasFiltrados.map((alerta) => (
-                    <AlertCard key={alerta.id} {...alerta} />
-                  ))}
-                </div>
-              ) : (
-                <Card>
+                ) : alertasFiltrados.length === 0 ? (
                   <CardBody>
                     <EmptyState
                       icon={AlertTriangle}
                       title="Nenhum alerta encontrado"
-                      description="Não há alertas que correspondam aos filtros de severidade ou tipo. Limpe os filtros ou escolha outra UF."
+                      description="Nenhum alerta corresponde aos filtros. Limpe os filtros ou escolha outra UF."
                     />
                   </CardBody>
-                </Card>
-              )}
+                ) : (
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border bg-muted/30">
+                            <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                              Tipo
+                            </th>
+                            <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                              UF
+                            </th>
+                            <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                              Vigência
+                            </th>
+                            <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                              Severidade
+                            </th>
+                            <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                              Valor Atual
+                            </th>
+                            <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                              Limiar
+                            </th>
+                            <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                              Fonte
+                            </th>
+                            <th className="px-4 py-3" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paginados.map((alerta) => (
+                            <tr
+                              key={alerta.id}
+                              className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors"
+                            >
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <AlertTriangle
+                                    className={`w-4 h-4 flex-shrink-0 ${SEVERITY_ICON_COLOR[alerta.severidade]}`}
+                                  />
+                                  <span className="font-medium text-foreground">{alerta.tipo}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="font-mono text-xs font-semibold bg-muted px-2 py-0.5 rounded">
+                                  {extractUf(alerta.local)}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                                {alerta.data}
+                              </td>
+                              <td className="px-4 py-3">
+                                <Badge variant={alerta.severidade}>
+                                  {SEVERITY_LABEL[alerta.severidade]}
+                                </Badge>
+                              </td>
+                              <td className="px-4 py-3 text-foreground">{alerta.valorAtual}</td>
+                              <td className="px-4 py-3 text-foreground">{alerta.limiar}</td>
+                              <td className="px-4 py-3 text-muted-foreground text-xs">{fonteLabel(alerta.fonte)}</td>
+                              <td className="px-4 py-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedAlerta(alerta)}
+                                  className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                                  title="Ver detalhes"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
 
-              <div className="flex items-center justify-between text-sm text-muted-foreground">
-                <span>
-                  Mostrando {alertasFiltrados.length} de {payload.items.length} alertas
-                </span>
-                <span>Última atualização: {formatUpdated(payload.updatedAt)}</span>
-              </div>
+                  {/* Paginação */}
+                  {(() => {
+                    const WINDOW = 4;
+                    const half = Math.floor(WINDOW / 2);
+                    let start = Math.max(1, currentPage - half);
+                    const end = Math.min(totalPages, start + WINDOW - 1);
+                    if (end - start < WINDOW - 1) start = Math.max(1, end - WINDOW + 1);
+                    const pageNums = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+
+                    return (
+                      <div className="px-6 py-3 border-t border-border flex items-center justify-between text-sm text-muted-foreground">
+                        <span>
+                          {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, alertasFiltrados.length)} de{' '}
+                          {alertasFiltrados.length} alertas
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setPage((p) => Math.max(1, p - 1))}
+                            disabled={currentPage === 1}
+                            className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                            Anterior
+                          </button>
+
+                          {start > 1 && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setPage(1)}
+                                className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground transition-colors"
+                              >
+                                1
+                              </button>
+                              {start > 2 && <span className="px-1 text-muted-foreground select-none">…</span>}
+                            </>
+                          )}
+
+                          {pageNums.map((n) => (
+                            <button
+                              key={n}
+                              type="button"
+                              onClick={() => setPage(n)}
+                              className={`w-8 h-8 rounded text-sm font-medium transition-colors ${
+                                n === currentPage
+                                  ? 'bg-primary text-primary-foreground'
+                                  : 'hover:bg-muted text-muted-foreground'
+                              }`}
+                            >
+                              {n}
+                            </button>
+                          ))}
+
+                          {end < totalPages && (
+                            <>
+                              {end < totalPages - 1 && <span className="px-1 text-muted-foreground select-none">…</span>}
+                              <button
+                                type="button"
+                                onClick={() => setPage(totalPages)}
+                                className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground transition-colors"
+                              >
+                                {totalPages}
+                              </button>
+                            </>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                            disabled={currentPage === totalPages}
+                            className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          >
+                            Próxima
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </>
+              )}
+            </Card>
             </>
           );
         }}
       </AsyncStateView>
+
+      {/* Modal de detalhes */}
+      <Modal
+        isOpen={selectedAlerta !== null}
+        onClose={() => setSelectedAlerta(null)}
+        title={selectedAlerta?.tipo ?? 'Detalhe do Alerta'}
+      >
+        {selectedAlerta && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <Badge variant={selectedAlerta.severidade}>
+                {SEVERITY_LABEL[selectedAlerta.severidade]}
+              </Badge>
+              <span className="text-xs text-muted-foreground">Fonte: {fonteLabel(selectedAlerta.fonte)}</span>
+            </div>
+
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <MapPin className="w-4 h-4 flex-shrink-0" />
+              <span>{selectedAlerta.local}</span>
+              <span>·</span>
+              <span>{selectedAlerta.data}</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 pt-3 border-t border-border">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Valor Atual</p>
+                <p className="text-sm font-medium text-foreground">{selectedAlerta.valorAtual}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Limiar</p>
+                <p className="text-sm font-medium text-foreground">{selectedAlerta.limiar}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-3 border-t border-border">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Recomendação</p>
+                <p className="text-sm text-foreground">{selectedAlerta.recomendacao}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Impacto Estimado</p>
+                <p className="text-sm text-foreground">{selectedAlerta.impactoEstimado}</p>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
