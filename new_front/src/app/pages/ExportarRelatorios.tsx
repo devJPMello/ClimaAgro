@@ -4,11 +4,8 @@ import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '../compo
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { Textarea } from '../components/ui/textarea';
 import { FileText, Download, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { generateAiReport } from '../../lib/api/aiReportsApi';
-import type { ReportHistoryItemDto } from '../../lib/api/contracts/aiReports';
 import { createReportExport, listReportExports } from '../../lib/api/reportExportsApi';
 import type { ReportExportItemDto } from '../../lib/api/contracts/reportExports';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -56,20 +53,7 @@ export function ExportarRelatorios() {
   const [formato, setFormato] = useState('pdf');
   const [loading, setLoading] = useState(false);
   const [loadingHistorico, setLoadingHistorico] = useState(true);
-  const [loadingIA, setLoadingIA] = useState(false);
-  const [instrucoesIA, setInstrucoesIA] = useState('');
-  const [resumoIA, setResumoIA] = useState('');
   const [exportacoes, setExportacoes] = useState<ReportExportItemDto[]>([]);
-
-  const mapHistorico = (): ReportHistoryItemDto[] =>
-    exportacoes.map((item) => ({
-      tipo: item.tipo,
-      local: item.local,
-      periodo: item.periodo,
-      formato: item.formato,
-      status: item.status,
-      data: item.data,
-    }));
 
   const carregarHistorico = useCallback(async () => {
     setLoadingHistorico(true);
@@ -87,35 +71,6 @@ export function ExportarRelatorios() {
   useEffect(() => {
     void carregarHistorico();
   }, [carregarHistorico]);
-
-  const handleGerarResumoIA = async () => {
-    setLoadingIA(true);
-    try {
-      const y0 = Math.min(parseInt(anoInicio, 10), parseInt(anoFim, 10));
-      const y1 = Math.max(parseInt(anoInicio, 10), parseInt(anoFim, 10));
-      const periodoIaInicio = `${y0}`;
-      const periodoIaFim = `${y1}`;
-      const response = await generateAiReport({
-        localidade,
-        tipoRelatorio,
-        periodoInicio: periodoIaInicio,
-        periodoFim: periodoIaFim,
-        formato,
-        instrucoesUsuario: instrucoesIA,
-        historicoRelatorios: mapHistorico(),
-      });
-
-      const highlights = response.highlights?.length
-        ? `\n\nDestaques sugeridos:\n- ${response.highlights.join('\n- ')}`
-        : '';
-      setResumoIA(`${response.summary}${highlights}`);
-      toast.success('Resumo com IA gerado com sucesso.');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Falha ao gerar resumo com IA.');
-    } finally {
-      setLoadingIA(false);
-    }
-  };
 
   const handleExportar = async () => {
     setLoading(true);
@@ -142,7 +97,6 @@ export function ExportarRelatorios() {
         local,
         periodo,
         formato: fmt,
-        corpoTexto: resumoIA.trim() || undefined,
         dadosIntegrados,
       });
 
@@ -156,7 +110,6 @@ export function ExportarRelatorios() {
         periodo,
         formato: formato.toUpperCase(),
         status: 'concluido',
-        foiGeradoComIA: Boolean(resumoIA.trim()),
       });
       toast.success('Download iniciado e registo guardado no histórico.');
       await carregarHistorico();
@@ -272,30 +225,6 @@ export function ExportarRelatorios() {
                 <FileText className="w-4 h-4" />
                 Gerar Relatório
               </Button>
-
-              <div className="pt-4 border-t border-border space-y-3">
-                <p className="text-sm font-medium">Assistente de Relatórios com IA (Gemini)</p>
-                <Textarea
-                  placeholder="Opcional: descreva foco do relatório (ex.: riscos da próxima safra, comparação com últimos 6 meses)."
-                  value={instrucoesIA}
-                  onChange={(e) => setInstrucoesIA(e.target.value)}
-                  rows={4}
-                />
-                <Button
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => void handleGerarResumoIA()}
-                  loading={loadingIA}
-                >
-                  Gerar resumo com IA
-                </Button>
-                <Textarea
-                  placeholder="O resumo gerado por IA aparecerá aqui e pode ser editado antes da exportação."
-                  value={resumoIA}
-                  onChange={(e) => setResumoIA(e.target.value)}
-                  rows={6}
-                />
-              </div>
             </CardBody>
           </Card>
         </div>
@@ -370,7 +299,6 @@ export function ExportarRelatorios() {
                     <th className="pb-3 text-sm text-muted-foreground">Formato</th>
                     <th className="pb-3 text-sm text-muted-foreground">Status</th>
                     <th className="pb-3 text-sm text-muted-foreground">Data</th>
-                    <th className="pb-3 text-sm text-muted-foreground">IA</th>
                     <th className="pb-3 text-sm text-muted-foreground">Ações</th>
                   </tr>
                 </thead>
@@ -411,19 +339,12 @@ export function ExportarRelatorios() {
                       </td>
                       <td className="py-4 text-sm text-muted-foreground">{exp.data}</td>
                       <td className="py-4">
-                        {exp.foiGeradoComIA ? (
-                          <Badge variant="info">Gemini</Badge>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </td>
-                      <td className="py-4">
                         {exp.status !== 'falha' && (
                           <Button
                             variant="ghost"
                             className="px-3 py-1"
                             onClick={() => void handleDownload(exp)}
-                            title="Descarregar de novo com dados atuais da API (o resumo de IA não fica guardado no servidor)"
+                            title="Descarregar de novo com dados atuais da API"
                           >
                             <Download className="w-4 h-4" />
                           </Button>
