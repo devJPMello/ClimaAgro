@@ -67,7 +67,7 @@ export function Dashboard() {
           Dashboard
         </h1>
         <p className="text-muted-foreground">
-          Visão geral do clima e da produtividade nos estados MT, TO, GO, SP e MG (últimos dias e último ano com
+          Visão geral do clima e da produtividade em estados selecionados dinamicamente (últimos dias e último ano com
           dados na base).
         </p>
       </div>
@@ -104,7 +104,7 @@ export function Dashboard() {
               <CardHeader>
                 <CardTitle>Resumo por localidade</CardTitle>
                 <CardDescription>
-                  Cinco estados prioritários — clima agregado na malha estadual (últimos 14 dias) e produtividade
+                  Cinco estados selecionados dinamicamente — clima agregado na malha estadual (últimos 14 dias) e produtividade
                   média no último ano agrícola com dados na base
                 </CardDescription>
               </CardHeader>

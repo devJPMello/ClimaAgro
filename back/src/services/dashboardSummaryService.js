@@ -35,8 +35,28 @@ function extractStatesFromUiLocal(local) {
     .filter((x) => /^[A-Z]{2}$/.test(x));
 }
 
-/** UFs exibidas no dashboard principal (resumo sem query `state`). Ordem fixa. */
-const DASHBOARD_PRINCIPAL_UFS = ['MT', 'TO', 'GO', 'SP', 'MG'];
+/** Quantidade de UFs exibidas no dashboard principal (resumo sem query `state`). */
+const DASHBOARD_PRINCIPAL_SAMPLE_SIZE = 5;
+
+function shuffleArray(list) {
+  const arr = [...list];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+async function pickDashboardPrincipalUfs(GeoData) {
+  const rows = await GeoData.findAll({
+    where: { category: 'state', isActive: true, state: { [Op.ne]: null } },
+    attributes: ['state'],
+    raw: true,
+  });
+  const unique = [...new Set(rows.map((r) => String(r.state || '').trim().toUpperCase()).filter((v) => /^[A-Z]{2}$/.test(v)))];
+  if (unique.length <= DASHBOARD_PRINCIPAL_SAMPLE_SIZE) return unique.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  return shuffleArray(unique).slice(0, DASHBOARD_PRINCIPAL_SAMPLE_SIZE);
+}
 
 function ufFromDerivedAlertLocal(local) {
   const parts = String(local || '')
@@ -46,14 +66,14 @@ function ufFromDerivedAlertLocal(local) {
   return /^[A-Z]{2}$/.test(last) ? last : null;
 }
 
-/** Alerta entra no recorte do dashboard principal (MT, TO, GO, SP, MG)? Usado só para o KPI total. */
-function principalDashboardAlertRelevant(item, principalSet, cityStateToId) {
+/** Alerta entra no recorte do dashboard principal (UFs sorteadas)? Usado só para o KPI total. */
+function principalDashboardAlertRelevant(item, principalSet, cityStateToId, principalUfs) {
   const ufsFromPrefix = extractStatesFromUiLocal(item.local);
   if (ufsFromPrefix.some((st) => principalSet.has(st))) return true;
 
   const cities = extractCitiesFromUiLocal(item.local);
   for (const city of cities) {
-    for (const st of DASHBOARD_PRINCIPAL_UFS) {
+    for (const st of principalUfs) {
       if (cityStateToId.has(`${normalizeCityKey(city)}|${st}`)) return true;
     }
   }
@@ -66,7 +86,7 @@ function principalDashboardAlertRelevant(item, principalSet, cityStateToId) {
     .split(' - ')[0]
     .trim();
   if (!localCity) return false;
-  for (const st of DASHBOARD_PRINCIPAL_UFS) {
+  for (const st of principalUfs) {
     if (cityStateToId.has(`${normalizeCityKey(localCity)}|${st}`)) return true;
   }
   return false;
@@ -77,10 +97,11 @@ function principalDashboardAlertRelevant(item, principalSet, cityStateToId) {
  */
 async function buildDashboardPrincipalStates({ models }) {
   const { ClimateData, GeoData, Productivity, OfficialAlert } = models;
-  const principalSet = new Set(DASHBOARD_PRINCIPAL_UFS);
+  const principalUfs = await pickDashboardPrincipalUfs(GeoData);
+  const principalSet = new Set(principalUfs);
 
   const stateRows = [];
-  for (const sig of DASHBOARD_PRINCIPAL_UFS) {
+  for (const sig of principalUfs) {
     const row = await GeoData.findOne({
       where: { category: 'state', isActive: true, state: sig },
       attributes: ['id', 'name', 'state'],
@@ -143,7 +164,7 @@ async function buildDashboardPrincipalStates({ models }) {
   });
 
   const alertClimateBlocks = await Promise.all(
-    DASHBOARD_PRINCIPAL_UFS.map((st) =>
+    principalUfs.map((st) =>
       alertSvc.loadClimateForAlerts({ ClimateData, GeoData, state: st, days: 7 })
     )
   );
@@ -170,7 +191,7 @@ async function buildDashboardPrincipalStates({ models }) {
   const allAlertItems = [...officialFromDb, ...officialFromLive, ...cptecOutlook, ...metarWind, ...derivedClimate];
 
   const muns = await GeoData.findAll({
-    where: { category: 'municipality', isActive: true, state: { [Op.in]: DASHBOARD_PRINCIPAL_UFS } },
+    where: { category: 'municipality', isActive: true, state: { [Op.in]: principalUfs } },
     attributes: ['id', 'name', 'state']
   });
   const cityStateToId = new Map();
@@ -196,7 +217,7 @@ async function buildDashboardPrincipalStates({ models }) {
     if (cities.length) {
       for (const city of cities) {
         let matched = false;
-        for (const st of DASHBOARD_PRINCIPAL_UFS) {
+        for (const st of principalUfs) {
           if (cityStateToId.has(`${normalizeCityKey(city)}|${st}`)) {
             const sid = stateIdByUf.get(st);
             if (sid) alertMap[sid] += 1;
@@ -218,7 +239,7 @@ async function buildDashboardPrincipalStates({ models }) {
       .split(' - ')[0]
       .trim();
     if (localCity) {
-      for (const st of DASHBOARD_PRINCIPAL_UFS) {
+      for (const st of principalUfs) {
         if (cityStateToId.has(`${normalizeCityKey(localCity)}|${st}`)) {
           const sid = stateIdByUf.get(st);
           if (sid) alertMap[sid] += 1;
@@ -229,16 +250,16 @@ async function buildDashboardPrincipalStates({ models }) {
   }
 
   const totalAlerts = allAlertItems.filter((item) =>
-    principalDashboardAlertRelevant(item, principalSet, cityStateToId)
+    principalDashboardAlertRelevant(item, principalSet, cityStateToId, principalUfs)
   ).length;
 
-  let latestYear = await Productivity.max('year', { where: { state: { [Op.in]: DASHBOARD_PRINCIPAL_UFS } } });
+  let latestYear = await Productivity.max('year', { where: { state: { [Op.in]: principalUfs } } });
   if (latestYear == null) latestYear = await Productivity.max('year');
   latestYear = latestYear != null ? Number(latestYear) : new Date().getFullYear();
 
   const [kpiProd] = await Productivity.findAll({
     attributes: [[fn('AVG', col('productivity')), 'v']],
-    where: { state: { [Op.in]: DASHBOARD_PRINCIPAL_UFS }, year: latestYear },
+    where: { state: { [Op.in]: principalUfs }, year: latestYear },
     raw: true
   });
 
