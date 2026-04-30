@@ -21,10 +21,46 @@ const PRODUCTIVITY_CROP_LABELS: Record<string, string> = {
 /** Chaves canónicas conhecidas (há também slugs por produto SIDRA em `crop_type`). */
 export const PRODUCTIVITY_CROP_ENUM_VALUES: string[] = Object.keys(PRODUCTIVITY_CROP_LABELS);
 
+/**
+ * Remove o código numérico do IBGE/SIDRA usado no início de `product_label` (ex.: `2813 - Soja` → `Soja`).
+ * Não altera o valor enviado à API — só o texto exibido.
+ */
+export function stripIbgeSidraProductCodePrefix(raw: string): string {
+  const source = String(raw || '')
+    .replace(/^[^\p{L}\d]+/u, '')
+    .trim();
+  if (!source) return source;
+
+  const tokens = source.split(/\s+/).filter(Boolean);
+  const isNumericCode = (token: string) => /^\d+(?:[./-]\d+)*$/.test(token);
+
+  let idx = 0;
+  while (idx < tokens.length && isNumericCode(tokens[idx])) idx += 1;
+
+  const cleaned = (idx > 0 ? tokens.slice(idx).join(' ') : source)
+    .replace(/^[-–·.:/]+\s*/u, '')
+    .trim();
+
+  return cleaned || source;
+}
+
+/** Corrige caixa mista vinda do SIDRA (ex.: "AlgodãO HerbáCeo") sem mexer em espaços. */
+function titleCaseWordsPt(s: string): string {
+  const lower = s.trim().toLowerCase().normalize('NFC');
+  return lower
+    .split(/(\s+)/)
+    .map((part) => {
+      if (!part || /^\s+$/.test(part)) return part;
+      return part.charAt(0).toLocaleUpperCase('pt-BR') + part.slice(1);
+    })
+    .join('');
+}
+
 export function labelForProductivityCropType(value: string): string {
-  const k = value.trim().toLowerCase();
+  const stripped = stripIbgeSidraProductCodePrefix(value);
+  const k = stripped.trim().toLowerCase();
   if (PRODUCTIVITY_CROP_LABELS[k]) return PRODUCTIVITY_CROP_LABELS[k];
-  return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return titleCaseWordsPt(k.replace(/_/g, ' '));
 }
 
 /**

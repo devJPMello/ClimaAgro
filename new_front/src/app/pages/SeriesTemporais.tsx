@@ -10,12 +10,12 @@ import {
   listClimateUfs,
 } from '../../lib/api/climateApi';
 import {
-  listProductivityCropTypes,
+  listProductivityProductLabels,
   listProductivityRecords,
   getClimateVsProductivity,
   type ProductivityListResponse,
 } from '../../lib/api/productivityApi';
-import { getProductivityYearOptions, labelForProductivityCropType } from '../../lib/filters/appFilters';
+import { buildProductivityCropSelectOptions, getProductivityYearOptions } from '../../lib/filters/appFilters';
 import type { ClimateSeriesVariable } from '../../lib/api/contracts/climate';
 
 type ProdRow = { mes: string; produtividade: number | null; produtividadeNum?: number | null };
@@ -101,13 +101,11 @@ function aggregateClimateByMonth(
 /** Agrupa por mês-ano (`periodRef`) no formato `YYYY-MM`. */
 function aggregateProductivityByMonthYear(
   rows: ProductivityListResponse['data'],
-  cropFilter: string,
   startYear: string,
   endYear: string
 ): ProdRow[] {
   const map = new Map<string, number[]>();
   for (const r of rows) {
-    if (cropFilter && cropFilter !== 'ALL' && r.cropType && r.cropType !== cropFilter) continue;
     const p = num(r.productivity);
     if (p == null) continue;
     const key = String(r.periodRef || '').trim();
@@ -134,10 +132,7 @@ function aggregateProductivityByMonthYear(
 }
 
 const CULTURA_FALLBACK_OPTIONS = [
-  { value: 'ALL', label: 'Todas as culturas' },
-  { value: 'soja', label: 'Soja' },
-  { value: 'milho', label: 'Milho' },
-  { value: 'trigo', label: 'Trigo' },
+  { value: '', label: 'Selecione uma cultura' },
 ];
 
 export function SeriesTemporais() {
@@ -147,7 +142,7 @@ export function SeriesTemporais() {
     { value: 'TO', label: 'TO' },
   ]);
   const yearOptions = useMemo(() => getProductivityYearOptions(), []);
-  const [cultura, setCultura] = useState('ALL');
+  const [cultura, setCultura] = useState('');
   const [culturaOptions, setCulturaOptions] =
     useState<Array<{ value: string; label: string }>>(CULTURA_FALLBACK_OPTIONS);
   const [startYear, setStartYear] = useState(yearOptions[Math.min(2, yearOptions.length - 1)]?.value ?? String(new Date().getFullYear() - 2));
@@ -161,22 +156,14 @@ export function SeriesTemporais() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await listProductivityCropTypes(uf === 'ALL' ? undefined : { state: uf });
+        const res = await listProductivityProductLabels(uf === 'ALL' ? undefined : { state: uf });
         if (cancelled || !res.success || !res.data?.length) return;
-        const uniq = [...new Set(res.data.map((x) => String(x || '').trim()).filter(Boolean))];
-        if (!uniq.length) return;
-        uniq.sort((a, b) =>
-          labelForProductivityCropType(a).localeCompare(labelForProductivityCropType(b), 'pt-BR')
-        );
-        const opts = [
-          { value: 'ALL', label: 'Todas as culturas' },
-          ...uniq.map((v) => ({ value: v, label: labelForProductivityCropType(v) })),
-        ];
+        const opts = buildProductivityCropSelectOptions(res.data);
         setCulturaOptions(opts);
         setCultura((c) =>
           opts.some((o) => o.value === c)
             ? c
-            : opts.find((o) => o.value === 'ALL')?.value ?? opts.find((o) => o.value === 'soja')?.value ?? opts[0]?.value ?? 'ALL'
+            : opts.find((o) => o.value === '')?.value ?? opts[0]?.value ?? ''
         );
       } catch {
         /* mantém fallback estático */
@@ -245,7 +232,7 @@ export function SeriesTemporais() {
             years.map((year) =>
               listProductivityRecords({
                 state: uf,
-                cropType: cultura === 'ALL' ? undefined : cultura,
+                productLabel: cultura || undefined,
                 year,
                 limit: 500,
               })
@@ -273,7 +260,7 @@ export function SeriesTemporais() {
             Array.from({ length: ye - ys + 1 }, (_, idx) => String(ys + idx)).map((y) =>
               getClimateVsProductivity({
                 state: stateUf,
-                cropType: cultura === 'ALL' ? undefined : cultura,
+                cropType: undefined,
                 season: seasonFromYear(y),
               })
             )
@@ -308,7 +295,7 @@ export function SeriesTemporais() {
       }
       setDadosClimaticos(climateMonthly);
 
-      const prodMonthly = aggregateProductivityByMonthYear(pRows, cultura, startYear, endYear);
+      const prodMonthly = aggregateProductivityByMonthYear(pRows, startYear, endYear);
       setDadosProdutividade(prodMonthly);
 
       const prodByMes = new Map(prodMonthly.map((r) => [r.mes, r.produtividadeNum ?? r.produtividade ?? null]));
@@ -417,15 +404,19 @@ export function SeriesTemporais() {
                     border: '1px solid #e2e8f0',
                     borderRadius: '8px',
                   }}
+                  formatter={(value: number | string | null | undefined) =>
+                    value == null ? 'Sem dado' : `${Number(value).toFixed(2)} t/ha`
+                  }
                 />
                 <Legend />
                 <Line
                   type="monotone"
-                  dataKey="produtividade"
+                  dataKey="produtividadeNum"
                   stroke="#1976D2"
                   strokeWidth={3}
                   dot={{ fill: '#1976D2', r: 5 }}
                   activeDot={{ r: 7 }}
+                  connectNulls
                   name="Produtividade (t/ha)"
                 />
               </LineChart>

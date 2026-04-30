@@ -5,6 +5,7 @@ import {
   listAllProductivityForYear,
   type ProductivityListResponse,
 } from '../api/productivityApi';
+import { labelForProductivityCropType } from '../filters/appFilters';
 import { TOCANTINS_CITY_VALUE_TO_NAME } from '../geo/tocantinsCities';
 
 export type ReportTipoKey = 'clima' | 'produtividade' | 'comparativo';
@@ -276,15 +277,17 @@ function formatProductivityBlock(perYear: ProductivityListResponse['data'][], pl
     : `Sem linhas com nome de município coincidente com «${place}»; a seguir consta o conjunto TO devolvido pela API (${use.length} linhas).`;
   const lines = [head, '', 'Produto / cultura | Ano | Produtividade (t/ha)'];
   const sorted = [...use].sort((a, b) => {
-    const cp = String(a.productLabel || a.cropType || '').localeCompare(
-      String(b.productLabel || b.cropType || '')
+    const cp = labelForProductivityCropType(String(a.productLabel || a.cropType || '')).localeCompare(
+      labelForProductivityCropType(String(b.productLabel || b.cropType || '')),
+      'pt-BR'
     );
     if (cp !== 0) return cp;
     return (a.year || 0) - (b.year || 0);
   });
   sorted.forEach((r) => {
     const p = n(r.productivity);
-    const cult = r.productLabel || r.cropType || '—';
+    const raw = r.productLabel || r.cropType;
+    const cult = raw ? labelForProductivityCropType(String(raw)) : '—';
     lines.push(
       `${cult} | ${r.year ?? '—'} | ${p != null ? p.toFixed(2) : '—'} (${r.geoData?.name || r.municipalityName || 'TO'})`
     );
@@ -398,7 +401,7 @@ export async function gatherReportDados(params: {
           `--- Ano ${reportYear} (${rows.length} linhas) ---`,
           ...rows.map(
             (r) =>
-              `${r.year} | ${r.municipalityName} | ${r.productLabel} | ${r.variableKey} | ${r.valueNumeric ?? '—'}`,
+              `${r.year} | ${r.municipalityName} | ${labelForProductivityCropType(String(r.productLabel || '')) || r.productLabel || '—'} | ${r.variableKey} | ${r.valueNumeric ?? '—'}`,
           ),
         );
       }
