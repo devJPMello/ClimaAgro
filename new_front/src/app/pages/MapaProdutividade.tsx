@@ -8,7 +8,6 @@ import { buildValuesByUfFromProductivityRows } from '../components/maps/brazilMa
 import { listClimateUfs } from '../../lib/api/climateApi';
 import {
   listAllProductivityForYear,
-  listProductivityMonthYears,
   listProductivityProductLabels,
 } from '../../lib/api/productivityApi';
 import { buildProductivityCropSelectOptions } from '../../lib/filters/appFilters';
@@ -20,41 +19,34 @@ import { EmptyState } from '../components/ui/EmptyState';
 type Indicador = { label: string; valor: string; descricao?: string };
 
 type CropSelectOption = { value: string; label: string };
-type MonthYearOption = { value: string; label: string };
+const MONTH_OPTIONS = [
+  { value: 'ALL', label: 'Todos os meses' },
+  { value: '01', label: 'Janeiro' },
+  { value: '02', label: 'Fevereiro' },
+  { value: '03', label: 'Março' },
+  { value: '04', label: 'Abril' },
+  { value: '05', label: 'Maio' },
+  { value: '06', label: 'Junho' },
+  { value: '07', label: 'Julho' },
+  { value: '08', label: 'Agosto' },
+  { value: '09', label: 'Setembro' },
+  { value: '10', label: 'Outubro' },
+  { value: '11', label: 'Novembro' },
+  { value: '12', label: 'Dezembro' },
+];
 
-function buildMonthYearOptions(monthsBack = 24): MonthYearOption[] {
-  const fmt = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' });
-  const out: MonthYearOption[] = [];
-  const now = new Date();
-  for (let i = 0; i < monthsBack; i += 1) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    out.push({
-      value: `${y}-${m}`,
-      label: fmt.format(d).replace(/^\w/, (c) => c.toUpperCase()),
-    });
-  }
-  return out;
-}
-
-function monthYearLabel(ym: string): string {
-  const m = /^(\d{4})-(\d{2})$/.exec(ym);
-  if (!m) return ym;
-  const y = Number(m[1]);
-  const mm = Number(m[2]);
-  const d = new Date(y, Math.max(0, mm - 1), 1);
-  return new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' })
-    .format(d)
-    .replace(/^\w/, (c) => c.toUpperCase());
-}
+const YEAR_OPTIONS = [
+  { value: '2023-2026', label: '2023–2026 (consolidado)' },
+  { value: '2026', label: '2026' },
+  { value: '2025', label: '2025' },
+  { value: '2024', label: '2024' },
+  { value: '2023', label: '2023' },
+];
 
 export function MapaProdutividade() {
-  const fallbackMesAnoOptions = useMemo(() => buildMonthYearOptions(48), []);
   const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([
     { value: 'ALL', label: 'Brasil (todos)' },
   ]);
-  const [mesAnoOptions, setMesAnoOptions] = useState<MonthYearOption[]>(fallbackMesAnoOptions);
   const cropOptionsRes = useAsyncResource<CropSelectOption[]>(async () => {
     const res = await listProductivityProductLabels();
     const fromDb = res.success && Array.isArray(res.data) ? res.data : [];
@@ -63,10 +55,8 @@ export function MapaProdutividade() {
 
   const [cultura, setCultura] = usePersistedState<string>('climaagro.pref.mapaProdutividade.cultura', '');
   const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaProdutividade.uf', 'ALL');
-  const [mesAno, setMesAno] = usePersistedState<string>(
-    'climaagro.pref.mapaProdutividade.mesAno',
-    fallbackMesAnoOptions[0]?.value ?? ''
-  );
+  const [mes, setMes] = usePersistedState<string>('climaagro.pref.mapaProdutividade.mes', 'ALL');
+  const [ano, setAno] = usePersistedState<string>('climaagro.pref.mapaProdutividade.ano', '2023-2026');
 
   useEffect(() => {
     const opts = cropOptionsRes.data;
@@ -89,32 +79,10 @@ export function MapaProdutividade() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await listProductivityMonthYears();
-        const fromDb = res.success && Array.isArray(res.data) ? res.data.filter((x) => /^\d{4}-\d{2}$/.test(x)) : [];
-        if (cancelled || !fromDb.length) return;
-        const opts = fromDb.map((v) => ({ value: v, label: monthYearLabel(v) }));
-        setMesAnoOptions(opts);
-        if (!opts.some((o) => o.value === mesAno)) {
-          setMesAno(opts[0].value);
-        }
-      } catch {
-        // fallback local já definido
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [mesAno, setMesAno]);
-
   const productLabelForApi = useMemo(() => cultura.trim(), [cultura]);
 
   const { status, data, error, reload } = useAsyncResource(
     async () => {
-      const mesAnoTrim = mesAno.trim();
       const targetUfs =
         uf === 'ALL'
           ? ufOptions.map((o) => o.value).filter((v) => /^[A-Z]{2}$/.test(v))
@@ -122,11 +90,29 @@ export function MapaProdutividade() {
 
       const responses = await Promise.all(
         targetUfs.map((stateUf) =>
-          listAllProductivityForYear({
-            state: stateUf,
-            mesAno: mesAnoTrim || undefined,
-            productLabel: productLabelForApi || undefined,
-          })
+          (async () => {
+            if (ano === '2023-2026') {
+              const years = [2023, 2024, 2025, 2026];
+              const byYear = await Promise.all(
+                years.map((year) =>
+                  listAllProductivityForYear({
+                    state: stateUf,
+                    year,
+                    mesAno: mes === 'ALL' ? undefined : `${year}-${mes}`,
+                    productLabel: productLabelForApi || undefined,
+                  })
+                )
+              );
+              return byYear.flat();
+            }
+            const yearNum = Number(ano);
+            return listAllProductivityForYear({
+              state: stateUf,
+              year: Number.isFinite(yearNum) ? yearNum : undefined,
+              mesAno: mes === 'ALL' ? undefined : `${ano}-${mes}`,
+              productLabel: productLabelForApi || undefined,
+            });
+          })()
         )
       );
       const items = responses.flat();
@@ -172,7 +158,7 @@ export function MapaProdutividade() {
         itemsCount: items.length,
       };
     },
-    [productLabelForApi, mesAno, uf, ufOptions]
+    [ano, mes, productLabelForApi, uf, ufOptions]
   );
 
   return (
@@ -223,7 +209,8 @@ export function MapaProdutividade() {
                     error={cropOptionsRes.error ?? undefined}
                   />
                   <Select label="Estado (UF)" value={uf} onChange={(e) => setUf(e.target.value)} options={ufOptions} />
-                  <Select label="Mês-Ano" value={mesAno} onChange={(e) => setMesAno(e.target.value)} options={mesAnoOptions} />
+                  <Select label="Mês" value={mes} onChange={(e) => setMes(e.target.value)} options={MONTH_OPTIONS} />
+                  <Select label="Ano" value={ano} onChange={(e) => setAno(e.target.value)} options={YEAR_OPTIONS} />
                   <div className="pt-4 border-t border-border">
                     <MapMetricLegend metric="produtividade" />
                   </div>
@@ -256,7 +243,7 @@ export function MapaProdutividade() {
                     <EmptyState
                       icon={MapPin}
                       title="Sem dados de produtividade"
-                      description="Não há registros para a cultura, estado e mês-ano escolhidos. Altere os filtros à esquerda."
+                      description="Não há registros para a cultura, estado, mês e ano escolhidos. Altere os filtros à esquerda."
                     />
                   </CardBody>
                 </Card>
