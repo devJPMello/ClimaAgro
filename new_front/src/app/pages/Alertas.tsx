@@ -238,9 +238,6 @@ export function Alertas() {
                               Valor Atual
                             </th>
                             <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                              Limiar
-                            </th>
-                            <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wide">
                               Fonte
                             </th>
                             <th className="px-4 py-3" />
@@ -253,7 +250,7 @@ export function Alertas() {
                               className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors"
                             >
                               <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 whitespace-nowrap">
                                   <AlertTriangle
                                     className={`w-4 h-4 flex-shrink-0 ${SEVERITY_ICON_COLOR[alerta.severidade]}`}
                                   />
@@ -269,12 +266,11 @@ export function Alertas() {
                                 {alerta.data}
                               </td>
                               <td className="px-4 py-3">
-                                <Badge variant={alerta.severidade}>
+                                <Badge variant={alerta.severidade} className="w-16 justify-center">
                                   {SEVERITY_LABEL[alerta.severidade]}
                                 </Badge>
                               </td>
                               <td className="px-4 py-3 text-foreground">{alerta.valorAtual}</td>
-                              <td className="px-4 py-3 text-foreground">{alerta.limiar}</td>
                               <td className="px-4 py-3 text-muted-foreground text-xs">{fonteLabel(alerta.fonte)}</td>
                               <td className="px-4 py-3">
                                 <button
