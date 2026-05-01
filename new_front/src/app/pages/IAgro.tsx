@@ -35,6 +35,7 @@ export function IAgro() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const IMAGE_CACHE_PREFIX = 'climaagro.iagro.thread-images.';
 
   const quickActions = [
     {
@@ -81,6 +82,17 @@ export function IAgro() {
       const response = await getIAgroHistory(nextThreadId);
       setThreadId(nextThreadId);
       setMessages(response.messages || []);
+      const cachedImages = loadCachedThreadImages(nextThreadId);
+      const hydratedImages = new Map<string, string[]>();
+      for (const msg of response.messages || []) {
+        if (msg.sender !== 'user') continue;
+        const key = buildMessageImageKey(msg.text);
+        const found = cachedImages[key];
+        if (Array.isArray(found) && found.length > 0) {
+          hydratedImages.set(msg.id, found);
+        }
+      }
+      setMessageImages(hydratedImages);
       setHistoryOpen(false);
     } finally {
       setLoadingHistory(false);
@@ -124,6 +136,49 @@ export function IAgro() {
     recognition.start();
   }
 
+  function buildMessageImageKey(text: string): string {
+    return String(text || '').trim();
+  }
+
+  function buildPersistedUserText(messageText: string, files: File[]): string {
+    const fileNames = files.map((file) => file.name).filter(Boolean);
+    if (fileNames.length === 0) return messageText;
+    const persistedBase = messageText || 'Arquivos enviados';
+    return `${persistedBase}\n\n[Anexos: ${fileNames.join(', ')}]`;
+  }
+
+  function loadCachedThreadImages(targetThreadId: string): Record<string, string[]> {
+    try {
+      const raw = localStorage.getItem(`${IMAGE_CACHE_PREFIX}${targetThreadId}`);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== 'object') return {};
+      return parsed as Record<string, string[]>;
+    } catch {
+      return {};
+    }
+  }
+
+  function saveCachedThreadImages(targetThreadId: string, key: string, images: string[]) {
+    if (!targetThreadId || !key || images.length === 0) return;
+    try {
+      const cache = loadCachedThreadImages(targetThreadId);
+      cache[key] = images;
+      localStorage.setItem(`${IMAGE_CACHE_PREFIX}${targetThreadId}`, JSON.stringify(cache));
+    } catch {
+      toast.warning('Não foi possível manter todas as imagens no cache local.');
+    }
+  }
+
+  async function fileToDataUrl(file: File): Promise<string> {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Falha ao converter imagem.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     recognitionRef.current?.stop();
@@ -148,6 +203,11 @@ export function IAgro() {
     }
 
     const filesToSend = [...pendingFiles];
+    const persistedUserText = buildPersistedUserText(messageText, filesToSend);
+    const imageDataUrls = await Promise.all(
+      imageFiles.map(async (file) => await fileToDataUrl(file).catch(() => ''))
+    );
+    const filteredImageDataUrls = imageDataUrls.filter(Boolean);
     const keptUrls = new Set(imageUrls);
     setMessages((prev) => [...prev, optimistic]);
     setInput('');
@@ -166,6 +226,9 @@ export function IAgro() {
       };
       setMessages((prev) => [...prev, assistant]);
       if (!threadId || threadId !== response.threadId) setThreadId(response.threadId);
+      if (filteredImageDataUrls.length > 0) {
+        saveCachedThreadImages(response.threadId, buildMessageImageKey(persistedUserText), filteredImageDataUrls);
+      }
       await refreshThreads();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Falha ao enviar mensagem.';
