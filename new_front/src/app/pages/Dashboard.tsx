@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import {
   Thermometer,
@@ -8,11 +9,12 @@ import {
   LineChart,
   FileText,
   ArrowRight,
+  ChevronLeft,
+  ChevronRight,
   type LucideIcon,
 } from 'lucide-react';
 import { KPICard } from '../components/ui/KPICard';
 import { Card, CardHeader, CardBody, CardTitle, CardDescription } from '../components/ui/Card';
-import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
@@ -64,8 +66,25 @@ const atalhos = [
   },
 ];
 
+const CARD_SCROLL_STEP = 272; // card width (256px) + gap (16px)
+
 export function Dashboard() {
   const { status, data, error, reload } = useAsyncResource(() => getDashboardSummary(), []);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(true);
+
+  function updateScrollState() {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanLeft(el.scrollLeft > 0);
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  }
+
+  useEffect(() => { updateScrollState(); }, [data]);
+
+  function scrollLeft() { scrollRef.current?.scrollBy({ left: -CARD_SCROLL_STEP, behavior: 'smooth' }); }
+  function scrollRight() { scrollRef.current?.scrollBy({ left: CARD_SCROLL_STEP, behavior: 'smooth' }); }
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -109,42 +128,70 @@ export function Dashboard() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Resumo por localidade</CardTitle>
-                <CardDescription>
-                  Cinco estados selecionados dinamicamente — clima agregado na malha estadual (últimos 14 dias) e produtividade
-                  média no último ano agrícola com dados na base
-                </CardDescription>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <CardTitle>Resumo por localidade</CardTitle>
+                    <CardDescription>
+                      Todos os estados com dados na base — clima agregado (últimos 14 dias) e produtividade média no último ano agrícola
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-xs text-muted-foreground mr-2">{summary.regioes.length} estados</span>
+                    <button
+                      type="button"
+                      onClick={scrollLeft}
+                      disabled={!canLeft}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={scrollRight}
+                      disabled={!canRight}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
               </CardHeader>
               <CardBody>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="text-left border-b border-border">
-                        <th className="pb-3 text-sm text-muted-foreground">Estado</th>
-                        <th className="pb-3 text-sm text-muted-foreground">Temperatura</th>
-                        <th className="pb-3 text-sm text-muted-foreground">Precipitação</th>
-                        <th className="pb-3 text-sm text-muted-foreground">Produtividade</th>
-                        <th className="pb-3 text-sm text-muted-foreground">Alertas</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {summary.regioes.map((regiao, index) => (
-                        <tr key={index} className="border-b border-border last:border-0">
-                          <td className="py-4 text-sm">
-                            {regiao.uf ? `${regiao.estado} (${regiao.uf})` : regiao.estado}
-                          </td>
-                          <td className="py-4 text-sm">{regiao.temperatura}</td>
-                          <td className="py-4 text-sm">{regiao.precipitacao}</td>
-                          <td className="py-4 text-sm">{regiao.produtividade}</td>
-                          <td className="py-4">
-                            <Badge variant={regiao.alertas > 3 ? 'high' : 'medium'}>
-                              {regiao.alertas} {regiao.alertas === 1 ? 'alerta' : 'alertas'}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div
+                  ref={scrollRef}
+                  onScroll={updateScrollState}
+                  className="flex gap-4 overflow-x-auto scroll-smooth pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                >
+                  {summary.regioes.map((regiao, index) => (
+                    <div key={index} className="flex-shrink-0 w-64 rounded-xl border border-border bg-card overflow-hidden">
+                      <div className="px-4 py-3 bg-primary/10 border-b border-border">
+                        <p className="text-base text-primary">{regiao.uf ?? '—'}</p>
+                        <p className="text-xs text-muted-foreground truncate">{regiao.estado}</p>
+                      </div>
+                      <div className="px-4 py-3 space-y-2">
+                        <div className="flex items-center gap-2 text-sm">
+                          <Thermometer className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                          <span className="text-muted-foreground text-xs">Temperatura</span>
+                          <span className="ml-auto text-xs">{regiao.temperatura}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <Droplets className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                          <span className="text-muted-foreground text-xs">Precipitação</span>
+                          <span className="ml-auto text-xs">{regiao.precipitacao}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <TrendingUp className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                          <span className="text-muted-foreground text-xs">Produtividade</span>
+                          <span className="ml-auto text-xs">{regiao.produtividade}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <Bell className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                          <span className="text-muted-foreground text-xs">Alertas</span>
+                          <span className="ml-auto text-xs">{regiao.alertas} {regiao.alertas === 1 ? 'alerta' : 'alertas'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </CardBody>
             </Card>

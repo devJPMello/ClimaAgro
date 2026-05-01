@@ -35,18 +35,6 @@ function extractStatesFromUiLocal(local) {
     .filter((x) => /^[A-Z]{2}$/.test(x));
 }
 
-/** Quantidade de UFs exibidas no dashboard principal (resumo sem query `state`). */
-const DASHBOARD_PRINCIPAL_SAMPLE_SIZE = 5;
-
-function shuffleArray(list) {
-  const arr = [...list];
-  for (let i = arr.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
 async function pickDashboardPrincipalUfs(GeoData) {
   const rows = await GeoData.findAll({
     where: { category: 'state', isActive: true, state: { [Op.ne]: null } },
@@ -54,8 +42,7 @@ async function pickDashboardPrincipalUfs(GeoData) {
     raw: true,
   });
   const unique = [...new Set(rows.map((r) => String(r.state || '').trim().toUpperCase()).filter((v) => /^[A-Z]{2}$/.test(v)))];
-  if (unique.length <= DASHBOARD_PRINCIPAL_SAMPLE_SIZE) return unique.sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  return shuffleArray(unique).slice(0, DASHBOARD_PRINCIPAL_SAMPLE_SIZE);
+  return unique.sort((a, b) => a.localeCompare(b, 'pt-BR'));
 }
 
 function ufFromDerivedAlertLocal(local) {
