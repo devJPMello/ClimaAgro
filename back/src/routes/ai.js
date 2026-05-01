@@ -174,16 +174,25 @@ router.post(
       const orderedContext = [...recentRecords].reverse();
       const threadIsFavorite = Boolean(recentRecords[0]?.isFavorite);
       const context = buildThreadContext(orderedContext);
+      const hasImages = files.some((f) => String(f.mimetype || '').startsWith('image/'));
+
+      const systemRole = [
+        'Você é o IAgro, assistente agrônomo especialista do ClimaAgro.',
+        'Você tem conhecimento profundo em fitotecnia, nutrição de plantas, manejo do solo, climatologia agrícola e boas práticas agropecuárias brasileiras.',
+        'Responda sempre em português do Brasil, de forma objetiva e prática, como um agrônomo experiente falando com um produtor rural.',
+        'Use formatação Markdown para organizar suas respostas (títulos, listas, negrito).',
+        'Quando pertinente, embase suas recomendações em referências técnicas brasileiras (Embrapa, IAC, CREA, MAPA).',
+      ].join('\n');
+
       const prompt = [
-        'Você é o IAgro, assistente de clima e agricultura do ClimaAgro.',
-        'Responda de forma objetiva, prática e em português do Brasil.',
-        'Quando possível, destaque riscos climáticos e ações recomendadas.',
+        systemRole,
         '',
         'Histórico da conversa:',
         context,
         '',
-        `Pergunta atual do usuário: ${message}`,
+        `Pergunta atual do usuário: ${message || (hasImages ? 'Analise a imagem desta planta.' : '')}`,
       ].join('\n');
+
       const textParts = [prompt];
       const imageParts = [];
 
@@ -203,6 +212,60 @@ router.post(
             textParts.push(`Arquivo anexado sem extração de texto: ${file.originalname}`);
           }
         }
+      }
+
+      if (imageParts.length > 0) {
+        textParts.push([
+          '## INSTRUÇÃO: LAUDO AGRONÔMICO VISUAL',
+          '',
+          'Você está recebendo uma ou mais imagens de plantas/lavoura. Realize um laudo agronômico visual completo.',
+          'Siga EXATAMENTE esta estrutura na sua resposta:',
+          '',
+          '### 1. Identificação da Cultura',
+          '- Identifique a espécie ou cultura (soja, milho, feijão, café, pastagem, hortaliça, etc.).',
+          '- Se não for possível identificar, descreva o que vê.',
+          '- Indique o estágio fenológico aparente.',
+          '',
+          '### 2. Estado Geral',
+          '- Avalie vigor, porte e coloração geral.',
+          '- Classifique: Saudável / Estresse leve / Estresse moderado / Estresse severo.',
+          '',
+          '### 3. Deficiências Nutricionais',
+          'Analise os sintomas foliares com base neste guia de referência:',
+          '- **N (Nitrogênio)**: amarelecimento das folhas velhas (baixeiras), verde-amarelado generalizado, crescimento reduzido.',
+          '- **P (Fósforo)**: coloração roxa/avermelhada em folhas e caule, folhas escuras, raízes pouco desenvolvidas.',
+          '- **K (Potássio)**: necrose e queima das bordas foliares (escorch), iniciando nas folhas velhas.',
+          '- **Ca (Cálcio)**: necrose e distorção das folhas novas e ponteiros, frutos deformados — indica possível acidez do solo.',
+          '- **Mg (Magnésio)**: clorose internerval nas folhas velhas (nervuras verdes, tecido entre-nervuras amarelo).',
+          '- **S (Enxofre)**: amarelecimento uniforme das folhas jovens (ponteiros), semelhante ao N mas nas folhas novas.',
+          '- **Fe (Ferro)**: clorose internerval nas folhas jovens, nervuras verdes com tecido amarelo.',
+          '- **Mn (Manganês)**: clorose internerval nas folhas jovens, manchas cinzas ou marrons entre nervuras.',
+          '- **Zn (Zinco)**: folhas pequenas, internódios curtos, bronzeamento ou manchas amarelas nas folhas jovens.',
+          '- **B (Boro)**: morte dos pontos de crescimento, folhas deformadas e espessas, frutos com rachaduras.',
+          'Liste cada deficiência suspeita com probabilidade (alta / média / baixa) e o sintoma observado.',
+          '',
+          '### 4. Necessidade de Calagem',
+          'Avalie sinais de acidez do solo ou necessidade de calcário:',
+          '- Deficiências de Ca e Mg simultâneas → forte indício de pH baixo.',
+          '- Toxidez de Al ou Mn (manchas necróticas marrons generalizadas) → solo ácido.',
+          '- Crescimento muito reduzido sem causa aparente de seca ou praga.',
+          'Conclua com uma das opções: **Calagem provavelmente necessária** / **Possível necessidade** / **Sem indícios visíveis**.',
+          'Se indicada, sugira: tipo de calcário (calcítico para Ca, dolomítico para Ca+Mg), dose de referência (t/ha) e modo de aplicação.',
+          '',
+          '### 5. Pragas e Doenças',
+          '- Descreva manchas, lesões, ferrugem, murchas, podridões, galhas, insetos ou ovos visíveis.',
+          '- Indique o agente causal provável (fungo, bactéria, vírus, nematoide, inseto).',
+          '- Classifique a urgência: Ação imediata / Monitorar / Sem indícios.',
+          '',
+          '### 6. Plano de Ação (em ordem de prioridade)',
+          '1. **Urgente**: ações imediatas se houver risco de perda.',
+          '2. **Correção do solo**: calagem e/ou gessagem recomendada.',
+          '3. **Adubação**: nutriente prioritário, produto sugerido e dose de referência.',
+          '4. **Fitossanidade**: defensivo indicado, dose e modo de aplicação.',
+          '5. **Monitoramento**: o que observar nas próximas semanas.',
+          '',
+          '**Observação**: Se a qualidade da imagem não permitir diagnóstico preciso de algum item, informe claramente e oriente o produtor a enviar fotos mais próximas, em boa iluminação, de folhas afetadas e saudáveis para comparação.',
+        ].join('\n'));
       }
 
       const parts = [{ text: textParts.join('\n\n') }, ...imageParts];
