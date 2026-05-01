@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Cloud, History, Loader2, Paperclip, SendHorizonal, Sprout, Star, Trash2, TriangleAlert, TrendingUp, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { Camera, Cloud, History, Loader2, Paperclip, SendHorizonal, Sprout, Star, Trash2, TriangleAlert, TrendingUp, X } from 'lucide-react';
 import { Card, CardBody } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -24,10 +25,14 @@ export function IAgro() {
   const [loadingThreads, setLoadingThreads] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [pendingPreviews, setPendingPreviews] = useState<Map<File, string>>(new Map());
+  const [messageImages, setMessageImages] = useState<Map<string, string[]>>(new Map());
   const [historyOpen, setHistoryOpen] = useState(false);
   const [threadToDelete, setThreadToDelete] = useState<IAgroThread | null>(null);
   const [deletingThread, setDeletingThread] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const quickActions = [
     {
@@ -80,27 +85,45 @@ export function IAgro() {
     }
   }
 
+  useEffect(() => { void refreshThreads(); }, []);
+
   useEffect(() => {
-    void refreshThreads();
-  }, []);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loadingSend]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const messageText = input.trim();
     if (!messageText && pendingFiles.length === 0) return;
 
+    const imageFiles = pendingFiles.filter((f) => f.type.startsWith('image/'));
+    const imageUrls = imageFiles
+      .map((f) => pendingPreviews.get(f))
+      .filter((u): u is string => Boolean(u));
+
+    const optimisticId = `tmp-${Date.now()}`;
     const optimistic: IAgroMessage = {
-      id: `tmp-${Date.now()}`,
+      id: optimisticId,
       sender: 'user',
-      text: messageText || 'Arquivos anexados',
+      text: messageText || (imageFiles.length > 0 ? 'Imagem enviada para análise' : 'Arquivos anexados'),
       createdAt: new Date().toISOString(),
     };
+
+    if (imageUrls.length > 0) {
+      setMessageImages((prev) => new Map(prev).set(optimisticId, imageUrls));
+    }
+
+    const filesToSend = [...pendingFiles];
+    const keptUrls = new Set(imageUrls);
     setMessages((prev) => [...prev, optimistic]);
     setInput('');
+    pendingPreviews.forEach((url) => { if (!keptUrls.has(url)) URL.revokeObjectURL(url); });
+    setPendingFiles([]);
+    setPendingPreviews(new Map());
     setLoadingSend(true);
 
     try {
-      const response = await sendIAgroMessage({ message: messageText, threadId, files: pendingFiles });
+      const response = await sendIAgroMessage({ message: messageText, threadId, files: filesToSend });
       const assistant: IAgroMessage = {
         id: `tmp-assistant-${Date.now()}`,
         sender: 'assistant',
@@ -108,12 +131,12 @@ export function IAgro() {
         createdAt: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, assistant]);
-
-      if (!threadId || threadId !== response.threadId) {
-        setThreadId(response.threadId);
-      }
+      if (!threadId || threadId !== response.threadId) setThreadId(response.threadId);
       await refreshThreads();
-      setPendingFiles([]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Falha ao enviar mensagem.';
+      toast.error(msg);
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
     } finally {
       setLoadingSend(false);
     }
@@ -123,16 +146,33 @@ export function IAgro() {
     if (!fileList) return;
     const files = Array.from(fileList);
     if (files.length === 0) return;
+    const newPreviews = new Map(pendingPreviews);
+    files.forEach((f) => {
+      if (f.type.startsWith('image/')) newPreviews.set(f, URL.createObjectURL(f));
+    });
+    setPendingPreviews(newPreviews);
     setPendingFiles((prev) => [...prev, ...files].slice(0, 6));
   }
 
   function removePendingFile(index: number) {
+    const file = pendingFiles[index];
+    if (pendingPreviews.has(file)) {
+      URL.revokeObjectURL(pendingPreviews.get(file)!);
+      const next = new Map(pendingPreviews);
+      next.delete(file);
+      setPendingPreviews(next);
+    }
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
   function applyQuickPrompt(prompt: string) {
     setInput(prompt);
     inputRef.current?.focus();
+  }
+
+  function applyPlantAnalysis() {
+    setInput('Analise a imagem desta planta: identifique o estado de saúde, possíveis deficiências nutricionais, sinais de pragas ou doenças, necessidade de calagem, e me dê recomendações práticas de manejo.');
+    fileInputRef.current?.click();
   }
 
   async function handleToggleFavorite(targetThread: IAgroThread) {
@@ -184,8 +224,8 @@ export function IAgro() {
             {loadingHistory && <p className="text-sm text-muted-foreground">Carregando histórico...</p>}
             {!loadingHistory && messages.length === 0 && (
               <div className="px-2 py-6">
-                <div className="mx-auto mb-5 flex h-24 w-24 items-center justify-center rounded-full bg-primary/10">
-                  <img src="/favicon.png" alt="IAgro" className="h-12 w-12 object-contain" />
+                <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-xl bg-sidebar-primary">
+                  <Cloud className="h-8 w-8 text-white" />
                 </div>
                 <h2 className="text-center text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
                   Olá! Como posso ajudar?
@@ -196,28 +236,53 @@ export function IAgro() {
                   Posso ajudar com:
                 </p>
 
-                <div className="mx-auto mt-6 grid max-w-4xl grid-cols-1 gap-3 md:grid-cols-2">
-                  {quickActions.map((action) => {
-                    const Icon = action.icon;
-                    return (
-                      <button
-                        key={action.title}
-                        type="button"
-                        onClick={() => applyQuickPrompt(action.prompt)}
-                        className="rounded-xl border border-border bg-card px-5 py-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                            <Icon className="h-5 w-5" />
-                          </span>
-                          <div>
-                            <p className="text-base text-foreground">{action.title}</p>
-                            <p className="text-sm text-muted-foreground">{action.description}</p>
+                <div className="mx-auto mt-6 max-w-4xl space-y-3">
+                  {/* Card de análise de planta — destaque */}
+                  <button
+                    type="button"
+                    onClick={applyPlantAnalysis}
+                    className="w-full rounded-2xl border-2 border-dashed border-green-500/40 bg-green-500/5 px-6 py-5 text-left transition-all hover:border-green-500/70 hover:bg-green-500/10 hover:shadow-md hover:-translate-y-0.5"
+                  >
+                    <div className="flex items-center gap-4">
+                      <span className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-green-500/15 text-green-600">
+                        <Camera className="h-7 w-7" />
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-base font-medium text-foreground">Analisar Planta com Foto</p>
+                        <p className="text-sm text-muted-foreground">
+                          Envie uma foto da sua cultura e receba um laudo agronômico completo: deficiências nutricionais, necessidade de calagem, pragas, doenças e recomendações de manejo.
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-medium text-green-700">
+                        Enviar foto →
+                      </span>
+                    </div>
+                  </button>
+
+                  {/* Quick actions secundários */}
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {quickActions.map((action) => {
+                      const Icon = action.icon;
+                      return (
+                        <button
+                          key={action.title}
+                          type="button"
+                          onClick={() => applyQuickPrompt(action.prompt)}
+                          className="rounded-xl border border-border bg-card px-5 py-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                              <Icon className="h-5 w-5" />
+                            </span>
+                            <div>
+                              <p className="text-base text-foreground">{action.title}</p>
+                              <p className="text-sm text-muted-foreground">{action.description}</p>
+                            </div>
                           </div>
-                        </div>
-                      </button>
-                    );
-                  })}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             )}
@@ -225,7 +290,9 @@ export function IAgro() {
               <div key={message.id} className={`${message.sender === 'user' ? 'flex justify-end' : 'flex justify-start'}`}>
                 {message.sender === 'assistant' ? (
                   <div className="flex items-end gap-2 max-w-[78%]">
-                    <img src="/favicon.png" alt="IAgro" className="h-8 w-8 object-contain shrink-0" />
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary">
+                      <Cloud className="h-4 w-4 text-white" />
+                    </div>
                     <div className="w-fit max-w-full break-words rounded-lg bg-card border border-border px-3 py-2 text-sm text-card-foreground prose prose-sm prose-neutral max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
@@ -259,8 +326,20 @@ export function IAgro() {
                     </div>
                   </div>
                 ) : (
-                  <div className="w-fit max-w-[78%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm ml-auto bg-primary text-primary-foreground">
-                    {message.text}
+                  <div className="w-fit max-w-[78%] ml-auto flex flex-col items-end gap-1">
+                    {(messageImages.get(message.id) ?? []).map((url) => (
+                      <img
+                        key={url}
+                        src={url}
+                        alt="Imagem enviada"
+                        className="h-40 w-40 object-cover rounded-xl border border-white/20 shadow-sm"
+                      />
+                    ))}
+                    {message.text && (
+                      <div className="whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm bg-primary text-primary-foreground">
+                        {message.text}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -268,7 +347,9 @@ export function IAgro() {
             {loadingSend && (
               <div className="flex justify-start">
                 <div className="flex items-end gap-2 max-w-[78%]">
-                  <img src="/favicon.png" alt="IAgro" className="h-8 w-8 object-contain shrink-0 animate-pulse" />
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary animate-pulse">
+                    <Cloud className="h-4 w-4 text-white" />
+                  </div>
                   <div className="w-fit max-w-full rounded-lg bg-card border border-border px-3 py-2 text-sm text-muted-foreground inline-flex items-center gap-2">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     Gerando resposta...
@@ -276,10 +357,37 @@ export function IAgro() {
                 </div>
               </div>
             )}
+            <div ref={messagesEndRef} />
           </div>
 
           <form className="space-y-2" onSubmit={handleSubmit}>
             <div className="w-full space-y-2">
+              {pendingFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2 px-1">
+                  {pendingFiles.map((file, index) => (
+                    <span
+                      key={`${file.name}-${index}`}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-2 py-1 text-xs"
+                    >
+                      {pendingPreviews.get(file) ? (
+                        <img
+                          src={pendingPreviews.get(file)}
+                          alt={file.name}
+                          className="h-10 w-10 object-cover rounded-lg shrink-0"
+                        />
+                      ) : null}
+                      <span className="max-w-[120px] truncate">{file.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => removePendingFile(index)}
+                        className="text-muted-foreground hover:text-foreground shrink-0"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <div className="relative">
                 <textarea
                   ref={inputRef}
@@ -299,6 +407,7 @@ export function IAgro() {
                 />
                 <label className="absolute left-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                   <input
+                    ref={fileInputRef}
                     type="file"
                     multiple
                     className="hidden"
@@ -319,18 +428,6 @@ export function IAgro() {
                   Enviar
                 </button>
               </div>
-              {pendingFiles.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {pendingFiles.map((file, index) => (
-                    <span key={`${file.name}-${index}`} className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-xs">
-                      {file.name}
-                      <button type="button" onClick={() => removePendingFile(index)} className="text-muted-foreground hover:text-foreground">
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
             </div>
           </form>
         </CardBody>
