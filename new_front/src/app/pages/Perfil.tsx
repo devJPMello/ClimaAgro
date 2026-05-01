@@ -4,7 +4,7 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
 import { Checkbox } from '../components/ui/Checkbox';
-import { User, Mail, Phone, MapPin, Bell, FileText, Calendar } from 'lucide-react';
+import { User, Mail, Moon, Phone, MapPin, Bell, FileText, Calendar, Sun } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUser } from '@clerk/clerk-react';
 import { TO_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
@@ -12,6 +12,7 @@ import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioS
 import { listReportExports } from '../../lib/api/reportExportsApi';
 import { listClimateAlerts } from '../../lib/api/alertsApi';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
+import { useTheme } from '../contexts/ThemeContext';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -62,6 +63,7 @@ function calcDaysSince(value: Date | number | null | undefined): string {
 }
 
 export function Perfil() {
+  const { theme, setTheme } = useTheme();
   const { user } = useUser();
   const [editando, setEditando] = useState(false);
   const [nome, setNome] = useState('');
@@ -262,6 +264,7 @@ export function Perfil() {
               />
             </CardBody>
           </Card>
+
         </div>
 
         {/* Estatísticas */}
@@ -304,6 +307,36 @@ export function Perfil() {
                   </>
                 )}
               </AsyncStateView>
+            </CardBody>
+          </Card>
+
+          {/* Aparência */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Aparência</CardTitle>
+            </CardHeader>
+            <CardBody className="space-y-2">
+              {([
+                { key: 'light', label: 'Claro', Icon: Sun },
+                { key: 'dark', label: 'Escuro', Icon: Moon },
+              ] as const).map(({ key, label, Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => { setTheme(key); toast.success(`Tema ${label} ativado`); }}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border transition-all duration-200 text-left ${
+                    theme === key
+                      ? 'border-primary bg-primary/5 text-primary'
+                      : 'border-border hover:bg-accent/50 text-foreground'
+                  }`}
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="text-sm flex-1">{label}</span>
+                  {theme === key && (
+                    <span className="text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded-full">Ativo</span>
+                  )}
+                </button>
+              ))}
             </CardBody>
           </Card>
 

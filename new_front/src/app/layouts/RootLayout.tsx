@@ -3,6 +3,7 @@ import { Outlet, Link, useLocation } from 'react-router';
 import { Cloud, LayoutDashboard, MapPin, TrendingUp, LineChart, Bell, FileText, User, LogOut, Menu, X, Bot } from 'lucide-react';
 import { useClerk, useUser } from '@clerk/clerk-react';
 
+
 const navigation = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
   { name: 'Mapa Climático', path: '/mapa-climatico', icon: MapPin },
@@ -18,6 +19,7 @@ export function RootLayout() {
   const location = useLocation();
   const { signOut } = useClerk();
   const { user } = useUser();
+
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
