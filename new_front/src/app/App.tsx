@@ -2,12 +2,15 @@ import { RouterProvider } from 'react-router';
 import { router } from './routes';
 import { Toaster } from 'sonner';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ThemeProvider } from './contexts/ThemeContext';
 
 export default function App() {
   return (
     <ErrorBoundary>
-      <RouterProvider router={router} />
-      <Toaster position="top-right" richColors />
+      <ThemeProvider>
+        <RouterProvider router={router} />
+        <Toaster position="top-right" richColors />
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }
