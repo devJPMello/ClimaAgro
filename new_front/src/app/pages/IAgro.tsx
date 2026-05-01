@@ -1,8 +1,8 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState, type ClipboardEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
-import { Camera, Cloud, History, Loader2, Paperclip, SendHorizonal, Sprout, Star, Trash2, TriangleAlert, TrendingUp, X } from 'lucide-react';
+import { Camera, Cloud, History, Loader2, Mic, MicOff, Paperclip, SendHorizonal, Sprout, Star, Trash2, TriangleAlert, TrendingUp, X } from 'lucide-react';
 import { Card, CardBody } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -33,6 +33,8 @@ export function IAgro() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   const quickActions = [
     {
@@ -91,8 +93,40 @@ export function IAgro() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loadingSend]);
 
+  function toggleRecording() {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      toast.error('Reconhecimento de voz não suportado. Use Chrome ou Edge.');
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const recognition = new SR() as any;
+    recognition.lang = 'pt-BR';
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => setIsRecording(true);
+    recognition.onend = () => { setIsRecording(false); recognitionRef.current = null; };
+    recognition.onerror = (e: SpeechRecognitionErrorEvent) => {
+      setIsRecording(false);
+      if (e.error !== 'aborted') toast.error(`Erro no microfone: ${e.error}`);
+    };
+    recognition.onresult = (e: SpeechRecognitionEvent) => {
+      const transcript = Array.from(e.results).map((r) => r[0].transcript).join('');
+      setInput(transcript);
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    recognitionRef.current?.stop();
     const messageText = input.trim();
     if (!messageText && pendingFiles.length === 0) return;
 
@@ -163,6 +197,18 @@ export function IAgro() {
       setPendingPreviews(next);
     }
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const items = Array.from(event.clipboardData.items);
+    const imageItems = items.filter((item) => item.type.startsWith('image/'));
+    if (imageItems.length === 0) return;
+    event.preventDefault();
+    const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
+    if (files.length === 0) return;
+    const dt = new DataTransfer();
+    files.forEach((f) => dt.items.add(f));
+    handleFilesSelected(dt.files);
   }
 
   function applyQuickPrompt(prompt: string) {
@@ -293,7 +339,7 @@ export function IAgro() {
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary">
                       <Cloud className="h-4 w-4 text-white" />
                     </div>
-                    <div className="w-fit max-w-full break-words rounded-lg bg-card border border-border px-3 py-2 text-sm text-card-foreground prose prose-sm prose-neutral max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                    <div className={'w-fit max-w-full break-words rounded-lg bg-card border border-border px-3 py-2 text-sm text-card-foreground prose prose-sm prose-neutral max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0'}>
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={{
@@ -393,6 +439,7 @@ export function IAgro() {
                   ref={inputRef}
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
+                  onPaste={handlePaste}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();
@@ -403,7 +450,11 @@ export function IAgro() {
                   }}
                   placeholder="Digite sua pergunta para o IAgro..."
                   rows={1}
-                  className="w-full h-14 resize-none overflow-hidden rounded-2xl border border-border bg-input-background py-4 pr-28 pl-12 text-sm leading-5 focus:outline-none focus:ring-0 focus:border-border"
+                  className={[
+                    'w-full h-14 resize-none overflow-hidden rounded-2xl border bg-input-background',
+                    'py-4 pr-36 pl-12 text-sm leading-5 focus:outline-none focus:ring-0 transition-colors',
+                    isRecording ? 'border-destructive' : 'border-border',
+                  ].join(' ')}
                 />
                 <label className="absolute left-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                   <input
@@ -419,14 +470,33 @@ export function IAgro() {
                   />
                   <Paperclip className="w-4 h-4" />
                 </label>
-                <button
-                  type="submit"
-                  disabled={!canSend}
-                  className="absolute right-3 top-1/2 inline-flex h-8 -translate-y-1/2 items-center gap-1 rounded-full bg-primary px-3 text-xs text-primary-foreground transition-all hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {loadingSend ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SendHorizonal className="w-3.5 h-3.5" />}
-                  Enviar
-                </button>
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleRecording}
+                    title={isRecording ? 'Parar gravação' : 'Transcrever áudio'}
+                    className={[
+                      'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors',
+                      isRecording
+                        ? 'text-destructive hover:bg-destructive/10'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                    ].join(' ')}
+                  >
+                    {isRecording
+                      ? <MicOff className="w-4 h-4 animate-pulse" />
+                      : <Mic className="w-4 h-4" />}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!canSend}
+                    className="inline-flex h-8 items-center gap-1 rounded-full bg-primary px-3 text-xs text-primary-foreground transition-all hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {loadingSend
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <SendHorizonal className="w-3.5 h-3.5" />}
+                    Enviar
+                  </button>
+                </div>
               </div>
             </div>
           </form>
