@@ -11,6 +11,7 @@
     "test": "jest",
     "seed:geo": "node src/scripts/seedGeoData.js",
     "seed:productivity": "node src/scripts/seedProductivityData.js",
+    "seed:agronomos": "node src/scripts/seedAgronomosParceiros.js",
     "seed:all": "npm run seed:geo && npm run seed:productivity",
     "db:reset": "npm run seed:all",
     "sync:climate": "node src/scripts/syncRealClimateData.js",
