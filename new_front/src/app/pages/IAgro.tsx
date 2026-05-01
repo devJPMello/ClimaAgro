@@ -140,6 +140,13 @@ export function IAgro() {
     return String(text || '').trim();
   }
 
+  /** Remove a linha `[Anexos: ...]` que o backend grava; não exibir ao reabrir o histórico. */
+  function displayUserMessageText(raw: string): string {
+    return String(raw || '')
+      .replace(/\n*\[Anexos:[^\]]+\]\s*$/i, '')
+      .trimEnd();
+  }
+
   function buildPersistedUserText(messageText: string, files: File[]): string {
     const fileNames = files.map((file) => file.name).filter(Boolean);
     if (fileNames.length === 0) return messageText;
@@ -395,7 +402,10 @@ export function IAgro() {
                 </div>
               </div>
             )}
-            {messages.map((message) => (
+            {messages.map((message) => {
+              const userDisplayText =
+                message.sender === 'user' ? displayUserMessageText(message.text) : message.text;
+              return (
               <div key={message.id} className={`${message.sender === 'user' ? 'flex justify-end' : 'flex justify-start'}`}>
                 {message.sender === 'assistant' ? (
                   <div className="flex items-end gap-2 max-w-[78%]">
@@ -444,15 +454,16 @@ export function IAgro() {
                         className="h-40 w-40 object-cover rounded-xl border border-white/20 shadow-sm"
                       />
                     ))}
-                    {message.text && (
+                    {userDisplayText && (
                       <div className="whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm bg-primary text-primary-foreground">
-                        {message.text}
+                        {userDisplayText}
                       </div>
                     )}
                   </div>
                 )}
               </div>
-            ))}
+            );
+            })}
             {loadingSend && (
               <div className="flex justify-start">
                 <div className="flex items-end gap-2 max-w-[78%]">
