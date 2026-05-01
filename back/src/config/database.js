@@ -164,6 +164,8 @@ const OfficialAlert = require('../models/OfficialAlert');
 const ReportExport = require('../models/ReportExport');
 const IbgeSidra1612Row = require('../models/IbgeSidra1612Row');
 const ChatHistory = require('../models/ChatHistory');
+const DualUserProfile = require('../models/DualUserProfile');
+const ConsultaAgronomica = require('../models/ConsultaAgronomica');
 
 // Configurar associações entre modelos
 const setupAssociations = () => {
@@ -197,6 +199,8 @@ module.exports = {
     OfficialAlert,
     ReportExport,
     IbgeSidra1612Row,
-    ChatHistory
+    ChatHistory,
+    DualUserProfile,
+    ConsultaAgronomica
   }
 };
