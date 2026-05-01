@@ -1,0 +1,693 @@
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import {
+  Award,
+  Briefcase,
+  CheckCircle,
+  ChevronLeft,
+  ChevronRight,
+  Mail,
+  MapPin,
+  MessageCircle,
+  Phone,
+  Search,
+  Star,
+  User,
+  UserPlus,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { Card, CardBody } from '../components/ui/Card';
+import { Input } from '../components/ui/Input';
+import { Select } from '../components/ui/Select';
+import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
+import { Modal } from '../components/ui/Modal';
+import { cadastrarAgronomoParceiro, listarAgronomosParceiros } from '../../lib/api/agronomosParceirosApi';
+import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
+
+const UFS_BR = [
+  'AC', 'AL', 'AM', 'AP', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT',
+  'PA', 'PB', 'PE', 'PI', 'PR', 'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO',
+];
+const UF_NOMES: Record<string, string> = {
+  AC: 'Acre',
+  AL: 'Alagoas',
+  AP: 'Amapá',
+  AM: 'Amazonas',
+  BA: 'Bahia',
+  CE: 'Ceará',
+  DF: 'Distrito Federal',
+  ES: 'Espírito Santo',
+  GO: 'Goiás',
+  MA: 'Maranhão',
+  MT: 'Mato Grosso',
+  MS: 'Mato Grosso do Sul',
+  MG: 'Minas Gerais',
+  PA: 'Pará',
+  PB: 'Paraíba',
+  PR: 'Paraná',
+  PE: 'Pernambuco',
+  PI: 'Piauí',
+  RJ: 'Rio de Janeiro',
+  RN: 'Rio Grande do Norte',
+  RS: 'Rio Grande do Sul',
+  RO: 'Rondônia',
+  RR: 'Roraima',
+  SC: 'Santa Catarina',
+  SP: 'São Paulo',
+  SE: 'Sergipe',
+  TO: 'Tocantins',
+};
+
+const ESPECIALIDADES_PRINCIPAIS = [
+  'Soja e Milho',
+  'Horticultura',
+  'Café e Frutas',
+  'Solos e Nutrição de Plantas',
+  'Fitossanidade',
+  'Irrigação e Recursos Hídricos',
+];
+const UF_IBGE_ID_BY_SIGLA: Record<string, string> = {
+  AC: '12', AL: '27', AP: '16', AM: '13', BA: '29', CE: '23', DF: '53', ES: '32', GO: '52',
+  MA: '21', MT: '51', MS: '50', MG: '31', PA: '15', PB: '25', PR: '41', PE: '26', PI: '22',
+  RJ: '33', RN: '24', RS: '43', RO: '11', RR: '14', SC: '42', SP: '35', SE: '28', TO: '17',
+};
+
+interface Agronomo {
+  id: string;
+  nome: string;
+  email: string;
+  whatsapp: string;
+  telefoneFormatado: string;
+  municipio: string;
+  uf: string;
+  crea: string;
+  especialidade: string;
+  avaliacao: number;
+  totalAvaliacoes: number;
+  totalAtendimentos: number;
+  tempoResposta: string;
+  sobre: string;
+  areasAtuacao: string[];
+}
+
+export function AgronomosParceiros() {
+  const [agronomos, setAgronomos] = useState<Agronomo[]>([]);
+  const [loadingLista, setLoadingLista] = useState(false);
+  const [agronomoSelecionado, setAgronomoSelecionado] = useState<Agronomo | null>(null);
+  const [modalPerfilAberto, setModalPerfilAberto] = useState(false);
+  const [modalCadastroAberto, setModalCadastroAberto] = useState(false);
+  const [busca, setBusca] = useState('');
+  const [estadoSelecionado, setEstadoSelecionado] = useState('todos');
+  const [municipioSelecionado, setMunicipioSelecionado] = useState('todos');
+  const [especialidadeSelecionada, setEspecialidadeSelecionada] = useState('todas');
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const [cadastro, setCadastro] = useState({
+    nome: '',
+    email: '',
+    whatsapp: '',
+    telefoneFormatado: '',
+    municipio: '',
+    uf: '',
+    crea: '',
+    especialidade: '',
+    sobre: '',
+  });
+
+  const itensPorPagina = 6;
+  const ufIbgeSelecionada = estadoSelecionado === 'todos' ? undefined : UF_IBGE_ID_BY_SIGLA[estadoSelecionado];
+  const ufIbgeCadastro = cadastro.uf ? UF_IBGE_ID_BY_SIGLA[cadastro.uf] : undefined;
+  const { options: municipiosPorUfOptions, loading: loadingMunicipiosPorUf } = useIbgeMunicipioSelectOptions(ufIbgeSelecionada);
+  const { options: municipiosCadastroOptions, loading: loadingMunicipiosCadastro } = useIbgeMunicipioSelectOptions(ufIbgeCadastro);
+  const ufOptionsOrdenadas = useMemo(
+    () =>
+      [...UFS_BR]
+        .sort((a, b) => UF_NOMES[a].localeCompare(UF_NOMES[b], 'pt-BR'))
+        .map((uf) => ({ value: uf, label: `${uf} - ${UF_NOMES[uf]}` })),
+    []
+  );
+
+  useEffect(() => {
+    async function carregar() {
+      setLoadingLista(true);
+      try {
+        const response = await listarAgronomosParceiros();
+        const normalizados = (response.agronomos || []).map((item): Agronomo => ({
+          id: String(item.id),
+          nome: item.nome || 'Agrônomo',
+          email: item.email || 'email-nao-informado@climaagro.com',
+          whatsapp: item.whatsapp || '',
+          telefoneFormatado: item.telefoneFormatado || item.telefone || 'Não informado',
+          municipio: item.municipio || 'Não informado',
+          uf: item.uf || '--',
+          crea: item.crea || 'Não informado',
+          especialidade: item.especialidade || 'Especialidade não informada',
+          avaliacao: typeof item.avaliacao === 'number' ? item.avaliacao : 5,
+          totalAvaliacoes: typeof item.totalAvaliacoes === 'number' ? item.totalAvaliacoes : 0,
+          totalAtendimentos: typeof item.totalAtendimentos === 'number' ? item.totalAtendimentos : 0,
+          tempoResposta: item.tempoResposta || 'N/A',
+          sobre: item.sobre || 'Profissional parceiro da rede ClimaAgro.',
+          areasAtuacao: Array.isArray(item.areasAtuacao) && item.areasAtuacao.length > 0
+            ? item.areasAtuacao
+            : [item.especialidade || 'Consultoria Agronômica'],
+        }));
+        setAgronomos(normalizados);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Erro ao carregar agrônomos.';
+        toast.error(msg);
+        setAgronomos([]);
+      } finally {
+        setLoadingLista(false);
+      }
+    }
+    void carregar();
+  }, []);
+
+  const estados = useMemo(
+    () => [{ value: 'todos', label: 'Todos os Estados' }, ...ufOptionsOrdenadas],
+    [ufOptionsOrdenadas]
+  );
+  const municipios = useMemo(() => {
+    if (estadoSelecionado === 'todos') return ['todos'];
+    const ordenados = [...new Set(municipiosPorUfOptions.map((item) => item.value))]
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    return ['todos', ...ordenados];
+  }, [estadoSelecionado, municipiosPorUfOptions]);
+  const especialidades = useMemo(
+    () => ['todas', ...ESPECIALIDADES_PRINCIPAIS],
+    []
+  );
+
+  useEffect(() => {
+    if (municipioSelecionado !== 'todos' && !municipios.includes(municipioSelecionado)) {
+      setMunicipioSelecionado('todos');
+      setPaginaAtual(1);
+    }
+  }, [municipioSelecionado, municipios]);
+
+  const agronomosFiltrados = useMemo(
+    () =>
+      agronomos.filter((item) => {
+        const termo = busca.trim().toLowerCase();
+        const bateBusca =
+          !termo ||
+          item.nome.toLowerCase().includes(termo) ||
+          item.especialidade.toLowerCase().includes(termo);
+        const bateEstado = estadoSelecionado === 'todos' || item.uf === estadoSelecionado;
+        const bateMunicipio = municipioSelecionado === 'todos' || item.municipio === municipioSelecionado;
+        const bateEspecialidade =
+          especialidadeSelecionada === 'todas' || item.especialidade.includes(especialidadeSelecionada);
+        return bateBusca && bateEstado && bateMunicipio && bateEspecialidade;
+      }),
+    [agronomos, busca, estadoSelecionado, municipioSelecionado, especialidadeSelecionada]
+  );
+
+  const totalPaginas = Math.max(1, Math.ceil(agronomosFiltrados.length / itensPorPagina));
+  const paginaCorrigida = Math.min(paginaAtual, totalPaginas);
+  const inicio = (paginaCorrigida - 1) * itensPorPagina;
+  const fim = inicio + itensPorPagina;
+  const agronomosPaginados = agronomosFiltrados.slice(inicio, fim);
+
+  useEffect(() => {
+    if (paginaAtual !== paginaCorrigida) setPaginaAtual(paginaCorrigida);
+  }, [paginaAtual, paginaCorrigida]);
+
+  function abrirDetalhes(agronomo: Agronomo) {
+    setAgronomoSelecionado(agronomo);
+    setModalPerfilAberto(true);
+  }
+
+  function abrirWhatsapp() {
+    if (!agronomoSelecionado) return;
+    window.open(`https://wa.me/${agronomoSelecionado.whatsapp}`, '_blank', 'noopener,noreferrer');
+  }
+
+  function cadastrarAgronomo(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (
+      !cadastro.nome.trim() ||
+      !cadastro.email.trim() ||
+      !cadastro.whatsapp.trim() ||
+      !cadastro.crea.trim() ||
+      !cadastro.especialidade.trim()
+    ) {
+      toast.error('Preencha os campos obrigatórios para cadastro.');
+      return;
+    }
+    void (async () => {
+      try {
+        await cadastrarAgronomoParceiro({
+          nome: cadastro.nome.trim(),
+          email: cadastro.email.trim(),
+          whatsapp: cadastro.whatsapp.trim(),
+          telefone: cadastro.telefoneFormatado.trim(),
+          municipio: cadastro.municipio.trim(),
+          uf: cadastro.uf.trim().toUpperCase(),
+          crea: cadastro.crea.trim(),
+          especialidade: cadastro.especialidade.trim(),
+          sobre: cadastro.sobre.trim(),
+        });
+        toast.success('Cadastro recebido! Em breve entraremos em contato.');
+        setModalCadastroAberto(false);
+        setCadastro({
+          nome: '',
+          email: '',
+          whatsapp: '',
+          telefoneFormatado: '',
+          municipio: '',
+          uf: '',
+          crea: '',
+          especialidade: '',
+          sobre: '',
+        });
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : 'Falha ao enviar cadastro.';
+        toast.error(msg);
+      }
+    })();
+  }
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div>
+        <h1 className="text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
+          Agrônomos Parceiros
+        </h1>
+        <p className="text-muted-foreground">
+          Encontre especialistas certificados para ajudar com suas necessidades agrícolas
+        </p>
+      </div>
+
+      <Card>
+        <CardBody className="rounded-xl border border-primary/20 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex-1 space-y-3">
+              <div className="inline-flex items-center gap-2">
+                <CheckCircle className="h-5 w-5 text-green-500" />
+                <h2 className="text-lg">Programa Agrônomos Parceiros ClimaAgro</h2>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Conectamos produtores a profissionais certificados para consultas técnicas, manejo e tomada de decisão.
+              </p>
+              <div className="flex flex-wrap gap-4 text-sm">
+                <span className="inline-flex items-center gap-1.5 text-white">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  Profissionais Verificados
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-white">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  Atendimento Rápido
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-white">
+                  <CheckCircle className="h-4 w-4 text-green-500" />
+                  Especialistas por Região
+                </span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Button type="button" onClick={() => setModalCadastroAberto(true)}>
+                <UserPlus className="h-4 w-4" />
+                Você é Agrônomo? Cadastre-se
+              </Button>
+              <p className="text-xs text-muted-foreground">Faça parte da nossa rede de parceiros</p>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardBody className="p-5">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
+            <div className="relative lg:col-span-2">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={busca}
+                onChange={(e) => {
+                  setBusca(e.target.value);
+                  setPaginaAtual(1);
+                }}
+                placeholder="Buscar por nome ou especialidade..."
+                className="pl-10"
+              />
+            </div>
+            <Select
+              value={estadoSelecionado}
+              onChange={(e) => {
+                setEstadoSelecionado(e.target.value);
+                setMunicipioSelecionado('todos');
+                setPaginaAtual(1);
+              }}
+              options={estados}
+            />
+            <Select
+              value={municipioSelecionado}
+              onChange={(e) => {
+                setMunicipioSelecionado(e.target.value);
+                setPaginaAtual(1);
+              }}
+              options={municipios.map((municipio) => ({
+                value: municipio,
+                label:
+                  municipio === 'todos'
+                    ? (estadoSelecionado === 'todos' ? 'Selecione primeiro um estado' : 'Todos os Municípios')
+                    : municipio,
+              }))}
+              disabled={estadoSelecionado === 'todos' || loadingMunicipiosPorUf}
+            />
+            <Select
+              value={especialidadeSelecionada}
+              onChange={(e) => {
+                setEspecialidadeSelecionada(e.target.value);
+                setPaginaAtual(1);
+              }}
+              options={especialidades.map((esp) => ({
+                value: esp,
+                label: esp === 'todas' ? 'Todas Especialidades' : esp,
+              }))}
+            />
+          </div>
+        </CardBody>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {loadingLista && (
+          <Card className="md:col-span-2 xl:col-span-3">
+            <CardBody>
+              <p className="text-sm text-muted-foreground">Carregando agrônomos parceiros...</p>
+            </CardBody>
+          </Card>
+        )}
+        {!loadingLista && agronomosPaginados.length === 0 && (
+          <Card className="md:col-span-2 xl:col-span-3">
+            <CardBody>
+              <p className="text-sm text-muted-foreground">Nenhum agrônomo parceiro encontrado.</p>
+            </CardBody>
+          </Card>
+        )}
+        {agronomosPaginados.map((agronomo) => (
+          <Card
+            key={agronomo.id}
+            className="cursor-pointer transition-all duration-200 hover:shadow-lg"
+            onClick={() => abrirDetalhes(agronomo)}
+          >
+            <CardBody className="space-y-4">
+              <div className="flex items-start gap-4">
+                <div className="relative">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-dark text-white">
+                    <User className="h-8 w-8" />
+                  </div>
+                  <span className="absolute -bottom-1 -right-1 inline-flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-green-500">
+                    <CheckCircle className="h-3.5 w-3.5 text-white" />
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-lg">{agronomo.nome}</p>
+                  <p className="text-sm text-muted-foreground">{agronomo.especialidade}</p>
+                  <p className="mt-1 inline-flex items-center gap-1 text-sm text-severity-medium">
+                    <Star className="h-4 w-4 fill-current" />
+                    {agronomo.avaliacao.toFixed(1)} ({agronomo.totalAvaliacoes})
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p className="inline-flex items-center gap-2">
+                  <MapPin className="h-4 w-4" />
+                  {`${agronomo.municipio} - ${agronomo.uf}`}
+                </p>
+                <p className="inline-flex items-center gap-2">
+                  <Briefcase className="h-4 w-4" />
+                  {agronomo.crea}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg bg-muted/50 p-3 text-center">
+                  <p className="text-2xl" style={{ fontFamily: 'var(--font-serif)' }}>
+                    {agronomo.totalAtendimentos}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Atendimentos</p>
+                </div>
+                <div className="rounded-lg bg-muted/50 p-3 text-center">
+                  <p className="text-2xl" style={{ fontFamily: 'var(--font-serif)' }}>
+                    {agronomo.tempoResposta}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Resposta média</p>
+                </div>
+              </div>
+
+              <Button type="button" className="w-full" onClick={() => abrirDetalhes(agronomo)}>
+                Ver Perfil
+              </Button>
+            </CardBody>
+          </Card>
+        ))}
+      </div>
+
+      <Card>
+        <CardBody className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <p className="text-sm text-muted-foreground">
+            {`Mostrando ${agronomosFiltrados.length === 0 ? 0 : inicio + 1}-${Math.min(
+              fim,
+              agronomosFiltrados.length
+            )} de ${agronomosFiltrados.length} agrônomos`}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setPaginaAtual((prev) => Math.max(1, prev - 1))}
+              disabled={paginaCorrigida <= 1}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Anterior
+            </Button>
+            <span className="text-sm text-muted-foreground">{`Página ${paginaCorrigida} de ${totalPaginas}`}</span>
+            <Button
+              variant="secondary"
+              onClick={() => setPaginaAtual((prev) => Math.min(totalPaginas, prev + 1))}
+              disabled={paginaCorrigida >= totalPaginas}
+            >
+              Próxima
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+
+      {agronomoSelecionado && (
+        <Modal
+          isOpen={modalPerfilAberto}
+          onClose={() => setModalPerfilAberto(false)}
+          title="Perfil do Agrônomo"
+          size="xl"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setModalPerfilAberto(false)}>
+                Fechar
+              </Button>
+              <Button onClick={abrirWhatsapp}>
+                <MessageCircle className="h-4 w-4" />
+                Conversar no WhatsApp
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-6">
+            <div className="border-b border-border pb-5">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start">
+                <div className="relative">
+                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-dark text-white">
+                    <User className="h-10 w-10" />
+                  </div>
+                  <span className="absolute -bottom-1 -right-1 inline-flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-green-500">
+                    <CheckCircle className="h-4 w-4 text-white" />
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl" style={{ fontFamily: 'var(--font-serif)' }}>
+                    {agronomoSelecionado.nome}
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="success" className="inline-flex items-center gap-1">
+                      <CheckCircle className="h-3.5 w-3.5" />
+                      Parceiro Certificado
+                    </Badge>
+                    <Badge variant="info">{agronomoSelecionado.especialidade}</Badge>
+                  </div>
+                  <p className="inline-flex items-center gap-1 text-sm text-severity-medium">
+                    <Star className="h-4 w-4 fill-current" />
+                    {agronomoSelecionado.avaliacao.toFixed(1)} ({agronomoSelecionado.totalAvaliacoes})
+                  </p>
+                  <p className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                    <MapPin className="h-4 w-4" />
+                    {`${agronomoSelecionado.municipio} - ${agronomoSelecionado.uf}`}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="rounded-xl bg-muted/50 p-4">
+                <p className="mb-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Briefcase className="h-4 w-4" />
+                  CREA
+                </p>
+                <p className="font-medium">{agronomoSelecionado.crea}</p>
+              </div>
+              <div className="rounded-xl bg-muted/50 p-4">
+                <p className="mb-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Mail className="h-4 w-4" />
+                  Email
+                </p>
+                <p className="font-medium truncate">{agronomoSelecionado.email}</p>
+              </div>
+              <div className="rounded-xl bg-muted/50 p-4">
+                <p className="mb-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Phone className="h-4 w-4" />
+                  WhatsApp
+                </p>
+                <p className="font-medium">{agronomoSelecionado.telefoneFormatado}</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="inline-flex items-center gap-2">
+                <Award className="h-4 w-4 text-primary" />
+                Sobre
+              </h4>
+              <p className="text-sm text-muted-foreground">{agronomoSelecionado.sobre}</p>
+            </div>
+
+            <div className="space-y-2">
+              <h4>Áreas de Atuação</h4>
+              <div className="flex flex-wrap gap-2">
+                {agronomoSelecionado.areasAtuacao.map((area) => (
+                  <Badge key={area}>{area}</Badge>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-xl bg-accent/30 p-4 text-center">
+                <p className="text-3xl" style={{ fontFamily: 'var(--font-serif)' }}>
+                  {agronomoSelecionado.totalAtendimentos}
+                </p>
+                <p className="text-xs text-muted-foreground">Atendimentos Realizados</p>
+              </div>
+              <div className="rounded-xl bg-accent/30 p-4 text-center">
+                <p className="text-3xl" style={{ fontFamily: 'var(--font-serif)' }}>
+                  {agronomoSelecionado.tempoResposta}
+                </p>
+                <p className="text-xs text-muted-foreground">Tempo de Resposta Médio</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-green-200 bg-green-50 p-4 dark:border-green-900 dark:bg-green-950/20">
+              <div className="flex items-start gap-3">
+                <MessageCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                <div>
+                  <p className="text-green-800 dark:text-green-300">Converse direto pelo WhatsApp</p>
+                  <p className="text-sm text-green-700/90 dark:text-green-400">
+                    Tire dúvidas técnicas, compartilhe fotos da lavoura e receba recomendações personalizadas.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      <Modal
+        isOpen={modalCadastroAberto}
+        onClose={() => setModalCadastroAberto(false)}
+        title="Cadastro de Agrônomo Parceiro"
+        size="xl"
+      >
+        <form className="space-y-4" onSubmit={cadastrarAgronomo}>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Input
+              label="Nome"
+              value={cadastro.nome}
+              onChange={(e) => setCadastro((prev) => ({ ...prev, nome: e.target.value }))}
+              required
+            />
+            <Input
+              label="Email"
+              type="email"
+              value={cadastro.email}
+              onChange={(e) => setCadastro((prev) => ({ ...prev, email: e.target.value }))}
+              required
+            />
+            <Input
+              label="WhatsApp (somente números)"
+              value={cadastro.whatsapp}
+              onChange={(e) => setCadastro((prev) => ({ ...prev, whatsapp: e.target.value }))}
+              required
+            />
+            <Input
+              label="Telefone formatado"
+              value={cadastro.telefoneFormatado}
+              onChange={(e) => setCadastro((prev) => ({ ...prev, telefoneFormatado: e.target.value }))}
+            />
+            <Select
+              label="Município"
+              value={cadastro.municipio}
+              onChange={(e) => setCadastro((prev) => ({ ...prev, municipio: e.target.value }))}
+              options={[
+                {
+                  value: '',
+                  label: !cadastro.uf
+                    ? 'Selecione a UF primeiro'
+                    : loadingMunicipiosCadastro
+                      ? 'Carregando municípios...'
+                      : 'Selecione um município',
+                },
+                ...municipiosCadastroOptions.map((m) => ({ value: m.value, label: m.label })),
+              ]}
+              disabled={!cadastro.uf || loadingMunicipiosCadastro}
+            />
+            <Select
+              label="UF"
+              value={cadastro.uf}
+              onChange={(e) => setCadastro((prev) => ({ ...prev, uf: e.target.value }))}
+              options={[
+                { value: '', label: 'Selecione a UF' },
+                ...ufOptionsOrdenadas,
+              ]}
+            />
+            <Input
+              label="CREA"
+              value={cadastro.crea}
+              onChange={(e) => setCadastro((prev) => ({ ...prev, crea: e.target.value }))}
+              required
+            />
+            <Select
+              label="Especialidade"
+              value={cadastro.especialidade}
+              onChange={(e) => setCadastro((prev) => ({ ...prev, especialidade: e.target.value }))}
+              options={[
+                { value: '', label: 'Selecione uma especialidade' },
+                ...ESPECIALIDADES_PRINCIPAIS.map((esp) => ({ value: esp, label: esp })),
+              ]}
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-sm text-muted-foreground">Sobre</label>
+            <textarea
+              value={cadastro.sobre}
+              onChange={(e) => setCadastro((prev) => ({ ...prev, sobre: e.target.value }))}
+              rows={4}
+              className="w-full rounded-lg border border-border bg-input-background px-4 py-2.5"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button type="button" variant="ghost" onClick={() => setModalCadastroAberto(false)}>
+              Cancelar
+            </Button>
+            <Button type="submit">Salvar cadastro</Button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  );
+}
