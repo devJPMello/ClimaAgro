@@ -38,10 +38,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../lib/api/climateApi', () => ({
   getClimateSeriesByUf: mocks.getClimateSeriesByUf,
-  listClimateUfs: vi.fn(async () => [
-    { value: 'ALL', label: 'Brasil (todos)' },
-    { value: 'SP', label: 'SP' },
-  ]),
+  listClimateUfs: vi.fn(async () => [{ value: 'SP', label: 'SP' }]),
   listAllClimateRecordsInRange: vi.fn(async () => []),
 }));
 
@@ -61,10 +58,10 @@ vi.mock('../../lib/hooks/useIbgeMunicipioSelectOptions', () => ({
 }));
 
 describe('SeriesTemporais UF filter', () => {
-  test('troca de UF atualiza requisição de clima', async () => {
+  test('seleção de UF dispara requisição de clima para essa sigla', async () => {
     render(<SeriesTemporais />);
-    await waitFor(() => expect(mocks.getClimateSeriesByUf).toHaveBeenCalled());
     const ufSelect = screen.getAllByRole('combobox')[0];
+    await waitFor(() => expect(ufSelect.querySelectorAll('option').length).toBeGreaterThanOrEqual(2));
     await userEvent.selectOptions(ufSelect, 'SP');
     await waitFor(() =>
       expect(mocks.getClimateSeriesByUf).toHaveBeenCalledWith(expect.objectContaining({ uf: 'SP' }))

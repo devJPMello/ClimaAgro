@@ -17,10 +17,21 @@ import {
 } from '../../lib/api/productivityApi';
 import { buildProductivityCropSelectOptions, getProductivityYearOptions } from '../../lib/filters/appFilters';
 import type { ClimateSeriesVariable } from '../../lib/api/contracts/climate';
+import { formatUfLabel, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
 
 type ProdRow = { mes: string; produtividade: number | null; produtividadeNum?: number | null };
 type ClimaRow = { mes: string; temperatura: number; precipitacao: number; umidade: number };
 type CompRow = { mes: string; clima: number; produtividade: number };
+
+/** Datas no eixo X e no cabeçalho do tooltip (tema escuro). */
+const TOOLTIP_DATE_LABEL_STYLE = { color: '#000000' };
+
+function formatTooltipProdutividade(value: unknown): string {
+  const v = Array.isArray(value) ? value[0] : value;
+  if (v == null || v === '') return 'Sem dado';
+  const n = Number(v);
+  return Number.isFinite(n) ? `${n.toFixed(2)} t/ha` : 'Sem dado';
+}
 
 function num(v: unknown): number | null {
   if (v == null || v === '') return null;
@@ -136,11 +147,8 @@ const CULTURA_FALLBACK_OPTIONS = [
 ];
 
 export function SeriesTemporais() {
-  const [uf, setUf] = useState('TO');
-  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([
-    { value: 'ALL', label: 'Brasil (todos)' },
-    { value: 'TO', label: 'TO' },
-  ]);
+  const [uf, setUf] = useState('');
+  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([UF_SELECT_PLACEHOLDER_OPTION]);
   const yearOptions = useMemo(() => getProductivityYearOptions(), []);
   const [cultura, setCultura] = useState('');
   const [culturaOptions, setCulturaOptions] =
@@ -155,8 +163,13 @@ export function SeriesTemporais() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      if (!/^[A-Z]{2}$/.test(uf)) {
+        setCulturaOptions(CULTURA_FALLBACK_OPTIONS);
+        setCultura('');
+        return;
+      }
       try {
-        const res = await listProductivityProductLabels(uf === 'ALL' ? undefined : { state: uf });
+        const res = await listProductivityProductLabels({ state: uf });
         if (cancelled || !res.success || !res.data?.length) return;
         const opts = buildProductivityCropSelectOptions(res.data);
         setCulturaOptions(opts);
@@ -180,11 +193,16 @@ export function SeriesTemporais() {
       try {
         const data = await listClimateUfs();
         if (!cancelled && data.length) {
-          const onlyUfs = data.filter((x) => /^[A-Z]{2}$/.test(String(x.value || '').trim().toUpperCase()));
+          const onlyUfs = data
+            .filter((x) => /^[A-Z]{2}$/.test(String(x.value || '').trim().toUpperCase()))
+            .map((x) => {
+              const value = String(x.value || '').trim().toUpperCase();
+              return { value, label: formatUfLabel(value) };
+            });
           if (onlyUfs.length) {
-            setUfOptions([{ value: 'ALL', label: 'Brasil (todos)' }, ...onlyUfs]);
-            if (uf !== 'ALL' && !onlyUfs.some((x) => x.value === uf)) {
-              setUf('ALL');
+            setUfOptions([UF_SELECT_PLACEHOLDER_OPTION, ...onlyUfs]);
+            if (uf && !onlyUfs.some((x) => x.value === uf)) {
+              setUf('');
             }
           }
         }
@@ -198,7 +216,7 @@ export function SeriesTemporais() {
   }, []);
 
   async function loadSeriesVariable(variavel: ClimateSeriesVariable) {
-    if (uf !== 'ALL' && !/^[A-Z]{2}$/.test(uf)) {
+    if (!/^[A-Z]{2}$/.test(uf)) {
       throw new Error('Selecione uma UF válida para consultar a série temporal.');
     }
     const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
@@ -216,6 +234,14 @@ export function SeriesTemporais() {
   }
 
   const carregar = useCallback(async () => {
+    if (!/^[A-Z]{2}$/.test(uf)) {
+      setDadosClimaticos([]);
+      setDadosProdutividade([]);
+      setDadosComparativos([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -224,7 +250,7 @@ export function SeriesTemporais() {
         loadSeriesVariable('precipitacao'),
         loadSeriesVariable('umidade'),
         (async (): Promise<ProductivityListResponse['data']> => {
-          if (uf === 'ALL') return [];
+          if (!/^[A-Z]{2}$/.test(uf)) return [];
           const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
           const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
           const years = Array.from({ length: ye - ys + 1 }, (_, idx) => String(ys + idx));
@@ -246,14 +272,11 @@ export function SeriesTemporais() {
         (m) => m.temperatura !== 0 || m.umidade !== 0 || m.precipitacao !== 0
       ).length;
       const shouldUseFallback = monthsWithAnyClimate < 3;
-      if (shouldUseFallback && (uf === 'ALL' || /^[A-Z]{2}$/.test(uf))) {
+      if (shouldUseFallback && /^[A-Z]{2}$/.test(uf)) {
         const byMonth = new Map<string, { t: number[]; h: number[]; p: number[] }>();
         const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
         const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
-        const targetUfs =
-          uf === 'ALL'
-            ? ufOptions.map((o) => String(o.value || '').trim().toUpperCase()).filter((v) => /^[A-Z]{2}$/.test(v))
-            : [uf];
+        const targetUfs = [uf];
 
         const fallbackResponses = await Promise.all(
           targetUfs.flatMap((stateUf) =>
@@ -316,11 +339,13 @@ export function SeriesTemporais() {
     } finally {
       setLoading(false);
     }
-  }, [cultura, startYear, endYear, uf, ufOptions]);
+  }, [cultura, startYear, endYear, uf]);
 
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  const ufValid = /^[A-Z]{2}$/.test(uf);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -347,6 +372,7 @@ export function SeriesTemporais() {
               value={cultura}
               onChange={(e) => setCultura(e.target.value)}
               options={culturaOptions}
+              disabled={!ufValid}
             />
           </div>
 
@@ -386,7 +412,13 @@ export function SeriesTemporais() {
           </CardDescription>
         </CardHeader>
         <CardBody>
-          {dadosProdutividade.length === 0 && !loading ? (
+          {!ufValid && !loading ? (
+            <EmptyState
+              icon={Calendar}
+              title="Escolha um estado"
+              description="Selecione uma UF acima para carregar a produtividade e os gráficos."
+            />
+          ) : dadosProdutividade.length === 0 && !loading ? (
             <EmptyState
               icon={Calendar}
               title="Sem dados de produtividade"
@@ -404,9 +436,8 @@ export function SeriesTemporais() {
                     border: '1px solid #e2e8f0',
                     borderRadius: '8px',
                   }}
-                  formatter={(value: number | string | null | undefined) =>
-                    value == null ? 'Sem dado' : `${Number(value).toFixed(2)} t/ha`
-                  }
+                  labelStyle={TOOLTIP_DATE_LABEL_STYLE}
+                  formatter={formatTooltipProdutividade}
                 />
                 <Legend />
                 <Line
@@ -433,7 +464,13 @@ export function SeriesTemporais() {
           </CardDescription>
         </CardHeader>
         <CardBody>
-          {dadosClimaticos.length === 0 && !loading ? (
+          {!ufValid && !loading ? (
+            <EmptyState
+              icon={Calendar}
+              title="Escolha um estado"
+              description="Selecione uma UF acima para carregar a série climática."
+            />
+          ) : dadosClimaticos.length === 0 && !loading ? (
             <EmptyState
               icon={Calendar}
               title="Sem dados climáticos no período"
@@ -451,6 +488,7 @@ export function SeriesTemporais() {
                     border: '1px solid #e2e8f0',
                     borderRadius: '8px',
                   }}
+                  labelStyle={TOOLTIP_DATE_LABEL_STYLE}
                 />
                 <Legend />
                 <Bar dataKey="temperatura" fill="#F97316" name="Temperatura (°C)" />
@@ -470,7 +508,13 @@ export function SeriesTemporais() {
           </CardDescription>
         </CardHeader>
         <CardBody>
-          {dadosComparativos.length === 0 && !loading ? (
+          {!ufValid && !loading ? (
+            <EmptyState
+              icon={Calendar}
+              title="Escolha um estado"
+              description="Selecione uma UF acima para comparar clima e produtividade."
+            />
+          ) : dadosComparativos.length === 0 && !loading ? (
             <EmptyState
               icon={Calendar}
               title="Sem dados comparativos"
@@ -489,6 +533,7 @@ export function SeriesTemporais() {
                     border: '1px solid #e2e8f0',
                     borderRadius: '8px',
                   }}
+                  labelStyle={TOOLTIP_DATE_LABEL_STYLE}
                 />
                 <Legend />
                 <Line
