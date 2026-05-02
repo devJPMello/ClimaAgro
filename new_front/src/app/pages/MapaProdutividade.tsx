@@ -15,7 +15,10 @@ import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { EmptyState } from '../components/ui/EmptyState';
-import { formatUfLabel, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
+import { formatUfLabel, UF_NOME } from '../../lib/geo/brazilStatesMalha';
+
+const UF_ALL_OPTION = { value: 'ALL', label: 'Todos os estados' } as const;
+const TODAS_SIGLAS_UF = Object.keys(UF_NOME);
 
 type Indicador = { label: string; valor: string; descricao?: string };
 
@@ -45,7 +48,7 @@ const YEAR_OPTIONS = [
 ];
 
 export function MapaProdutividade() {
-  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([UF_SELECT_PLACEHOLDER_OPTION]);
+  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([UF_ALL_OPTION]);
   const cropOptionsRes = useAsyncResource<CropSelectOption[]>(async () => {
     const res = await listProductivityProductLabels();
     const fromDb = res.success && Array.isArray(res.data) ? res.data : [];
@@ -53,13 +56,9 @@ export function MapaProdutividade() {
   }, []);
 
   const [cultura, setCultura] = usePersistedState<string>('climaagro.pref.mapaProdutividade.cultura', '');
-  const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaProdutividade.uf', '');
+  const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaProdutividade.uf', 'ALL');
   const [mes, setMes] = usePersistedState<string>('climaagro.pref.mapaProdutividade.mes', 'ALL');
   const [ano, setAno] = usePersistedState<string>('climaagro.pref.mapaProdutividade.ano', '2023-2026');
-
-  useEffect(() => {
-    if (uf === 'ALL') setUf('');
-  }, [uf, setUf]);
 
   useEffect(() => {
     const opts = cropOptionsRes.data;
@@ -81,7 +80,7 @@ export function MapaProdutividade() {
               return { value: sigla, label: /^[A-Z]{2}$/.test(sigla) ? formatUfLabel(sigla) : x.label };
             })
             .filter((o): o is { value: string; label: string } => o != null);
-          setUfOptions([UF_SELECT_PLACEHOLDER_OPTION, ...fromApi]);
+          setUfOptions([UF_ALL_OPTION, ...fromApi]);
         }
       } catch {
         // Mantém fallback local no select
@@ -92,11 +91,16 @@ export function MapaProdutividade() {
     };
   }, []);
 
+  useEffect(() => {
+    if (uf === '') setUf('ALL');
+  }, [uf, setUf]);
+
   const productLabelForApi = useMemo(() => cultura.trim(), [cultura]);
 
   const { status, data, error, reload } = useAsyncResource(
     async () => {
-      if (!/^[A-Z]{2}$/.test(uf)) {
+      const ufValido = uf === 'ALL' || /^[A-Z]{2}$/.test(uf);
+      if (!ufValido) {
         return {
           indicators: [] as Indicador[],
           mapRevision: Date.now(),
@@ -104,7 +108,7 @@ export function MapaProdutividade() {
           itemsCount: 0,
         };
       }
-      const targetUfs = [uf];
+      const targetUfs = uf === 'ALL' ? TODAS_SIGLAS_UF : [uf];
 
       const responses = await Promise.all(
         targetUfs.map((stateUf) =>
@@ -250,7 +254,7 @@ export function MapaProdutividade() {
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <MapPin className="w-4 h-4" />
                 <span>
-                  Mapa estadual: agregação na UF, mês-ano e cultura selecionados. Escolha um estado para carregar os dados.
+                  Mapa estadual: com «Todos os estados» compara-se todas as UFs com dado; com uma UF só, o mapa foca nesse estado.
                 </span>
               </div>
 
@@ -259,12 +263,8 @@ export function MapaProdutividade() {
                   <CardBody>
                     <EmptyState
                       icon={MapPin}
-                      title={!/^[A-Z]{2}$/.test(uf) ? 'Escolha um estado' : 'Sem dados de produtividade'}
-                      description={
-                        !/^[A-Z]{2}$/.test(uf)
-                          ? 'Selecione uma UF nos filtros à esquerda para carregar o mapa e os indicadores.'
-                          : 'Não há registros para a cultura, estado, mês e ano escolhidos. Altere os filtros à esquerda.'
-                      }
+                      title="Sem dados de produtividade"
+                      description="Não há registros para a cultura, estado, mês e ano escolhidos. Altere os filtros à esquerda."
                     />
                   </CardBody>
                 </Card>

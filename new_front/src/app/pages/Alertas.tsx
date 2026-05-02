@@ -13,10 +13,10 @@ import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { listClimateAlerts } from '../../lib/api/alertsApi';
 import type { ClimateAlertDto, ClimateAlertListDto, ClimateAlertSeverity } from '../../lib/api/contracts/alerts';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
-import { UF_NOME, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
+import { UF_NOME } from '../../lib/geo/brazilStatesMalha';
 
 const ALERTAS_UF_OPTIONS = [
-  UF_SELECT_PLACEHOLDER_OPTION,
+  { value: 'ALL', label: 'Todos os estados' },
   ...Object.entries(UF_NOME)
     .sort(([, a], [, b]) => a.localeCompare(b, 'pt-BR'))
     .map(([sigla, nome]) => ({ value: sigla, label: `${nome} (${sigla})` })),
@@ -89,7 +89,7 @@ function formatUpdatedAt(iso: string): string {
 export function Alertas() {
   const [severidadeFiltro, setSeveridadeFiltro] = usePersistedState('climaagro.pref.alertas.severidade', 'todos');
   const [tipoFiltro, setTipoFiltro] = usePersistedState('climaagro.pref.alertas.tipo', 'todos');
-  const [ufFiltro, setUfFiltro] = usePersistedState('climaagro.pref.alertas.uf', '');
+  const [ufFiltro, setUfFiltro] = usePersistedState('climaagro.pref.alertas.uf', 'ALL');
   const [page, setPage] = useState(1);
   const [selectedAlerta, setSelectedAlerta] = useState<ClimateAlertDto | null>(null);
 
@@ -99,17 +99,12 @@ export function Alertas() {
 
   const { status, data, error, reload } = useAsyncResource(
     () =>
-      /^[A-Z]{2}$/.test(ufFiltro)
-        ? listClimateAlerts({ state: ufFiltro })
-        : Promise.resolve({
-            items: [],
-            updatedAt: new Date().toISOString(),
-          } satisfies ClimateAlertListDto),
+      listClimateAlerts(/^[A-Z]{2}$/.test(ufFiltro) && ufFiltro !== 'ALL' ? { state: ufFiltro } : undefined),
     [ufFiltro],
   );
 
   useEffect(() => {
-    if (ufFiltro === 'ALL') setUfFiltro('');
+    if (ufFiltro === '') setUfFiltro('ALL');
   }, [ufFiltro, setUfFiltro]);
 
   const filtros = useMemo(
@@ -142,7 +137,9 @@ export function Alertas() {
         <h1 className="text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
           Alertas Climáticos
         </h1>
-        <p className="text-muted-foreground">Monitoramento por UF — escolha um estado para listar os alertas.</p>
+        <p className="text-muted-foreground">
+          Monitoramento por UF — «Todos os estados» mostra o Brasil; escolha uma UF para filtrar.
+        </p>
       </div>
 
       <AsyncStateView<ClimateAlertListDto>
@@ -156,7 +153,6 @@ export function Alertas() {
         {(payload) => {
           const alertasFiltrados = filterItems(payload.items);
           const cnt = contagem(payload.items);
-          const semUfSelecionada = !/^[A-Z]{2}$/.test(ufFiltro);
           const semDadosApi = payload.items.length === 0;
           const totalPages = Math.max(1, Math.ceil(alertasFiltrados.length / PAGE_SIZE));
           const currentPage = Math.min(page, totalPages);
@@ -256,10 +252,10 @@ export function Alertas() {
                           options={ALERTAS_UF_OPTIONS}
                         />
                       </div>
-                      {(severidadeFiltro !== 'todos' || tipoFiltro !== 'todos' || ufFiltro !== '') && (
+                      {(severidadeFiltro !== 'todos' || tipoFiltro !== 'todos' || ufFiltro !== 'ALL') && (
                         <button
                           type="button"
-                          onClick={() => { setSeveridadeFiltro('todos'); setTipoFiltro('todos'); setUfFiltro(''); }}
+                          onClick={() => { setSeveridadeFiltro('todos'); setTipoFiltro('todos'); setUfFiltro('ALL'); }}
                           className="text-xs text-primary hover:underline pb-2.5"
                         >
                           Limpar
@@ -269,15 +265,7 @@ export function Alertas() {
                   </div>
                 </CardHeader>
 
-                {semUfSelecionada ? (
-                  <CardBody>
-                    <EmptyState
-                      icon={MapPin}
-                      title="Escolha um estado"
-                      description="Selecione uma UF nos filtros acima para carregar os alertas climáticos."
-                    />
-                  </CardBody>
-                ) : semDadosApi ? (
+                {semDadosApi ? (
                   <CardBody>
                     <EmptyState
                       icon={AlertTriangle}

@@ -89,6 +89,8 @@ export async function getClimateSeriesByUf(params: {
   start: string;
   end: string;
   variavel: ClimateSeriesVariable;
+  /** Com `uf=ALL`, pede média por (dia, UF) em todo o país — necessário para mapas por estado. */
+  perUf?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<ClimateSeriesResponseDto> {
@@ -97,6 +99,7 @@ export async function getClimateSeriesByUf(params: {
   sp.set('start', params.start);
   sp.set('end', params.end);
   sp.set('variavel', params.variavel);
+  if (params.perUf) sp.set('perUf', '1');
   if (params.limit != null) sp.set('limit', String(params.limit));
   if (params.offset != null) sp.set('offset', String(params.offset));
   return httpClient.get<ClimateSeriesResponseDto>(`climate/series?${sp.toString()}`);

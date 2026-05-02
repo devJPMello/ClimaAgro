@@ -293,6 +293,7 @@ router.get('/series', [
   query('variavel').exists().isString(),
   query('limit').optional().isInt({ min: 1, max: 20000 }),
   query('offset').optional().isInt({ min: 0 }),
+  query('perUf').optional().isIn(['0', '1', 'true', 'false']),
   validateRequest
 ], async (req, res) => {
   try {
@@ -324,6 +325,9 @@ router.get('/series', [
 
     const limit = parsePositiveInt(req.query.limit, 365);
     const offset = parsePositiveInt(req.query.offset, 0);
+    const perUf =
+      uf === 'ALL' &&
+      (req.query.perUf === '1' || String(req.query.perUf || '').toLowerCase() === 'true');
     const geoStateExpr = literal('COALESCE("ClimateData"."uf", "geoData"."state")');
     const where = { date: { [Op.between]: [start, end] } };
     if (uf !== 'ALL') {
@@ -331,22 +335,23 @@ router.get('/series', [
     }
 
     /**
-     * Brasil (ALL): uma média nacional por dia. Agrupar também por UF explodia o número de linhas
-     * (dia × estados) e o `limit` 1000 truncava o intervalo — a UI de séries temporais ficava vazia/incompleta.
-     * Por UF: uma média por (dia, estado), como antes.
+     * Brasil (ALL, default): uma média nacional por dia — uma série única (evita estourar `limit`
+     * com dia × 27 UFs em intervalos longos).
+     * ALL + perUf=1: média por (dia, UF) em todo o país — para mapas / agregação por estado.
+     * Uf concreta: média por (dia, estado) filtrada à UF.
      */
-    const groupBy = uf === 'ALL' ? [col('ClimateData.date')] : [col('ClimateData.date'), geoStateExpr];
-    const attributes =
-      uf === 'ALL'
-        ? [
-            [col('ClimateData.date'), 'date'],
-            [fn('AVG', col(`ClimateData.${variableColumn}`)), 'value']
-          ]
-        : [
-            'date',
-            [geoStateExpr, 'uf'],
-            [fn('AVG', col(`ClimateData.${variableColumn}`)), 'value']
-          ];
+    const nationalOnly = uf === 'ALL' && !perUf;
+    const groupBy = nationalOnly ? [col('ClimateData.date')] : [col('ClimateData.date'), geoStateExpr];
+    const attributes = nationalOnly
+      ? [
+          [col('ClimateData.date'), 'date'],
+          [fn('AVG', col(`ClimateData.${variableColumn}`)), 'value']
+        ]
+      : [
+          'date',
+          [geoStateExpr, 'uf'],
+          [fn('AVG', col(`ClimateData.${variableColumn}`)), 'value']
+        ];
 
     const rows = await ClimateData.findAll({
       attributes,
@@ -379,6 +384,7 @@ router.get('/series', [
       success: true,
       metadata: {
         uf,
+        perUf: uf === 'ALL' ? perUf : undefined,
         periodo: { start, end },
         variavel,
         fonte: 'climate_data',
@@ -386,7 +392,7 @@ router.get('/series', [
       },
       serieTemporal: rows.map((row) => ({
         date: row.date,
-        uf: uf === 'ALL' ? 'ALL' : String(row.uf || '').toUpperCase(),
+        uf: nationalOnly ? 'ALL' : String(row.uf || '').toUpperCase(),
         value: row.value != null ? Number(row.value) : null
       })),
       estatisticas: {

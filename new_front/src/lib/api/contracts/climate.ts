@@ -46,6 +46,8 @@ export interface ClimateSeriesResponseDto {
   success: boolean;
   metadata: {
     uf: string;
+    /** Presente quando `uf` é ALL: true = série por UF no país; omitido/false = média nacional por dia. */
+    perUf?: boolean;
     periodo: { start: string; end: string };
     variavel: ClimateSeriesVariable;
     fonte: string;
