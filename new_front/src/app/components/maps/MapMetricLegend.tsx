@@ -1,5 +1,5 @@
 import type { BrazilMapMetric } from './brazilMapConfig';
-import { LEGEND_BY_METRIC } from './brazilMapConfig';
+import { LEGEND_BY_METRIC, normalizeBrazilMapMetric } from './brazilMapConfig';
 
 interface MapMetricLegendProps {
   metric: BrazilMapMetric;
@@ -7,7 +7,7 @@ interface MapMetricLegendProps {
 }
 
 export function MapMetricLegend({ metric, className }: MapMetricLegendProps) {
-  const items = LEGEND_BY_METRIC[metric];
+  const items = LEGEND_BY_METRIC[normalizeBrazilMapMetric(metric)];
   return (
     <div className={className}>
       <p className="text-sm mb-3 font-medium">Legenda</p>

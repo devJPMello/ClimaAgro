@@ -15,6 +15,7 @@ import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { EmptyState } from '../components/ui/EmptyState';
+import { formatUfLabel, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
 
 type Indicador = { label: string; valor: string; descricao?: string };
 
@@ -44,9 +45,7 @@ const YEAR_OPTIONS = [
 ];
 
 export function MapaProdutividade() {
-  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([
-    { value: 'ALL', label: 'Brasil (todos)' },
-  ]);
+  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([UF_SELECT_PLACEHOLDER_OPTION]);
   const cropOptionsRes = useAsyncResource<CropSelectOption[]>(async () => {
     const res = await listProductivityProductLabels();
     const fromDb = res.success && Array.isArray(res.data) ? res.data : [];
@@ -54,9 +53,13 @@ export function MapaProdutividade() {
   }, []);
 
   const [cultura, setCultura] = usePersistedState<string>('climaagro.pref.mapaProdutividade.cultura', '');
-  const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaProdutividade.uf', 'ALL');
+  const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaProdutividade.uf', '');
   const [mes, setMes] = usePersistedState<string>('climaagro.pref.mapaProdutividade.mes', 'ALL');
   const [ano, setAno] = usePersistedState<string>('climaagro.pref.mapaProdutividade.ano', '2023-2026');
+
+  useEffect(() => {
+    if (uf === 'ALL') setUf('');
+  }, [uf, setUf]);
 
   useEffect(() => {
     const opts = cropOptionsRes.data;
@@ -69,7 +72,17 @@ export function MapaProdutividade() {
     void (async () => {
       try {
         const data = await listClimateUfs();
-        if (!cancelled && data.length) setUfOptions(data);
+        if (!cancelled && data.length) {
+          const fromApi = data
+            .map((x) => {
+              const value = String(x.value ?? '').trim();
+              if (value === 'ALL') return null;
+              const sigla = value.toUpperCase();
+              return { value: sigla, label: /^[A-Z]{2}$/.test(sigla) ? formatUfLabel(sigla) : x.label };
+            })
+            .filter((o): o is { value: string; label: string } => o != null);
+          setUfOptions([UF_SELECT_PLACEHOLDER_OPTION, ...fromApi]);
+        }
       } catch {
         // Mantém fallback local no select
       }
@@ -83,10 +96,15 @@ export function MapaProdutividade() {
 
   const { status, data, error, reload } = useAsyncResource(
     async () => {
-      const targetUfs =
-        uf === 'ALL'
-          ? ufOptions.map((o) => o.value).filter((v) => /^[A-Z]{2}$/.test(v))
-          : [/^[A-Z]{2}$/.test(uf) ? uf : null].filter(Boolean) as string[];
+      if (!/^[A-Z]{2}$/.test(uf)) {
+        return {
+          indicators: [] as Indicador[],
+          mapRevision: Date.now(),
+          valuesByUfProdutividade: {} as Partial<Record<string, number>>,
+          itemsCount: 0,
+        };
+      }
+      const targetUfs = [uf];
 
       const responses = await Promise.all(
         targetUfs.map((stateUf) =>
@@ -158,7 +176,7 @@ export function MapaProdutividade() {
         itemsCount: items.length,
       };
     },
-    [ano, mes, productLabelForApi, uf, ufOptions]
+    [ano, mes, productLabelForApi, uf]
   );
 
   return (
@@ -232,8 +250,7 @@ export function MapaProdutividade() {
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <MapPin className="w-4 h-4" />
                 <span>
-                  Mapa estadual: agregação por UF para o mês-ano e cultura selecionados. Quando o filtro de estado está em
-                  Brasil, todas as UFs com dado são coloridas.
+                  Mapa estadual: agregação na UF, mês-ano e cultura selecionados. Escolha um estado para carregar os dados.
                 </span>
               </div>
 
@@ -242,8 +259,12 @@ export function MapaProdutividade() {
                   <CardBody>
                     <EmptyState
                       icon={MapPin}
-                      title="Sem dados de produtividade"
-                      description="Não há registros para a cultura, estado, mês e ano escolhidos. Altere os filtros à esquerda."
+                      title={!/^[A-Z]{2}$/.test(uf) ? 'Escolha um estado' : 'Sem dados de produtividade'}
+                      description={
+                        !/^[A-Z]{2}$/.test(uf)
+                          ? 'Selecione uma UF nos filtros à esquerda para carregar o mapa e os indicadores.'
+                          : 'Não há registros para a cultura, estado, mês e ano escolhidos. Altere os filtros à esquerda.'
+                      }
                     />
                   </CardBody>
                 </Card>

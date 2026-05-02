@@ -4,13 +4,14 @@ import { Select } from '../components/ui/Select';
 import { MapPin } from 'lucide-react';
 import { BrazilMap } from '../components/maps/BrazilMap';
 import { MapMetricLegend } from '../components/maps/MapMetricLegend';
-import type { BrazilMapMetric } from '../components/maps/brazilMapConfig';
+import { normalizeBrazilMapMetric, type BrazilMapMetric } from '../components/maps/brazilMapConfig';
 import { getClimateSeriesByUf, listClimateUfs } from '../../lib/api/climateApi';
 import { CLIMATE_PERIOD_OPTIONS } from '../../lib/filters/appFilters';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { EmptyState } from '../components/ui/EmptyState';
+import { formatUfLabel, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
 
 type PeriodStateRow = {
   uf: string;
@@ -62,19 +63,36 @@ const MAP_METRIC_OPTIONS: Array<{ value: BrazilMapMetric; label: string }> = [
 ];
 
 export function MapaClimatico() {
-  const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaClimatico.uf', 'ALL');
+  const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaClimatico.uf', '');
   const [metric, setMetric] = usePersistedState<BrazilMapMetric>('climaagro.pref.mapaClimatico.metric', 'temperatura');
   const [periodo, setPeriodo] = usePersistedState<string>('climaagro.pref.mapaClimatico.periodo', 'hoje');
-  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([
-    { value: 'ALL', label: 'Brasil (todos)' },
-  ]);
+  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([UF_SELECT_PLACEHOLDER_OPTION]);
+
+  useEffect(() => {
+    if (uf === 'ALL') setUf('');
+  }, [uf, setUf]);
+
+  useEffect(() => {
+    const fixed = normalizeBrazilMapMetric(metric);
+    if (fixed !== metric) setMetric(fixed);
+  }, [metric, setMetric]);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const data = await listClimateUfs();
-        if (!cancelled && data.length) setUfOptions(data);
+        if (!cancelled && data.length) {
+          const fromApi = data
+            .map((x) => {
+              const value = String(x.value ?? '').trim();
+              if (value === 'ALL') return null;
+              const sigla = value.toUpperCase();
+              return { value: sigla, label: /^[A-Z]{2}$/.test(sigla) ? formatUfLabel(sigla) : x.label };
+            })
+            .filter((o): o is { value: string; label: string } => o != null);
+          setUfOptions([UF_SELECT_PLACEHOLDER_OPTION, ...fromApi]);
+        }
       } catch {
         // fallback local
       }
@@ -86,6 +104,9 @@ export function MapaClimatico() {
 
   const { status, data, error, reload } = useAsyncResource(
     async () => {
+      if (!/^[A-Z]{2}$/.test(uf)) {
+        return { periodRows: [] as PeriodStateRow[], mapRevision: Date.now() };
+      }
       const range = calcPeriodRange(periodo);
       const [temp, hum, wind, precip] = await Promise.all([
         getClimateSeriesByUf({ uf, start: range.startDate, end: range.endDate, variavel: 'temperatura_media', limit: 1000 }),
@@ -130,7 +151,7 @@ export function MapaClimatico() {
         const p = b.precs.length ? b.precs.reduce((a, x) => a + x, 0) : null;
         return {
           uf: rowUf,
-          estado: rowUf,
+          estado: formatUfLabel(rowUf),
           temperatura: t != null ? `${t.toFixed(1)}°C` : '—',
           temperaturaNum: t,
           umidade: h != null ? `${h.toFixed(1)}%` : '—',
@@ -154,7 +175,7 @@ export function MapaClimatico() {
 
   const selectedStateRow = useMemo(() => {
     const rows = data?.periodRows ?? [];
-    if (uf === 'ALL' || !rows.length) return null;
+    if (!/^[A-Z]{2}$/.test(uf) || !rows.length) return null;
     return rows.find((r) => r.uf === uf) || null;
   }, [data?.periodRows, uf]);
 
@@ -241,8 +262,12 @@ export function MapaClimatico() {
                   <CardBody>
                     <EmptyState
                       icon={MapPin}
-                      title="Sem dados climáticos para o filtro"
-                      description="Não há registros para a UF ou o período selecionados. Ajuste os filtros à esquerda e tente novamente."
+                      title={!/^[A-Z]{2}$/.test(uf) ? 'Escolha um estado' : 'Sem dados climáticos para o filtro'}
+                      description={
+                        !/^[A-Z]{2}$/.test(uf)
+                          ? 'Selecione uma UF nos filtros à esquerda para carregar o mapa e os indicadores.'
+                          : 'Não há registros para a UF ou o período selecionados. Ajuste os filtros à esquerda e tente novamente.'
+                      }
                     />
                   </CardBody>
                 </Card>
@@ -264,7 +289,7 @@ export function MapaClimatico() {
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
                       <div>
                         <p className="text-muted-foreground">UF</p>
-                        <p>{selectedStateRow.uf}</p>
+                        <p>{selectedStateRow.estado}</p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Temperatura</p>

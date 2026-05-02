@@ -43,6 +43,13 @@ export const LEGEND_BY_METRIC: Record<BrazilMapMetric, LegendItem[]> = {
   ],
 };
 
+/** Valores antigos no localStorage ou inputs incorretos podem não existir em LEGEND_BY_METRIC — evita crash no mapa e na legenda. */
+export function normalizeBrazilMapMetric(raw: unknown): BrazilMapMetric {
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  if (s !== '' && s in LEGEND_BY_METRIC) return s as BrazilMapMetric;
+  return 'temperatura';
+}
+
 const COLOR_SCALE_TEMP = ['#1e3a8a', '#2563eb', '#60a5fa', '#fb923c', '#dc2626'];
 const COLOR_SCALE_HUM = ['#fef3c7', '#fde68a', '#93c5fd', '#3b82f6', '#1e40af'];
 const COLOR_SCALE_PRECIP = ['#f0f9ff', '#a5f3fc', '#22d3ee', '#0891b2', '#164e63'];
@@ -50,7 +57,8 @@ const COLOR_SCALE_WIND = ['#ecfdf5', '#a7f3d0', '#34d399', '#059669', '#14532d']
 const COLOR_SCALE_PROD = ['#ea580c', '#eab308', '#84cc16', '#16a34a', '#14532d'];
 
 export function bucketIndexForMetric(metric: BrazilMapMetric, value: number): number {
-  switch (metric) {
+  const m = normalizeBrazilMapMetric(metric);
+  switch (m) {
     case 'temperatura':
       if (value < 15) return 0;
       if (value < 20) return 1;
@@ -98,8 +106,9 @@ function numFromUnknown(v: unknown): number | null {
 
 /** Texto do popup / legenda contextual para o valor numérico do indicador. */
 export function formatPopupValueForMetric(metric: BrazilMapMetric, value: number | null): string {
+  const m = normalizeBrazilMapMetric(metric);
   if (value == null || Number.isNaN(value)) {
-    switch (metric) {
+    switch (m) {
       case 'temperatura':
         return 'Sem dado de temperatura';
       case 'umidade':
@@ -114,7 +123,7 @@ export function formatPopupValueForMetric(metric: BrazilMapMetric, value: number
         return 'Sem dado';
     }
   }
-  switch (metric) {
+  switch (m) {
     case 'temperatura':
       return `${value.toFixed(1)}°C`;
     case 'umidade':
@@ -132,9 +141,10 @@ export function formatPopupValueForMetric(metric: BrazilMapMetric, value: number
 }
 
 export function fillColorForMetric(metric: BrazilMapMetric, value: number | null): string {
+  const m = normalizeBrazilMapMetric(metric);
   if (value == null || Number.isNaN(value)) return COLOR_NO_DATA;
-  if (metric === 'produtividade' && value === 0) return COLOR_PROD_ZERO;
-  const i = bucketIndexForMetric(metric, value);
+  if (m === 'produtividade' && value === 0) return COLOR_PROD_ZERO;
+  const i = bucketIndexForMetric(m, value);
   const scales: Record<BrazilMapMetric, string[]> = {
     temperatura: COLOR_SCALE_TEMP,
     umidade: COLOR_SCALE_HUM,
@@ -142,7 +152,7 @@ export function fillColorForMetric(metric: BrazilMapMetric, value: number | null
     vento: COLOR_SCALE_WIND,
     produtividade: COLOR_SCALE_PROD,
   };
-  return scales[metric][i] ?? COLOR_NO_DATA;
+  return scales[m][i] ?? COLOR_NO_DATA;
 }
 
 function getUfFromFeature(feature: { properties?: Record<string, unknown> }): string {

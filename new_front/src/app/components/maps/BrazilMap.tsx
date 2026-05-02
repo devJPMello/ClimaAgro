@@ -6,6 +6,7 @@ import 'leaflet/dist/leaflet.css';
 import type { BrazilMapMetric } from './brazilMapConfig';
 import { fillColorForMetric, formatPopupValueForMetric, resolveValueForFeature } from './brazilMapConfig';
 import {
+  formatUfLabel,
   IBGE_BRASIL_UFS_GEOJSON_URL,
   normalizeBrazilStatesFeatureCollection,
 } from '../../../lib/geo/brazilStatesMalha';
@@ -105,9 +106,8 @@ export function BrazilMap({ metric, height = 600, valuesByUf, dataRevision = 0 }
       const v = resolveValueForFeature(metric, feature as { properties?: Record<string, unknown> }, valuesByUf);
       const label =
         v == null || Number.isNaN(v) ? 'Sem dado para esta UF' : formatPopupValueForMetric(metric, v);
-      (layer as Layer & { bindPopup: (s: string) => void }).bindPopup(
-        `<strong>${name}${uf ? ` (${uf})` : ''}</strong><br/>${label}`
-      );
+      const title = uf ? formatUfLabel(uf) : String(name);
+      (layer as Layer & { bindPopup: (s: string) => void }).bindPopup(`<strong>${title}</strong><br/>${label}`);
     },
     [metric, valuesByUf]
   );
