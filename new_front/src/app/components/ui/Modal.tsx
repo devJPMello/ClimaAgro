@@ -7,7 +7,7 @@ interface ModalProps {
   title: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  size?: 'md' | 'lg' | 'xl';
+  size?: 'md' | 'lg' | 'xl' | '2xl';
 }
 
 export function Modal({ isOpen, onClose, title, children, footer, size = 'lg' }: ModalProps) {
@@ -26,7 +26,13 @@ export function Modal({ isOpen, onClose, title, children, footer, size = 'lg' }:
   if (!isOpen) return null;
 
   const sizeClass =
-    size === 'md' ? 'max-w-md' : size === 'xl' ? 'max-w-3xl' : 'max-w-lg';
+    size === 'md'
+      ? 'max-w-md'
+      : size === 'xl'
+        ? 'max-w-3xl'
+        : size === '2xl'
+          ? 'max-w-5xl'
+          : 'max-w-lg';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -46,7 +52,7 @@ export function Modal({ isOpen, onClose, title, children, footer, size = 'lg' }:
         </div>
         <div className="px-6 py-5 overflow-y-auto flex-1">{children}</div>
         {footer && (
-          <div className="px-6 py-4 border-t border-border flex justify-end gap-3">
+          <div className="px-6 py-4 border-t border-border flex flex-wrap justify-end gap-3">
             {footer}
           </div>
         )}

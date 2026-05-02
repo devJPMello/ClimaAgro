@@ -37,7 +37,7 @@ export function EncerrarAtendimentoModal({
         if (!loading) onClose();
       }}
       title="Encerrar atendimento"
-      size="md"
+      size="2xl"
       footer={
         <>
           <Button type="button" variant="ghost" onClick={onClose} disabled={loading}>
@@ -67,7 +67,7 @@ export function EncerrarAtendimentoModal({
         </>
       }
     >
-      <p className="text-sm text-muted-foreground mb-4">
+      <p className="text-sm text-muted-foreground mb-4 leading-relaxed max-w-none">
         Como foi o atendimento do especialista? Sua nota entra na média exibida no perfil do agrônomo
         parceiro (quanto mais estrelas, mais a média sobe; notas baixas puxam a média para baixo).
       </p>
