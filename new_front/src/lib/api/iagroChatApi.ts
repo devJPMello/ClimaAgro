@@ -39,13 +39,24 @@ function getApiBase(): string {
   return '/api';
 }
 
-export async function sendIAgroMessage(payload: { message: string; threadId?: string | null; files?: File[] }) {
+function clerkHeaders(clerkUserId: string): Record<string, string> {
+  return { 'X-Clerk-User-Id': clerkUserId };
+}
+
+export async function sendIAgroMessage(
+  payload: { message: string; threadId?: string | null; files?: File[] },
+  clerkUserId: string
+) {
   const files = payload.files ?? [];
   if (files.length === 0) {
-    return httpClient.post<{ threadId: string; response: string; concierge?: ConciergeMeta }>('ai/chat/messages', {
-      message: payload.message,
-      threadId: payload.threadId ?? undefined,
-    });
+    return httpClient.post<{ threadId: string; response: string; concierge?: ConciergeMeta }>(
+      'ai/chat/messages',
+      {
+        message: payload.message,
+        threadId: payload.threadId ?? undefined,
+      },
+      { headers: clerkHeaders(clerkUserId) }
+    );
   }
 
   const formData = new FormData();
@@ -58,6 +69,7 @@ export async function sendIAgroMessage(payload: { message: string; threadId?: st
   const response = await fetch(`${getApiBase()}/ai/chat/messages`, {
     method: 'POST',
     body: formData,
+    headers: clerkHeaders(clerkUserId),
   });
 
   if (!response.ok) {
@@ -69,19 +81,29 @@ export async function sendIAgroMessage(payload: { message: string; threadId?: st
   return (await response.json()) as { threadId: string; response: string; concierge?: ConciergeMeta };
 }
 
-export async function listIAgroThreads() {
-  return httpClient.get<{ threads: IAgroThread[] }>('ai/chat/threads', { cacheTtlMs: 0, forceRefresh: true });
+export async function listIAgroThreads(clerkUserId: string) {
+  return httpClient.get<{ threads: IAgroThread[] }>('ai/chat/threads', {
+    cacheTtlMs: 0,
+    forceRefresh: true,
+    headers: clerkHeaders(clerkUserId),
+  });
 }
 
-export async function getIAgroHistory(threadId: string) {
+export async function getIAgroHistory(threadId: string, clerkUserId: string) {
   const encoded = encodeURIComponent(threadId);
-  return httpClient.get<{ threadId: string; messages: IAgroMessage[] }>(`ai/chat/history?threadId=${encoded}`);
+  return httpClient.get<{ threadId: string; messages: IAgroMessage[] }>(
+    `ai/chat/history?threadId=${encoded}`,
+    { cacheTtlMs: 0, forceRefresh: true, headers: clerkHeaders(clerkUserId) }
+  );
 }
 
-export async function toggleIAgroThreadFavorite(threadId: string, isFavorite: boolean) {
+export async function toggleIAgroThreadFavorite(threadId: string, isFavorite: boolean, clerkUserId: string) {
   const response = await fetch(`${getApiBase()}/ai/chat/threads/${encodeURIComponent(threadId)}/favorite`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...clerkHeaders(clerkUserId),
+    },
     body: JSON.stringify({ isFavorite }),
   });
   if (!response.ok) {
@@ -91,9 +113,10 @@ export async function toggleIAgroThreadFavorite(threadId: string, isFavorite: bo
   return (await response.json()) as { success: boolean; threadId: string; isFavorite: boolean };
 }
 
-export async function deleteIAgroThread(threadId: string) {
+export async function deleteIAgroThread(threadId: string, clerkUserId: string) {
   const response = await fetch(`${getApiBase()}/ai/chat/threads/${encodeURIComponent(threadId)}`, {
     method: 'DELETE',
+    headers: clerkHeaders(clerkUserId),
   });
   if (!response.ok) {
     const maybeJson = await response.json().catch(() => null);

@@ -17,13 +17,36 @@ function headerProdutorId(req) {
   return String(req.headers['x-clerk-user-id'] || req.query.produtorClerkId || '').trim();
 }
 
+/** Bloqueia acesso se o thread já estiver associado a outro Clerk ID. */
+async function produtorCanAccessIaThread(threadId, produtorClerkId) {
+  if (!produtorClerkId) return false;
+  const hostile = await ChatHistory.findOne({
+    where: {
+      threadId,
+      isActive: true,
+      [Op.and]: [
+        { clerkUserId: { [Op.ne]: null } },
+        { clerkUserId: { [Op.ne]: produtorClerkId } },
+      ],
+    },
+  });
+  return !hostile;
+}
+
 /** Últimas 10 mensagens no sentido alternado Produtor↔IAgro (5 pares de registros em chat_history). */
-async function collectLastIaMessages(threadId, limitPairs = 5) {
+async function collectLastIaMessages(threadId, limitPairs = 5, produtorClerkId = null) {
+  if (!produtorClerkId || !(await produtorCanAccessIaThread(threadId, produtorClerkId))) {
+    return [];
+  }
   const rows = await ChatHistory.findAll({
     where: {
       threadId,
       isActive: true,
       status: { [Op.ne]: 'error' },
+      [Op.or]: [
+        { clerkUserId: produtorClerkId },
+        { clerkUserId: { [Op.is]: null } },
+      ],
     },
     order: [['createdAt', 'DESC']],
     limit: limitPairs,
@@ -154,7 +177,7 @@ router.post('/escalate', async (req, res) => {
   }
 
   try {
-    const iaLines = await collectLastIaMessages(threadId, 5);
+    const iaLines = await collectLastIaMessages(threadId, 5, produtorClerkId);
     if (iaLines.length === 0) {
       return res.status(400).json({ message: 'Não há mensagens da IA neste tópico para enviar.' });
     }
@@ -278,10 +301,20 @@ router.get('/timeline', async (req, res) => {
       where: { produtorClerkId, iaThreadId: threadId },
     });
 
-    const rows = await ChatHistory.findAll({
-      where: { threadId, isActive: true },
-      order: [['createdAt', 'ASC']],
-    });
+    const rows =
+      (await produtorCanAccessIaThread(threadId, produtorClerkId))
+        ? await ChatHistory.findAll({
+            where: {
+              threadId,
+              isActive: true,
+              [Op.or]: [
+                { clerkUserId: produtorClerkId },
+                { clerkUserId: { [Op.is]: null } },
+              ],
+            },
+            order: [['createdAt', 'ASC']],
+          })
+        : [];
 
     const iaTimeline = [];
     for (const row of rows) {

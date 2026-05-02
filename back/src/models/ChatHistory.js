@@ -14,6 +14,11 @@ const ChatHistory = sequelize.define(
       allowNull: false,
       field: 'thread_id',
     },
+    clerkUserId: {
+      type: DataTypes.STRING(128),
+      allowNull: true,
+      field: 'clerk_user_id',
+    },
     message: {
       type: DataTypes.TEXT,
       allowNull: false,
@@ -53,6 +58,7 @@ const ChatHistory = sequelize.define(
       { fields: ['created_at'] },
       { fields: ['is_active'] },
       { fields: ['is_favorite'] },
+      { fields: ['clerk_user_id', 'is_active'] },
     ],
   }
 );

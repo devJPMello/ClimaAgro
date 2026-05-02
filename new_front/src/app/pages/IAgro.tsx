@@ -27,7 +27,6 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import {
   deleteIAgroThread,
-  getIAgroHistory,
   listIAgroThreads,
   sendIAgroMessage,
   toggleIAgroThreadFavorite,
@@ -118,9 +117,14 @@ export function IAgro() {
   const canUseHumanInput = humanHandoff && hybridConversation?.id && user?.id;
 
   async function refreshThreads() {
+    const uid = user?.id;
+    if (!uid) {
+      setThreads([]);
+      return;
+    }
     setLoadingThreads(true);
     try {
-      const response = await listIAgroThreads();
+      const response = await listIAgroThreads(uid);
       setThreads(response.threads || []);
     } finally {
       setLoadingThreads(false);
@@ -136,15 +140,11 @@ export function IAgro() {
         setHybridConversation(hybrid.conversation);
         list = hybrid.messages || [];
       } else {
-        const response = await getIAgroHistory(nextThreadId);
+        toast.error('Faça login para abrir o histórico de conversas.');
         setHybridConversation(null);
-        list = (response.messages || []).map((m): UnifiedChatMessage => ({
-          id: m.id,
-          sender: m.sender === 'assistant' ? 'assistant' : 'user',
-          kind: 'ia',
-          text: m.text,
-          createdAt: m.createdAt,
-        }));
+        setMessages([]);
+        setThreadId(null);
+        return;
       }
       setThreadId(nextThreadId);
       setMessages(list);
@@ -165,7 +165,9 @@ export function IAgro() {
     }
   }
 
-  useEffect(() => { void refreshThreads(); }, []);
+  useEffect(() => {
+    void refreshThreads();
+  }, [user?.id]);
 
   useEffect(() => {
     if (!conciergeSuggestion?.escalate) {
@@ -366,6 +368,11 @@ export function IAgro() {
       return;
     }
 
+    if (!user?.id) {
+      toast.error('Faça login para conversar com o IAgro.');
+      return;
+    }
+
     const imageFiles = pendingFiles.filter((f) => f.type.startsWith('image/'));
     const imageUrls = imageFiles
       .map((f) => pendingPreviews.get(f))
@@ -399,7 +406,10 @@ export function IAgro() {
     setLoadingSend(true);
 
     try {
-      const response = await sendIAgroMessage({ message: messageText, threadId, files: filesToSend });
+      const response = await sendIAgroMessage(
+        { message: messageText, threadId, files: filesToSend },
+        user.id
+      );
       if (response.concierge?.escalate) {
         setConciergeSuggestion(response.concierge);
       } else {
@@ -473,7 +483,8 @@ export function IAgro() {
   }
 
   async function handleToggleFavorite(targetThread: IAgroThread) {
-    await toggleIAgroThreadFavorite(targetThread.threadId, !targetThread.isFavorite);
+    if (!user?.id) return;
+    await toggleIAgroThreadFavorite(targetThread.threadId, !targetThread.isFavorite, user.id);
     await refreshThreads();
   }
 
@@ -482,10 +493,10 @@ export function IAgro() {
   }
 
   async function confirmDeleteThread() {
-    if (!threadToDelete) return;
+    if (!threadToDelete || !user?.id) return;
     setDeletingThread(true);
     try {
-      await deleteIAgroThread(threadToDelete.threadId);
+      await deleteIAgroThread(threadToDelete.threadId, user.id);
       if (threadId === threadToDelete.threadId) {
         setThreadId(null);
         setMessages([]);

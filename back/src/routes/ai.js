@@ -13,6 +13,33 @@ const upload = multer({
   limits: { files: 6, fileSize: 8 * 1024 * 1024 },
 });
 
+function clerkUserIdFromReq(req) {
+  return String(req.headers['x-clerk-user-id'] || '').trim();
+}
+
+/** Impede escrita em thread de outro usuário; atribui clerk aos registros legados sem dono. */
+async function ensureThreadWritable(threadId, clerkUserId) {
+  const hostile = await ChatHistory.findOne({
+    where: {
+      threadId,
+      isActive: true,
+      [Op.and]: [
+        { clerkUserId: { [Op.ne]: null } },
+        { clerkUserId: { [Op.ne]: clerkUserId } },
+      ],
+    },
+  });
+  if (hostile) {
+    const err = new Error('Conversa pertence a outro usuário.');
+    err.statusCode = 403;
+    throw err;
+  }
+  await ChatHistory.update(
+    { clerkUserId },
+    { where: { threadId, isActive: true, clerkUserId: { [Op.is]: null } } }
+  );
+}
+
 const aiReportLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: Number(process.env.AI_REPORT_RATE_LIMIT_PER_MIN || 20),
@@ -211,12 +238,20 @@ router.post(
       return res.status(400).json({ message: 'Mensagem excede o limite de 12.000 caracteres.' });
     }
 
+    const clerkUserId = clerkUserIdFromReq(req);
+    if (!clerkUserId) {
+      return res.status(401).json({ message: 'Faça login para usar o IAgro.' });
+    }
+
     try {
+      await ensureThreadWritable(threadId, clerkUserId);
+
       const recentRecords = await ChatHistory.findAll({
         where: {
           threadId,
           isActive: true,
           status: { [Op.ne]: 'error' },
+          clerkUserId,
         },
         order: [['createdAt', 'DESC']],
         limit: 8,
@@ -342,6 +377,7 @@ router.post(
 
       await ChatHistory.create({
         threadId,
+        clerkUserId,
         message: persistedMessage,
         response: displayText,
         status: 'completed',
@@ -355,6 +391,9 @@ router.post(
         concierge,
       });
     } catch (error) {
+      if (error.statusCode === 403) {
+        return res.status(403).json({ message: error.message || 'Acesso negado a esta conversa.' });
+      }
       const status = error.statusCode || error.response?.status;
       const messageText =
         error.code === 'ECONNABORTED' || error.message?.includes('timeout')
@@ -369,8 +408,13 @@ router.post(
 
 router.get('/chat/threads', async (req, res) => {
   try {
+    const clerkUserId = clerkUserIdFromReq(req);
+    if (!clerkUserId) {
+      return res.status(401).json({ message: 'Faça login para ver suas conversas.' });
+    }
+
     const rows = await ChatHistory.findAll({
-      where: { isActive: true },
+      where: { isActive: true, clerkUserId },
       order: [['updatedAt', 'DESC']],
       limit: 1000,
     });
@@ -415,11 +459,17 @@ router.get('/chat/history', async (req, res) => {
       return res.status(400).json({ message: 'threadId é obrigatório.' });
     }
 
+    const clerkUserId = clerkUserIdFromReq(req);
+    if (!clerkUserId) {
+      return res.status(401).json({ message: 'Faça login para ver o histórico.' });
+    }
+
     try {
       const rows = await ChatHistory.findAll({
         where: {
           threadId,
           isActive: true,
+          clerkUserId,
         },
         order: [['createdAt', 'ASC']],
       });
@@ -448,8 +498,12 @@ router.get('/chat/history', async (req, res) => {
 router.patch('/chat/threads/:threadId/favorite', async (req, res) => {
   const threadId = String(req.params.threadId || '').trim();
   const isFavorite = Boolean(req.body?.isFavorite);
+  const clerkUserId = clerkUserIdFromReq(req);
   if (!threadId) {
     return res.status(400).json({ message: 'threadId é obrigatório.' });
+  }
+  if (!clerkUserId) {
+    return res.status(401).json({ message: 'Faça login para alterar favoritos.' });
   }
 
   try {
@@ -459,6 +513,7 @@ router.patch('/chat/threads/:threadId/favorite', async (req, res) => {
         where: {
           threadId,
           isActive: true,
+          clerkUserId,
         },
       }
     );
@@ -473,8 +528,12 @@ router.patch('/chat/threads/:threadId/favorite', async (req, res) => {
 
 router.delete('/chat/threads/:threadId', async (req, res) => {
   const threadId = String(req.params.threadId || '').trim();
+  const clerkUserId = clerkUserIdFromReq(req);
   if (!threadId) {
     return res.status(400).json({ message: 'threadId é obrigatório.' });
+  }
+  if (!clerkUserId) {
+    return res.status(401).json({ message: 'Faça login para remover conversas.' });
   }
 
   try {
@@ -484,6 +543,7 @@ router.delete('/chat/threads/:threadId', async (req, res) => {
         where: {
           threadId,
           isActive: true,
+          clerkUserId,
         },
       }
     );
