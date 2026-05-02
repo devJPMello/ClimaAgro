@@ -6,7 +6,14 @@ import {
   type ProductivityListResponse,
 } from '../api/productivityApi';
 import { labelForProductivityCropType } from '../filters/appFilters';
-import { TOCANTINS_CITY_VALUE_TO_NAME } from '../geo/tocantinsCities';
+import { formatUfLabel, UF_NOME } from '../geo/brazilStatesMalha';
+import { REPORT_EXPORT_UF, TOCANTINS_CITY_VALUE_TO_NAME } from '../geo/tocantinsCities';
+
+function normalizeReportUf(localidadeKey: string): string {
+  const u = String(localidadeKey || '').trim().toUpperCase();
+  if (u.length === 2 && UF_NOME[u]) return u;
+  return REPORT_EXPORT_UF;
+}
 
 export type ReportTipoKey = 'clima' | 'produtividade' | 'comparativo';
 
@@ -14,7 +21,10 @@ export type ReportTipoKey = 'clima' | 'produtividade' | 'comparativo';
 export function climatePlaceFromUi(localidadeKey: string, displayLocal?: string): string {
   const byKey = TOCANTINS_CITY_VALUE_TO_NAME[localidadeKey as keyof typeof TOCANTINS_CITY_VALUE_TO_NAME];
   if (byKey) return byKey;
-  const stripped = (displayLocal || localidadeKey || '').replace(/\s*-\s*TO\s*$/i, '').trim();
+  const stripped = (displayLocal || localidadeKey || '')
+    .replace(/\s*—\s*Tocantins\s*\(TO\)\s*$/i, '')
+    .replace(/\s*-\s*TO\s*$/i, '')
+    .trim();
   return stripped || 'Palmas';
 }
 
@@ -26,12 +36,24 @@ export function reportTipoFromStoredLabel(tipo: string): ReportTipoKey {
 }
 
 export function localidadeKeyFromStoredLocal(localLabel: string): string {
+  const trimmed = localLabel.trim();
+  const paren = /\(([A-Za-z]{2})\)\s*$/i.exec(trimmed);
+  if (paren) {
+    const s = paren[1].toUpperCase();
+    if (UF_NOME[s]) return s;
+  }
+  const dash = /[-–]\s*([A-Za-z]{2})\s*$/i.exec(trimmed);
+  if (dash) {
+    const s = dash[1].toUpperCase();
+    if (UF_NOME[s]) return s;
+  }
+  if (trimmed.length === 2 && UF_NOME[trimmed.toUpperCase()]) return trimmed.toUpperCase();
   const normalized = localLabel.replace(/\s*-\s*TO\s*$/i, '').trim();
   const hit = Object.entries(TOCANTINS_CITY_VALUE_TO_NAME).find(([, name]) =>
     normalized.toLowerCase().startsWith(name.toLowerCase())
   );
   if (hit) return hit[0];
-  return normalized || 'Palmas';
+  return normalized || REPORT_EXPORT_UF;
 }
 
 export function parsePeriodoExport(periodo: string): { startDate: string; endDate: string } {
@@ -194,7 +216,7 @@ function formatClimateBlock(rows: ClimateListResponse['data'], place: string): s
     }
   }
   const lines: string[] = [
-    `Município (filtro): ${place}`,
+    `UF (filtro): ${formatUfLabel(place)}`,
     `Registos diários: ${sorted.length}`,
     nT ? `Temperatura média (média das médias diárias): ${(sumT / nT).toFixed(1)} °C` : 'Temperatura média: —',
     nP ? `Precipitação acumulada (soma dos dias): ${sumP.toFixed(1)} mm` : 'Precipitação: —',
@@ -260,21 +282,13 @@ function formatComparativoClimateBlock(rows: Array<{
   return lines.join('\n');
 }
 
-function formatProductivityBlock(perYear: ProductivityListResponse['data'][], place: string): string {
+function formatProductivityBlock(perYear: ProductivityListResponse['data'][], ufLabel: string): string {
   const flat = perYear.flat();
-  const placeLc = place.trim().toLowerCase();
-  const forMun = flat.filter((r) => {
-    const gd = (r.geoData?.name || '').trim().toLowerCase();
-    const mn = (r.municipalityName || '').trim().toLowerCase();
-    return gd === placeLc || mn === placeLc || mn.includes(placeLc) || placeLc.includes(mn);
-  });
-  const use = forMun.length ? forMun : flat;
+  const use = flat;
   if (!use.length) {
-    return `Sem registos de produtividade para o estado TO no período de anos consultado.`;
+    return `Sem registos de produtividade para a UF ${formatUfLabel(ufLabel)} no período de anos consultado.`;
   }
-  const head = forMun.length
-    ? `Registos alinhados ao município «${place}»: ${forMun.length}.`
-    : `Sem linhas com nome de município coincidente com «${place}»; a seguir consta o conjunto TO devolvido pela API (${use.length} linhas).`;
+  const head = `Registos da UF «${formatUfLabel(ufLabel)}»: ${use.length}.`;
   const lines = [head, '', 'Produto / cultura | Ano | Produtividade (t/ha)'];
   const sorted = [...use].sort((a, b) => {
     const cp = labelForProductivityCropType(String(a.productLabel || a.cropType || '')).localeCompare(
@@ -289,7 +303,7 @@ function formatProductivityBlock(perYear: ProductivityListResponse['data'][], pl
     const raw = r.productLabel || r.cropType;
     const cult = raw ? labelForProductivityCropType(String(raw)) : '—';
     lines.push(
-      `${cult} | ${r.year ?? '—'} | ${p != null ? p.toFixed(2) : '—'} (${r.geoData?.name || r.municipalityName || 'TO'})`
+      `${cult} | ${r.year ?? '—'} | ${p != null ? p.toFixed(2) : '—'} (${r.geoData?.name || r.municipalityName || ufLabel})`
     );
   });
   return lines.join('\n');
@@ -307,7 +321,7 @@ export async function gatherReportDados(params: {
   /** Só `tipo === 'produtividade'`: filtra produtividade/SIDRA pela safra SIDRA (`2024/25`). */
   productivitySeason?: string;
 }): Promise<string> {
-  const place = climatePlaceFromUi(params.localidadeKey, params.displayLocal);
+  const ufLabel = normalizeReportUf(params.localidadeKey);
   const chunks: string[] = [];
   const seasonProd =
     (params.tipo === 'produtividade' || params.tipo === 'comparativo') && params.productivitySeason?.trim()
@@ -319,8 +333,7 @@ export async function gatherReportDados(params: {
       if (params.tipo === 'comparativo' && seasonProd) {
         const comp = await getClimateVsProductivity({
           season: seasonProd,
-          state: 'TO',
-          municipality: place,
+          state: ufLabel,
         });
         const compRows = comp.success && Array.isArray(comp.data) ? comp.data : [];
         chunks.push('=== Dados climáticos (API /api/productivity/climate-vs-productivity) ===\n');
@@ -329,13 +342,12 @@ export async function gatherReportDados(params: {
         chunks.push(formatComparativoClimateBlock(compRows));
       } else {
         const rows = await listAllClimateRecordsInRange({
-          state: 'TO',
+          state: ufLabel,
           startDate: params.startDate,
           endDate: params.endDate,
-          place,
         });
         chunks.push('=== Dados climáticos (API /api/climate) ===\n');
-        chunks.push(formatClimateBlock(rows, place));
+        chunks.push(formatClimateBlock(rows, ufLabel));
       }
     } catch {
       chunks.push('=== Dados climáticos ===\nNão foi possível obter os dados (rede, sessão ou servidor).');
@@ -347,9 +359,8 @@ export async function gatherReportDados(params: {
       const perYear: Awaited<ReturnType<typeof listAllProductivityForYear>>[] = [];
       if (seasonProd) {
         const rows = await listAllProductivityForYear({
-          state: 'TO',
+          state: ufLabel,
           season: seasonProd,
-          municipality: place,
         });
         perYear.push(rows);
       } else {
@@ -358,12 +369,12 @@ export async function gatherReportDados(params: {
         const lo = Math.min(y0, y1);
         const hi = Math.max(y0, y1);
         for (let y = lo; y <= hi; y += 1) {
-          perYear.push(await listAllProductivityForYear({ state: 'TO', year: y, municipality: place }));
+          perYear.push(await listAllProductivityForYear({ state: ufLabel, year: y }));
         }
       }
       chunks.push('\n\n=== Produtividade (API /api/productivity) ===\n');
       if (seasonProd) chunks.push(`Safra: ${seasonProd}\n`);
-      chunks.push(formatProductivityBlock(perYear, place));
+      chunks.push(formatProductivityBlock(perYear, ufLabel));
     } catch {
       chunks.push('\n\n=== Produtividade ===\nNão foi possível obter os dados.');
     }
@@ -392,7 +403,7 @@ export async function gatherReportDados(params: {
       let anySidra = false;
       for (let reportYear = loSidra; reportYear <= hiSidra; reportYear += 1) {
         const rows = await listAllIbgeSidra1612Rows({
-          municipality: place,
+          state: ufLabel,
           year: reportYear,
         });
         if (!rows.length) continue;
@@ -407,11 +418,11 @@ export async function gatherReportDados(params: {
       }
       if (anySidra) {
         chunks.push('\n\n=== SIDRA 1612 (API /api/ibge-sidra-1612 — PostgreSQL) ===\n');
-        chunks.push(`Filtro: município «${place}», anos ${loSidra}–${hiSidra}.\n\n`);
+        chunks.push(`Filtro: UF «${formatUfLabel(ufLabel)}», anos ${loSidra}–${hiSidra}.\n\n`);
         chunks.push(sidraParts.join('\n'));
       } else {
         chunks.push(
-          '\n\n=== SIDRA 1612 (API /api/ibge-sidra-1612) ===\nSem registos para este município nos anos do período na tabela ibge_sidra_1612.',
+          '\n\n=== SIDRA 1612 (API /api/ibge-sidra-1612) ===\nSem registos para esta UF nos anos do período na tabela ibge_sidra_1612.',
         );
       }
     } catch {
