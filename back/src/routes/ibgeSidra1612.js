@@ -2,6 +2,7 @@ const express = require('express');
 const { Op, QueryTypes } = require('sequelize');
 const { query, validationResult } = require('express-validator');
 const { sequelize, models } = require('../config/database');
+const { GeoData } = models;
 const { mapProductLabelToCropType } = require('../utils/sidra1612ProductCropMap');
 
 const router = express.Router();
@@ -77,6 +78,7 @@ router.get(
   '/',
   [
     query('year').optional().isInt({ min: 1970, max: 2100 }),
+    query('state').optional().isString().isLength({ min: 2, max: 2 }),
     query('municipality').optional().isString().isLength({ min: 1, max: 200 }),
     query('variable').optional().isString().isLength({ min: 1, max: 200 }),
     query('product').optional().isString().isLength({ min: 1, max: 300 }),
@@ -91,6 +93,21 @@ router.get(
       if (req.query.year != null && req.query.year !== '') {
         const y = parseInt(String(req.query.year), 10);
         if (Number.isFinite(y)) where.year = y;
+      }
+
+      const rawUf = req.query.state != null ? String(req.query.state).trim().toUpperCase().slice(0, 2) : '';
+      if (rawUf && /^[A-Z]{2}$/.test(rawUf)) {
+        const munis = await GeoData.findAll({
+          where: { state: rawUf, category: 'municipality', isActive: true },
+          attributes: ['name'],
+          raw: true,
+        });
+        const names = munis.map((m) => String(m.name || '').trim()).filter(Boolean);
+        if (names.length) {
+          where.municipalityName = { [Op.in]: names };
+        } else {
+          where.municipalityName = { [Op.in]: ['__none__'] };
+        }
       }
 
       if (req.query.municipality) {

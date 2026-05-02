@@ -37,6 +37,8 @@ export async function listIbgeSidra1612ProductLabels(params?: {
 /** GET /ibge-sidra-1612 — observações SIDRA 1612 (tabela `ibge_sidra_1612`). */
 export async function listIbgeSidra1612Rows(params: {
   year?: number;
+  /** Filtra municípios cuja `geo_data.state` coincide (ex.: TO). */
+  state?: string;
   municipality?: string;
   variable?: string;
   product?: string;
@@ -45,6 +47,7 @@ export async function listIbgeSidra1612Rows(params: {
 }): Promise<IbgeSidra1612ListResponse> {
   const sp = new URLSearchParams();
   if (params.year != null) sp.set('year', String(params.year));
+  if (params.state?.trim()) sp.set('state', params.state.trim().toUpperCase().slice(0, 2));
   if (params.municipality?.trim()) sp.set('municipality', params.municipality.trim());
   if (params.variable?.trim()) sp.set('variable', params.variable.trim());
   if (params.product?.trim()) sp.set('product', params.product.trim());
@@ -58,6 +61,7 @@ const SIDRA_PAGE_MAX = 500;
 /** Pagina até esgotar o critério (máx. 50 000 linhas de segurança). */
 export async function listAllIbgeSidra1612Rows(params: {
   year: number;
+  state?: string;
   municipality?: string;
   variable?: string;
   product?: string;
