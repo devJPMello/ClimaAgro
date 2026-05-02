@@ -53,9 +53,29 @@ const DualUserProfile = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    parceiroAtivo: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+      field: 'parceiro_ativo',
+    },
     whatsapp: {
       type: DataTypes.STRING(32),
       allowNull: true,
+    },
+    /** Soma das notas (1–5) recebidas em atendimentos encerrados com avaliação. */
+    parceiroAvaliacaoSoma: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      field: 'parceiro_avaliacao_soma',
+    },
+    /** Quantidade de avaliações agregadas na média. */
+    parceiroAvaliacaoQtd: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      field: 'parceiro_avaliacao_qtd',
     },
   },
   {

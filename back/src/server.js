@@ -2,9 +2,11 @@ const path = require('path');
 // Carregar .env ANTES de qualquer módulo que use process.env (ex.: database.js)
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
+const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const { Server } = require('socket.io');
 const { connectDB, sequelize, models } = require('./config/database');
 const { startClimateAutoSyncScheduler } = require('./services/climateSyncScheduler');
 
@@ -35,9 +37,11 @@ app.use(
       return callback(null, false);
     },
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Export-Client-Id']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Export-Client-Id', 'X-Clerk-User-Id']
   })
 );
+// Webhook WhatsApp (parser específico na rota; Twilio = urlencoded, Z-API = JSON)
+app.use('/webhook/whatsapp', require('./routes/whatsappWebhook'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -56,6 +60,7 @@ app.use('/api/ibge-sidra-1612', require('./routes/ibgeSidra1612'));
 app.use('/api/climate', require('./routes/climate'));
 app.use('/api/clima', require('./routes/climate'));
 app.use('/api/ai', require('./routes/ai'));
+app.use('/api/hybrid-chat', require('./routes/hybridChat'));
 app.use('/api/agronomos-parceiros', require('./routes/agronomosParceiros'));
 app.use('/api/superset', require('./routes/superset'));
 app.use('/api/inmet-adapter', require('./routes/inmetAdapter'));
@@ -103,11 +108,34 @@ app.use('*', (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin(origin, callback) {
+      const allowed = parseFrontendOrigins();
+      if (!origin) return callback(null, true);
+      if (allowed.includes(origin)) return callback(null, true);
+      return callback(null, false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST'],
+  },
+});
+app.set('io', io);
+io.on('connection', (socket) => {
+  socket.on('join:produtor', (clerkId) => {
+    if (typeof clerkId === 'string' && clerkId.length > 4) {
+      socket.join(`produtor:${clerkId}`);
+    }
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📊 API: http://localhost:${PORT}/api  ·  health: http://localhost:${PORT}/api/health`);
+  console.log(`💬 WebSocket: /socket.io  ·  Webhook: POST /webhook/whatsapp`);
   startClimateAutoSyncScheduler({ sequelize, models });
 });
 
-module.exports = app;
+module.exports = { app, server, io };

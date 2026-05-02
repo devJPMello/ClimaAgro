@@ -166,6 +166,8 @@ const IbgeSidra1612Row = require('../models/IbgeSidra1612Row');
 const ChatHistory = require('../models/ChatHistory');
 const DualUserProfile = require('../models/DualUserProfile');
 const ConsultaAgronomica = require('../models/ConsultaAgronomica');
+const HybridConversation = require('../models/HybridConversation');
+const HybridMessage = require('../models/HybridMessage');
 
 // Configurar associações entre modelos
 const setupAssociations = () => {
@@ -181,6 +183,9 @@ const setupAssociations = () => {
   ClimateData.belongsTo(GeoData, { foreignKey: 'geoDataId', as: 'geoData' });
 
   // Report/Alert em models/ ainda são esquemas Mongoose legados — não associar aqui ao Sequelize.
+
+  HybridConversation.hasMany(HybridMessage, { foreignKey: 'conversationId', as: 'messages' });
+  HybridMessage.belongsTo(HybridConversation, { foreignKey: 'conversationId', as: 'conversation' });
 };
 
 // Configurar associações
@@ -201,6 +206,8 @@ module.exports = {
     IbgeSidra1612Row,
     ChatHistory,
     DualUserProfile,
-    ConsultaAgronomica
+    ConsultaAgronomica,
+    HybridConversation,
+    HybridMessage
   }
 };
