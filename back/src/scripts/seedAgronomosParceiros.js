@@ -5,6 +5,19 @@ const DualUserProfile = require('../models/DualUserProfile');
 
 const agronomosSeed = [
   {
+    clerkUserId: 'seed-agro-pragas',
+    nome: 'Dr. Ricardo Mendes',
+    email: 'ricardo.pragas@climaagro.seed',
+    telefone: '(63) 98444-3322',
+    municipio: 'Palmas',
+    uf: 'TO',
+    especialidade: 'Pragas',
+    crea: 'CREA-TO 99887',
+    parceiro: true,
+    parceiroAtivo: true,
+    whatsapp: '5563984443322',
+  },
+  {
     clerkUserId: 'seed-agro-1',
     nome: 'Dr. Carlos Oliveira',
     email: 'carlos.mendes@agro.com',
@@ -14,6 +27,7 @@ const agronomosSeed = [
     especialidade: 'Soja e Milho',
     crea: 'CREA-TO 12345',
     parceiro: true,
+    parceiroAtivo: true,
     whatsapp: '5516998765432',
   },
   {
@@ -26,6 +40,7 @@ const agronomosSeed = [
     especialidade: 'Horticultura',
     crea: 'CREA-GO 54321',
     parceiro: true,
+    parceiroAtivo: true,
     whatsapp: '5566987654321',
   },
   {
@@ -38,6 +53,7 @@ const agronomosSeed = [
     especialidade: 'Café e Frutas',
     crea: 'CREA-MT 98765',
     parceiro: true,
+    parceiroAtivo: true,
     whatsapp: '5562991234567',
   },
   {
@@ -50,6 +66,7 @@ const agronomosSeed = [
     especialidade: 'Solos e Nutrição de Plantas',
     crea: 'CREA-PR 901234',
     parceiro: true,
+    parceiroAtivo: true,
     whatsapp: '5544988887777',
   },
   {
@@ -62,6 +79,7 @@ const agronomosSeed = [
     especialidade: 'Fitossanidade',
     crea: 'CREA-MG 567890',
     parceiro: true,
+    parceiroAtivo: true,
     whatsapp: '5534995556666',
   },
 ];
