@@ -1,10 +1,14 @@
+import { formatUfLabel, UF_NOME } from './brazilStatesMalha';
+
+const TO_UF_LABEL = formatUfLabel('TO');
+
 export const TOCANTINS_CITY_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: 'palmas', label: 'Palmas - TO' },
-  { value: 'araguaina', label: 'Araguaína - TO' },
-  { value: 'gurupi', label: 'Gurupi - TO' },
-  { value: 'porto-nacional', label: 'Porto Nacional - TO' },
-  { value: 'paraiso-to', label: 'Paraíso do Tocantins - TO' },
-  { value: 'guarai', label: 'Guaraí - TO' },
+  { value: 'palmas', label: `Palmas — ${TO_UF_LABEL}` },
+  { value: 'araguaina', label: `Araguaína — ${TO_UF_LABEL}` },
+  { value: 'gurupi', label: `Gurupi — ${TO_UF_LABEL}` },
+  { value: 'porto-nacional', label: `Porto Nacional — ${TO_UF_LABEL}` },
+  { value: 'paraiso-to', label: `Paraíso do Tocantins — ${TO_UF_LABEL}` },
+  { value: 'guarai', label: `Guaraí — ${TO_UF_LABEL}` },
 ];
 
 export const TOCANTINS_CITY_VALUE_TO_NAME: Record<string, string> = {
@@ -20,7 +24,7 @@ export const TO_CITY_VALUE_TO_NAME = TOCANTINS_CITY_VALUE_TO_NAME;
 
 export const TO_CITY_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'todos', label: 'Todos' },
-  ...TOCANTINS_CITY_OPTIONS.map((x) => ({ value: x.value, label: x.label.replace(' - TO', '') })),
+  ...Object.entries(TOCANTINS_CITY_VALUE_TO_NAME).map(([value, name]) => ({ value, label: name })),
 ];
 
 export function getTocantinsCityLabel(value: string): string {
@@ -28,9 +32,17 @@ export function getTocantinsCityLabel(value: string): string {
   return option?.label ?? value;
 }
 
-/** Rótulo para relatório/exportação: chave legada → `Palmas - TO`; nome IBGE → acrescenta sufixo UF. */
+/** Sigla da UF por defeito nos relatórios (Tocantins). */
+export const REPORT_EXPORT_UF = 'TO';
+
+/** Rótulo para relatório/exportação: sigla UF → «Nome (UF)»; legado Tocantins por slug/cidade. */
 export function displayLocalidadeLabel(keyOrName: string): string {
+  const raw = String(keyOrName || '').trim();
+  const sigla = raw.toUpperCase();
+  if (sigla.length === 2 && UF_NOME[sigla]) {
+    return formatUfLabel(sigla);
+  }
   const fromSlug = getTocantinsCityLabel(keyOrName);
-  if (fromSlug !== keyOrName || keyOrName.includes('-')) return fromSlug;
-  return `${keyOrName} - TO`;
+  if (fromSlug !== keyOrName || raw.includes('-')) return fromSlug;
+  return `${keyOrName} — ${formatUfLabel('TO')}`;
 }

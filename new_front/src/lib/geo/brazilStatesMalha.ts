@@ -68,6 +68,37 @@ export const UF_NOME: Record<string, string> = {
   DF: 'Distrito Federal',
 };
 
+/** Primeira opção dos filtros de UF: obriga uma escolha antes de carregar dados por estado. */
+export const UF_SELECT_PLACEHOLDER_OPTION: { value: string; label: string } = {
+  value: '',
+  label: 'Escolher um estado',
+};
+
+/** Rótulo padrão do projeto: nome do estado e sigla «Nome (SIGLA)». Sigla desconhecida → só a sigla em maiúsculas (se parecer sigla). */
+export function formatUfLabel(sigla: string | undefined | null): string {
+  const raw = String(sigla ?? '').trim().toUpperCase();
+  const u =
+    raw.length === 2 && /^[A-Z]{2}$/.test(raw) ? raw : raw.replace(/[^A-Z]/g, '').slice(0, 2);
+  if (!u) return '';
+  const nome = UF_NOME[u];
+  return nome ? `${nome} (${u})` : u;
+}
+
+/** Localização na UI: «Município — Nome (UF)». */
+export function formatMunicipioComUf(municipio: string, siglaUf: string | undefined | null): string {
+  const m = String(municipio || '').trim();
+  const uf = formatUfLabel(siglaUf);
+  if (!m || m === 'Não informado' || m === '--') return uf || m || '—';
+  return uf ? `${m} — ${uf}` : m;
+}
+
+/** Todas as UFs do país, ordenadas alfabeticamente pelo nome do estado (pt-BR). */
+export function brazilUfSelectOptionsAlphabetical(): Array<{ value: string; label: string }> {
+  return Object.entries(UF_NOME)
+    .sort(([, nomeA], [, nomeB]) => nomeA.localeCompare(nomeB, 'pt-BR'))
+    .map(([sigla]) => ({ value: sigla, label: formatUfLabel(sigla) }));
+}
+
 /**
  * Garante `properties.state` (sigla) e `properties.name` para coroplética e popups,
  * quer a fonte seja IBGE (`codarea`) quer o GeoJSON local (`state` já preenchido).
