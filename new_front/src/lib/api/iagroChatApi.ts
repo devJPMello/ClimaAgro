@@ -15,6 +15,13 @@ export type IAgroThread = {
   isFavorite?: boolean;
 };
 
+/** Triagem IA → humano (linha [META] parseada no backend). */
+export type ConciergeMeta = {
+  escalate: boolean;
+  reason?: string;
+  specialtyHint?: string;
+};
+
 function normalizeApiBaseUrl(raw: string): string {
   const t = raw.trim().replace(/\/+$/, '');
   if (!t) return '';
@@ -35,7 +42,7 @@ function getApiBase(): string {
 export async function sendIAgroMessage(payload: { message: string; threadId?: string | null; files?: File[] }) {
   const files = payload.files ?? [];
   if (files.length === 0) {
-    return httpClient.post<{ threadId: string; response: string }>('ai/chat/messages', {
+    return httpClient.post<{ threadId: string; response: string; concierge?: ConciergeMeta }>('ai/chat/messages', {
       message: payload.message,
       threadId: payload.threadId ?? undefined,
     });
@@ -59,7 +66,7 @@ export async function sendIAgroMessage(payload: { message: string; threadId?: st
     throw new Error(message);
   }
 
-  return (await response.json()) as { threadId: string; response: string };
+  return (await response.json()) as { threadId: string; response: string; concierge?: ConciergeMeta };
 }
 
 export async function listIAgroThreads() {

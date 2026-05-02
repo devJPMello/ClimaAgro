@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router';
-import { Cloud, LayoutDashboard, MapPin, TrendingUp, LineChart, Bell, FileText, User, LogOut, Menu, X, Bot, Handshake } from 'lucide-react';
+import { Cloud, LayoutDashboard, MapPin, TrendingUp, LineChart, Bell, FileText, User, LogOut, Menu, X, Bot, Handshake, MessagesSquare } from 'lucide-react';
 import { useClerk, useUser } from '@clerk/clerk-react';
 
 
@@ -13,6 +13,7 @@ const navigation = [
   { name: 'Exportar Relatório', path: '/exportar', icon: FileText },
   { name: 'IAgro', path: '/iagro', icon: Bot },
   { name: 'Agrônomos Parceiros', path: '/parceiros', icon: Handshake },
+  { name: 'Minhas conversas', path: '/minhas-conversas', icon: MessagesSquare },
   { name: 'Perfil', path: '/perfil', icon: User },
 ];
 

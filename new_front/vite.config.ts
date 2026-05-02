@@ -21,6 +21,11 @@ const apiProxy = (target: string) => ({
     target: target.replace(/\/$/, ''),
     changeOrigin: true,
   },
+  '/socket.io': {
+    target: target.replace(/\/$/, ''),
+    changeOrigin: true,
+    ws: true,
+  },
 })
 
 export default defineConfig(({ mode }) => {

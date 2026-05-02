@@ -230,4 +230,6 @@ export const httpClient = {
   get: <T>(path: string, options?: HttpClientOptions) => httpRequest<T>('GET', path, { ...options, retry: true }),
   post: <T>(path: string, body?: unknown, options?: HttpClientOptions) =>
     httpRequest<T>('POST', path, { ...options, body, retry: false }),
+  patch: <T>(path: string, body?: unknown, options?: HttpClientOptions) =>
+    httpRequest<T>('PATCH', path, { ...options, body, retry: false }),
 };
