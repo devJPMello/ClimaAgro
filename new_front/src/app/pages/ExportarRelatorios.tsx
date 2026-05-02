@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
@@ -9,7 +8,8 @@ import { toast } from 'sonner';
 import { createReportExport, listReportExports } from '../../lib/api/reportExportsApi';
 import type { ReportExportItemDto } from '../../lib/api/contracts/reportExports';
 import { EmptyState } from '../components/ui/EmptyState';
-import { displayLocalidadeLabel, TO_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
+import { brazilUfSelectOptionsAlphabetical, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
+import { displayLocalidadeLabel } from '../../lib/geo/tocantinsCities';
 import { getProductivityYearOptions } from '../../lib/filters/appFilters';
 import { downloadReportFile, type ReportExportFileFormat } from '../../lib/reportExportFile';
 import {
@@ -27,25 +27,12 @@ function labelTipoRelatorio(value: string): string {
 }
 
 export function ExportarRelatorios() {
-  const [localidade, setLocalidade] = useState('Palmas');
-  const { options: ibgeLocalOptions, loading: localidadesLoading, error: localidadesError } =
-    useIbgeMunicipioSelectOptions();
-  const localidadeSelectOptions = ibgeLocalOptions.map((o) => ({
-    value: o.value,
-    label: `${o.label} - TO`,
-  }));
-
-  useEffect(() => {
-    if (!ibgeLocalOptions.length) return;
-    const valid = new Set(ibgeLocalOptions.map((o) => o.value));
-    if (valid.has(localidade)) return;
-    const legacy = TO_CITY_VALUE_TO_NAME[localidade as keyof typeof TO_CITY_VALUE_TO_NAME];
-    if (legacy && valid.has(legacy)) {
-      setLocalidade(legacy);
-      return;
-    }
-    if (valid.has('Palmas')) setLocalidade('Palmas');
-  }, [ibgeLocalOptions, localidade]);
+  const [localidade, setLocalidade] = useState('');
+  const localidadeSelectOptions = useMemo(
+    () => [UF_SELECT_PLACEHOLDER_OPTION, ...brazilUfSelectOptionsAlphabetical()],
+    []
+  );
+  const localidadeValida = /^[A-Z]{2}$/.test(localidade);
   const [tipoRelatorio, setTipoRelatorio] = useState('clima');
   const yearOptions = useMemo(() => getProductivityYearOptions(), []);
   const [anoInicio, setAnoInicio] = useState(yearOptions[Math.min(2, yearOptions.length - 1)]?.value ?? '2024');
@@ -73,6 +60,10 @@ export function ExportarRelatorios() {
   }, [carregarHistorico]);
 
   const handleExportar = async () => {
+    if (!localidadeValida) {
+      toast.error('Selecione uma UF para definir o escopo do relatório.');
+      return;
+    }
     setLoading(true);
     try {
       const local = displayLocalidadeLabel(localidade);
@@ -174,12 +165,10 @@ export function ExportarRelatorios() {
             <CardBody className="space-y-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Select
-                  label="Localidade"
+                  label="UF (escopo do relatório)"
                   value={localidade}
                   onChange={(e) => setLocalidade(e.target.value)}
                   options={localidadeSelectOptions}
-                  disabled={localidadesLoading}
-                  error={localidadesError ?? undefined}
                 />
 
                 <Select
@@ -221,7 +210,13 @@ export function ExportarRelatorios() {
                 ]}
               />
 
-              <Button variant="primary" className="w-full" onClick={() => void handleExportar()} loading={loading}>
+              <Button
+                variant="primary"
+                className="w-full"
+                onClick={() => void handleExportar()}
+                loading={loading}
+                disabled={!localidadeValida}
+              >
                 <FileText className="w-4 h-4" />
                 Gerar Relatório
               </Button>

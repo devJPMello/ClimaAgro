@@ -13,10 +13,10 @@ import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { listClimateAlerts } from '../../lib/api/alertsApi';
 import type { ClimateAlertDto, ClimateAlertListDto, ClimateAlertSeverity } from '../../lib/api/contracts/alerts';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
-import { UF_NOME } from '../../lib/geo/brazilStatesMalha';
+import { UF_NOME, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
 
-const ALL_UF_OPTIONS = [
-  { value: 'ALL', label: 'Brasil (todos)' },
+const ALERTAS_UF_OPTIONS = [
+  UF_SELECT_PLACEHOLDER_OPTION,
   ...Object.entries(UF_NOME)
     .sort(([, a], [, b]) => a.localeCompare(b, 'pt-BR'))
     .map(([sigla, nome]) => ({ value: sigla, label: `${nome} (${sigla})` })),
@@ -89,7 +89,7 @@ function formatUpdatedAt(iso: string): string {
 export function Alertas() {
   const [severidadeFiltro, setSeveridadeFiltro] = usePersistedState('climaagro.pref.alertas.severidade', 'todos');
   const [tipoFiltro, setTipoFiltro] = usePersistedState('climaagro.pref.alertas.tipo', 'todos');
-  const [ufFiltro, setUfFiltro] = usePersistedState('climaagro.pref.alertas.uf', 'ALL');
+  const [ufFiltro, setUfFiltro] = usePersistedState('climaagro.pref.alertas.uf', '');
   const [page, setPage] = useState(1);
   const [selectedAlerta, setSelectedAlerta] = useState<ClimateAlertDto | null>(null);
 
@@ -98,9 +98,19 @@ export function Alertas() {
   }, [severidadeFiltro, tipoFiltro, ufFiltro]);
 
   const { status, data, error, reload } = useAsyncResource(
-    () => listClimateAlerts({ state: ufFiltro === 'ALL' ? undefined : ufFiltro }),
+    () =>
+      /^[A-Z]{2}$/.test(ufFiltro)
+        ? listClimateAlerts({ state: ufFiltro })
+        : Promise.resolve({
+            items: [],
+            updatedAt: new Date().toISOString(),
+          } satisfies ClimateAlertListDto),
     [ufFiltro],
   );
+
+  useEffect(() => {
+    if (ufFiltro === 'ALL') setUfFiltro('');
+  }, [ufFiltro, setUfFiltro]);
 
   const filtros = useMemo(
     () => ({ severidadeFiltro, tipoFiltro }),
@@ -132,9 +142,7 @@ export function Alertas() {
         <h1 className="text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
           Alertas Climáticos
         </h1>
-        <p className="text-muted-foreground">
-          Monitoramento por UF — escolha um estado ou visão Brasil inteiro.
-        </p>
+        <p className="text-muted-foreground">Monitoramento por UF — escolha um estado para listar os alertas.</p>
       </div>
 
       <AsyncStateView<ClimateAlertListDto>
@@ -148,6 +156,7 @@ export function Alertas() {
         {(payload) => {
           const alertasFiltrados = filterItems(payload.items);
           const cnt = contagem(payload.items);
+          const semUfSelecionada = !/^[A-Z]{2}$/.test(ufFiltro);
           const semDadosApi = payload.items.length === 0;
           const totalPages = Math.max(1, Math.ceil(alertasFiltrados.length / PAGE_SIZE));
           const currentPage = Math.min(page, totalPages);
@@ -244,13 +253,13 @@ export function Alertas() {
                           label="UF"
                           value={ufFiltro}
                           onChange={(e) => setUfFiltro(e.target.value)}
-                          options={ALL_UF_OPTIONS}
+                          options={ALERTAS_UF_OPTIONS}
                         />
                       </div>
-                      {(severidadeFiltro !== 'todos' || tipoFiltro !== 'todos' || ufFiltro !== 'ALL') && (
+                      {(severidadeFiltro !== 'todos' || tipoFiltro !== 'todos' || ufFiltro !== '') && (
                         <button
                           type="button"
-                          onClick={() => { setSeveridadeFiltro('todos'); setTipoFiltro('todos'); setUfFiltro('ALL'); }}
+                          onClick={() => { setSeveridadeFiltro('todos'); setTipoFiltro('todos'); setUfFiltro(''); }}
                           className="text-xs text-primary hover:underline pb-2.5"
                         >
                           Limpar
@@ -260,7 +269,15 @@ export function Alertas() {
                   </div>
                 </CardHeader>
 
-                {semDadosApi ? (
+                {semUfSelecionada ? (
+                  <CardBody>
+                    <EmptyState
+                      icon={MapPin}
+                      title="Escolha um estado"
+                      description="Selecione uma UF nos filtros acima para carregar os alertas climáticos."
+                    />
+                  </CardBody>
+                ) : semDadosApi ? (
                   <CardBody>
                     <EmptyState
                       icon={AlertTriangle}
