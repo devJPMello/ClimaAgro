@@ -26,40 +26,7 @@ import { Modal } from '../components/ui/Modal';
 import { cadastrarAgronomoParceiro, listarAgronomosParceiros } from '../../lib/api/agronomosParceirosApi';
 import { escalateToSpecialist } from '../../lib/api/hybridChatApi';
 import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
-
-const UFS_BR = [
-  'AC', 'AL', 'AM', 'AP', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT',
-  'PA', 'PB', 'PE', 'PI', 'PR', 'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO',
-];
-const UF_NOMES: Record<string, string> = {
-  AC: 'Acre',
-  AL: 'Alagoas',
-  AP: 'Amapá',
-  AM: 'Amazonas',
-  BA: 'Bahia',
-  CE: 'Ceará',
-  DF: 'Distrito Federal',
-  ES: 'Espírito Santo',
-  GO: 'Goiás',
-  MA: 'Maranhão',
-  MT: 'Mato Grosso',
-  MS: 'Mato Grosso do Sul',
-  MG: 'Minas Gerais',
-  PA: 'Pará',
-  PB: 'Paraíba',
-  PR: 'Paraná',
-  PE: 'Pernambuco',
-  PI: 'Piauí',
-  RJ: 'Rio de Janeiro',
-  RN: 'Rio Grande do Norte',
-  RS: 'Rio Grande do Sul',
-  RO: 'Rondônia',
-  RR: 'Roraima',
-  SC: 'Santa Catarina',
-  SP: 'São Paulo',
-  SE: 'Sergipe',
-  TO: 'Tocantins',
-};
+import { formatMunicipioComUf, formatUfLabel, UF_NOME } from '../../lib/geo/brazilStatesMalha';
 
 const ESPECIALIDADES_PRINCIPAIS = [
   'Soja e Milho',
@@ -119,16 +86,16 @@ export function AgronomosParceiros() {
     sobre: '',
   });
 
-  const itensPorPagina = 6;
+  const PAGE_SIZE = 6;
   const ufIbgeSelecionada = estadoSelecionado === 'todos' ? undefined : UF_IBGE_ID_BY_SIGLA[estadoSelecionado];
   const ufIbgeCadastro = cadastro.uf ? UF_IBGE_ID_BY_SIGLA[cadastro.uf] : undefined;
   const { options: municipiosPorUfOptions, loading: loadingMunicipiosPorUf } = useIbgeMunicipioSelectOptions(ufIbgeSelecionada);
   const { options: municipiosCadastroOptions, loading: loadingMunicipiosCadastro } = useIbgeMunicipioSelectOptions(ufIbgeCadastro);
   const ufOptionsOrdenadas = useMemo(
     () =>
-      [...UFS_BR]
-        .sort((a, b) => UF_NOMES[a].localeCompare(UF_NOMES[b], 'pt-BR'))
-        .map((uf) => ({ value: uf, label: `${uf} - ${UF_NOMES[uf]}` })),
+      [...Object.keys(UF_NOME)]
+        .sort((a, b) => UF_NOME[a].localeCompare(UF_NOME[b], 'pt-BR'))
+        .map((uf) => ({ value: uf, label: formatUfLabel(uf) })),
     []
   );
 
@@ -208,10 +175,10 @@ export function AgronomosParceiros() {
     [agronomos, busca, estadoSelecionado, municipioSelecionado, especialidadeSelecionada]
   );
 
-  const totalPaginas = Math.max(1, Math.ceil(agronomosFiltrados.length / itensPorPagina));
+  const totalPaginas = Math.max(1, Math.ceil(agronomosFiltrados.length / PAGE_SIZE));
   const paginaCorrigida = Math.min(paginaAtual, totalPaginas);
-  const inicio = (paginaCorrigida - 1) * itensPorPagina;
-  const fim = inicio + itensPorPagina;
+  const inicio = (paginaCorrigida - 1) * PAGE_SIZE;
+  const fim = inicio + PAGE_SIZE;
   const agronomosPaginados = agronomosFiltrados.slice(inicio, fim);
 
   useEffect(() => {
@@ -328,27 +295,27 @@ export function AgronomosParceiros() {
       </div>
 
       <Card>
-        <CardBody className="rounded-xl border border-primary/20 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
+        <CardBody className="rounded-xl border border-border bg-white dark:bg-card">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="flex-1 space-y-3">
               <div className="inline-flex items-center gap-2">
-                <CheckCircle className="h-5 w-5 text-green-500" />
-                <h2 className="text-lg">Programa Agrônomos Parceiros ClimaAgro</h2>
+                <CheckCircle className="h-5 w-5 shrink-0 text-primary" aria-hidden />
+                <h2 className="text-lg text-foreground">Programa Agrônomos Parceiros ClimaAgro</h2>
               </div>
               <p className="text-sm text-muted-foreground">
                 Conectamos produtores a profissionais certificados para consultas técnicas, manejo e tomada de decisão.
               </p>
-              <div className="flex flex-wrap gap-4 text-sm">
-                <span className="inline-flex items-center gap-1.5 text-white">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
+              <div className="flex flex-wrap gap-4 text-sm text-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
                   Profissionais Verificados
                 </span>
-                <span className="inline-flex items-center gap-1.5 text-white">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
                   Atendimento Rápido
                 </span>
-                <span className="inline-flex items-center gap-1.5 text-white">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
+                <span className="inline-flex items-center gap-1.5">
+                  <CheckCircle className="h-4 w-4 shrink-0 text-green-500" />
                   Especialistas por Região
                 </span>
               </div>
@@ -418,115 +385,170 @@ export function AgronomosParceiros() {
         </CardBody>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {loadingLista && (
-          <Card className="md:col-span-2 xl:col-span-3">
-            <CardBody>
-              <p className="text-sm text-muted-foreground">Carregando agrônomos parceiros...</p>
-            </CardBody>
-          </Card>
-        )}
-        {!loadingLista && agronomosPaginados.length === 0 && (
-          <Card className="md:col-span-2 xl:col-span-3">
-            <CardBody>
-              <p className="text-sm text-muted-foreground">Nenhum agrônomo parceiro encontrado.</p>
-            </CardBody>
-          </Card>
-        )}
-        {agronomosPaginados.map((agronomo) => (
-          <Card
-            key={agronomo.id}
-            className="cursor-pointer transition-all duration-200 hover:shadow-lg"
-            onClick={() => abrirDetalhes(agronomo)}
-          >
-            <CardBody className="space-y-4">
-              <div className="flex items-start gap-4">
-                <div className="relative">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-dark text-white">
-                    <User className="h-8 w-8" />
-                  </div>
-                  <span className="absolute -bottom-1 -right-1 inline-flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-green-500">
-                    <CheckCircle className="h-3.5 w-3.5 text-white" />
-                  </span>
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-lg">{agronomo.nome}</p>
-                  <p className="text-sm text-muted-foreground">{agronomo.especialidade}</p>
-                  <p className="mt-1 inline-flex items-center gap-1 text-sm text-severity-medium">
-                    <Star className="h-4 w-4 fill-current" />
-                    {agronomo.totalAvaliacoes > 0 ? (
-                      <>
-                        {agronomo.avaliacao.toFixed(1)} ({agronomo.totalAvaliacoes} aval.)
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground font-normal">Sem avaliações ainda</span>
-                    )}
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-2 text-sm text-muted-foreground">
-                <p className="inline-flex items-center gap-2">
-                  <MapPin className="h-4 w-4" />
-                  {`${agronomo.municipio} - ${agronomo.uf}`}
-                </p>
-                <p className="inline-flex items-center gap-2">
-                  <Briefcase className="h-4 w-4" />
-                  {agronomo.crea}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg bg-muted/50 p-3 text-center">
-                  <p className="text-2xl" style={{ fontFamily: 'var(--font-serif)' }}>
-                    {agronomo.totalAtendimentos}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Atendimentos</p>
-                </div>
-                <div className="rounded-lg bg-muted/50 p-3 text-center">
-                  <p className="text-2xl" style={{ fontFamily: 'var(--font-serif)' }}>
-                    {agronomo.tempoResposta}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Resposta média</p>
-                </div>
-              </div>
-
-              <Button type="button" className="w-full" onClick={() => abrirDetalhes(agronomo)}>
-                Ver Perfil
-              </Button>
-            </CardBody>
-          </Card>
-        ))}
-      </div>
-
       <Card>
-        <CardBody className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <p className="text-sm text-muted-foreground">
-            {`Mostrando ${agronomosFiltrados.length === 0 ? 0 : inicio + 1}-${Math.min(
-              fim,
-              agronomosFiltrados.length
-            )} de ${agronomosFiltrados.length} agrônomos`}
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => setPaginaAtual((prev) => Math.max(1, prev - 1))}
-              disabled={paginaCorrigida <= 1}
-            >
-              <ChevronLeft className="h-4 w-4" />
-              Anterior
-            </Button>
-            <span className="text-sm text-muted-foreground">{`Página ${paginaCorrigida} de ${totalPaginas}`}</span>
-            <Button
-              variant="secondary"
-              onClick={() => setPaginaAtual((prev) => Math.min(totalPaginas, prev + 1))}
-              disabled={paginaCorrigida >= totalPaginas}
-            >
-              Próxima
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </CardBody>
+        <div className="p-5">
+          {loadingLista && (
+            <p className="text-sm text-muted-foreground">Carregando agrônomos parceiros...</p>
+          )}
+          {!loadingLista && agronomosFiltrados.length === 0 && (
+            <p className="text-sm text-muted-foreground">Nenhum agrônomo parceiro encontrado.</p>
+          )}
+          {!loadingLista && agronomosFiltrados.length > 0 && (
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+              {agronomosPaginados.map((agronomo) => (
+                <Card
+                  key={agronomo.id}
+                  className="cursor-pointer transition-all duration-200 hover:shadow-lg"
+                  onClick={() => abrirDetalhes(agronomo)}
+                >
+                  <CardBody className="space-y-4">
+                    <div className="flex items-start gap-4">
+                      <div className="relative">
+                        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-dark text-white">
+                          <User className="h-8 w-8" />
+                        </div>
+                        <span className="absolute -bottom-1 -right-1 inline-flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-green-500">
+                          <CheckCircle className="h-3.5 w-3.5 text-white" />
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-lg">{agronomo.nome}</p>
+                        <p className="text-sm text-muted-foreground">{agronomo.especialidade}</p>
+                        <p className="mt-1 inline-flex items-center gap-1 text-sm text-severity-medium">
+                          <Star className="h-4 w-4 fill-current" />
+                          {agronomo.totalAvaliacoes > 0 ? (
+                            <>
+                              {agronomo.avaliacao.toFixed(1)} ({agronomo.totalAvaliacoes} aval.)
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground font-normal">Sem avaliações ainda</span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <MapPin className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                        <span className="min-w-0 break-words leading-snug">
+                          {formatMunicipioComUf(agronomo.municipio, agronomo.uf)}
+                        </span>
+                      </div>
+                      <div className="flex items-start gap-2 min-w-0">
+                        <Briefcase className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                        <span className="min-w-0 break-words leading-snug">{agronomo.crea}</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-lg bg-muted/50 p-3 text-center">
+                        <p className="text-2xl" style={{ fontFamily: 'var(--font-serif)' }}>
+                          {agronomo.totalAtendimentos}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Atendimentos</p>
+                      </div>
+                      <div className="rounded-lg bg-muted/50 p-3 text-center">
+                        <p className="text-2xl" style={{ fontFamily: 'var(--font-serif)' }}>
+                          {agronomo.tempoResposta}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Resposta média</p>
+                      </div>
+                    </div>
+
+                    <Button type="button" className="w-full" onClick={() => abrirDetalhes(agronomo)}>
+                      Ver Perfil
+                    </Button>
+                  </CardBody>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {!loadingLista &&
+          agronomosFiltrados.length > 0 &&
+          (() => {
+            const WINDOW = 4;
+            const half = Math.floor(WINDOW / 2);
+            let start = Math.max(1, paginaCorrigida - half);
+            const end = Math.min(totalPaginas, start + WINDOW - 1);
+            if (end - start < WINDOW - 1) start = Math.max(1, end - WINDOW + 1);
+            const pageNums = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+
+            return (
+              <div className="px-6 py-3 border-t border-border flex items-center justify-between text-sm text-muted-foreground">
+                <span>
+                  {(paginaCorrigida - 1) * PAGE_SIZE + 1}–
+                  {Math.min(paginaCorrigida * PAGE_SIZE, agronomosFiltrados.length)} de {agronomosFiltrados.length}{' '}
+                  agrônomos
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPaginaAtual((p) => Math.max(1, p - 1))}
+                    disabled={paginaCorrigida === 1}
+                    className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    Anterior
+                  </button>
+
+                  {start > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setPaginaAtual(1)}
+                        className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground transition-colors"
+                      >
+                        1
+                      </button>
+                      {start > 2 && <span className="px-1 text-muted-foreground select-none">…</span>}
+                    </>
+                  )}
+
+                  {pageNums.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setPaginaAtual(n)}
+                      className={`w-8 h-8 rounded text-sm font-medium transition-colors ${
+                        n === paginaCorrigida
+                          ? 'bg-primary text-primary-foreground'
+                          : 'hover:bg-muted text-muted-foreground'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+
+                  {end < totalPaginas && (
+                    <>
+                      {end < totalPaginas - 1 && (
+                        <span className="px-1 text-muted-foreground select-none">…</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setPaginaAtual(totalPaginas)}
+                        className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground transition-colors"
+                      >
+                        {totalPaginas}
+                      </button>
+                    </>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setPaginaAtual((p) => Math.min(totalPaginas, p + 1))}
+                    disabled={paginaCorrigida === totalPaginas}
+                    className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Próxima
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
       </Card>
 
       {agronomoSelecionado && (
@@ -587,22 +609,25 @@ export function AgronomosParceiros() {
                       <span className="text-muted-foreground font-normal">Sem avaliações ainda</span>
                     )}
                   </p>
-                  <p className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <MapPin className="h-4 w-4" />
-                    {`${agronomoSelecionado.municipio} - ${agronomoSelecionado.uf}`}
-                  </p>
+                  <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <MapPin className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                      <span className="min-w-0 break-words leading-snug">
+                        {formatMunicipioComUf(agronomoSelecionado.municipio, agronomoSelecionado.uf)}
+                      </span>
+                    </div>
+                    <div className="flex items-start gap-2 min-w-0">
+                      <Briefcase className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                      <span className="min-w-0 break-words font-medium text-foreground leading-snug">
+                        {agronomoSelecionado.crea}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="rounded-xl bg-muted/50 p-4">
-                <p className="mb-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Briefcase className="h-4 w-4" />
-                  CREA
-                </p>
-                <p className="font-medium">{agronomoSelecionado.crea}</p>
-              </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div className="rounded-xl bg-muted/50 p-4">
                 <p className="mb-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Mail className="h-4 w-4" />
