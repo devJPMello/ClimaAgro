@@ -38,6 +38,57 @@ function buildThreadContext(records = []) {
     .join('\n\n');
 }
 
+const CONCIERGE_FOOTER = [
+  '---',
+  'Ao final da sua resposta ao produtor, acrescente OBRIGATORIAMENTE uma linha adicional, sozinha, exatamente neste formato (JSON minificado, sem crases ou markdown):',
+  '[META]{"escalate":false,"reason":"","specialtyHint":""}',
+  'Regras: use "escalate": true quando: (1) houver incerteza relevante no diagnóstico; (2) risco de perda da lavoura; (3) for necessário laudo CREA, receituário de defensivo ou orientação presencial; (4) o caso exigir confirmação de laboratório ou visita; (5) o produtor pedir explicitamente falar com agrônomo, especialista ou atendimento humano. Em "reason" resuma em uma frase o motivo. Em "specialtyHint" indique a área (ex.: "Pragas", "Fitossanidade", "Solos", "Irrigação").',
+  'Exemplo: [META]{"escalate":true,"reason":"Sintomas ambíguos; risco de lagarta em soja.","specialtyHint":"Pragas"}',
+].join('\n');
+
+function normalizeConcierge(parsed) {
+  return {
+    escalate: Boolean(parsed && parsed.escalate),
+    reason: String((parsed && parsed.reason) || '').slice(0, 800),
+    specialtyHint: String((parsed && parsed.specialtyHint) || '').slice(0, 160),
+  };
+}
+
+/**
+ * Remove a linha [META]{...} do final e devolve metadados para triagem humana.
+ */
+function splitConciergeMeta(raw) {
+  const empty = { escalate: false, reason: '', specialtyHint: '' };
+  if (!raw || typeof raw !== 'string') {
+    return { displayText: '', concierge: empty };
+  }
+  const trimmed = raw.trimEnd();
+  const lineRe = /\n\[META\](\{[\s\S]*\})\s*$/;
+  const m1 = trimmed.match(lineRe);
+  if (m1) {
+    try {
+      const parsed = JSON.parse(m1[1]);
+      const displayText = trimmed.slice(0, m1.index).trimEnd();
+      return { displayText, concierge: normalizeConcierge(parsed) };
+    } catch {
+      return { displayText: trimmed, concierge: empty };
+    }
+  }
+  const lines = trimmed.split('\n');
+  const last = lines[lines.length - 1];
+  if (last && last.trim().startsWith('[META]')) {
+    try {
+      const jsonStr = last.replace(/^\[META\]/, '').trim();
+      const parsed = JSON.parse(jsonStr);
+      const displayText = lines.slice(0, -1).join('\n').trimEnd();
+      return { displayText, concierge: normalizeConcierge(parsed) };
+    } catch {
+      return { displayText: trimmed, concierge: empty };
+    }
+  }
+  return { displayText: trimmed, concierge: empty };
+}
+
 function extractGeminiText(responseData) {
   return responseData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
@@ -182,6 +233,8 @@ router.post(
         'Responda sempre em português do Brasil, de forma objetiva e prática, como um agrônomo experiente falando com um produtor rural.',
         'Use formatação Markdown para organizar suas respostas (títulos, listas, negrito).',
         'Quando pertinente, embase suas recomendações em referências técnicas brasileiras (Embrapa, IAC, CREA, MAPA).',
+        'Quando perceber que o caso foge do que pode ser resolvido com segurança apenas por chat (incerteza, laudo formal, receituário agronômico, urgência fitossanitária), reconheça o limite e indique apoio humano — isso será sinalizado ao sistema na linha [META] final.',
+        CONCIERGE_FOOTER,
       ].join('\n');
 
       const prompt = [
@@ -265,6 +318,8 @@ router.post(
           '5. **Monitoramento**: o que observar nas próximas semanas.',
           '',
           '**Observação**: Se a qualidade da imagem não permitir diagnóstico preciso de algum item, informe claramente e oriente o produtor a enviar fotos mais próximas, em boa iluminação, de folhas afetadas e saudáveis para comparação.',
+          '',
+          CONCIERGE_FOOTER,
         ].join('\n'));
       }
 
@@ -272,6 +327,11 @@ router.post(
       const responseText = imageParts.length > 0 || files.length > 0 ? await callGeminiParts(parts) : await callGemini(prompt);
       if (!responseText) {
         return res.status(502).json({ message: 'Resposta vazia do modelo.' });
+      }
+
+      const { displayText, concierge } = splitConciergeMeta(responseText);
+      if (!displayText.trim()) {
+        return res.status(502).json({ message: 'Resposta inválida do modelo após triagem.' });
       }
 
       const fileNames = files.map((file) => file.originalname).filter(Boolean);
@@ -283,7 +343,7 @@ router.post(
       await ChatHistory.create({
         threadId,
         message: persistedMessage,
-        response: responseText,
+        response: displayText,
         status: 'completed',
         isActive: true,
         isFavorite: threadIsFavorite,
@@ -291,7 +351,8 @@ router.post(
 
       return res.json({
         threadId,
-        response: responseText,
+        response: displayText,
+        concierge,
       });
     } catch (error) {
       const status = error.statusCode || error.response?.status;
