@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
+import { useUser } from '@clerk/clerk-react';
 import {
   Award,
   Briefcase,
@@ -22,6 +24,7 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { cadastrarAgronomoParceiro, listarAgronomosParceiros } from '../../lib/api/agronomosParceirosApi';
+import { escalateToSpecialist } from '../../lib/api/hybridChatApi';
 import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 
 const UFS_BR = [
@@ -91,11 +94,14 @@ interface Agronomo {
 }
 
 export function AgronomosParceiros() {
+  const navigate = useNavigate();
+  const { user } = useUser();
   const [agronomos, setAgronomos] = useState<Agronomo[]>([]);
   const [loadingLista, setLoadingLista] = useState(false);
   const [agronomoSelecionado, setAgronomoSelecionado] = useState<Agronomo | null>(null);
   const [modalPerfilAberto, setModalPerfilAberto] = useState(false);
   const [modalCadastroAberto, setModalCadastroAberto] = useState(false);
+  const [enviandoEspecialista, setEnviandoEspecialista] = useState(false);
   const [busca, setBusca] = useState('');
   const [estadoSelecionado, setEstadoSelecionado] = useState('todos');
   const [municipioSelecionado, setMunicipioSelecionado] = useState('todos');
@@ -141,7 +147,8 @@ export function AgronomosParceiros() {
           uf: item.uf || '--',
           crea: item.crea || 'Não informado',
           especialidade: item.especialidade || 'Especialidade não informada',
-          avaliacao: typeof item.avaliacao === 'number' ? item.avaliacao : 5,
+          avaliacao:
+            typeof item.avaliacao === 'number' && !Number.isNaN(item.avaliacao) ? item.avaliacao : 0,
           totalAvaliacoes: typeof item.totalAvaliacoes === 'number' ? item.totalAvaliacoes : 0,
           totalAtendimentos: typeof item.totalAtendimentos === 'number' ? item.totalAtendimentos : 0,
           tempoResposta: item.tempoResposta || 'N/A',
@@ -219,6 +226,49 @@ export function AgronomosParceiros() {
   function abrirWhatsapp() {
     if (!agronomoSelecionado) return;
     window.open(`https://wa.me/${agronomoSelecionado.whatsapp}`, '_blank', 'noopener,noreferrer');
+  }
+
+  async function enviarParaEspecialista() {
+    if (!agronomoSelecionado) return;
+    if (!user?.id) {
+      toast.error('Faça login para enviar o histórico ao especialista.');
+      return;
+    }
+    let threadId: string | null = null;
+    try {
+      threadId = sessionStorage.getItem('climaagro.iagro.activeThreadId');
+    } catch {
+      threadId = null;
+    }
+    if (!threadId) {
+      toast.error('Abra o IAgro, converse com a IA e volte aqui para enviar o histórico.');
+      return;
+    }
+    if (!agronomoSelecionado.whatsapp?.trim()) {
+      toast.error('Este agrônomo não possui WhatsApp cadastrado.');
+      return;
+    }
+    setEnviandoEspecialista(true);
+    try {
+      await escalateToSpecialist(
+        {
+          threadId,
+          whatsappAgronomo: agronomoSelecionado.whatsapp.trim(),
+          agronomoParceiroId: agronomoSelecionado.id,
+          produtorNome: user.fullName || user.firstName || undefined,
+          specialtyFilter: agronomoSelecionado.especialidade,
+        },
+        user.id
+      );
+      toast.success('Histórico preparado. Abrindo Minhas conversas.');
+      setModalPerfilAberto(false);
+      navigate(`/minhas-conversas?thread=${encodeURIComponent(threadId)}`);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Não foi possível preparar o envio.';
+      toast.error(msg);
+    } finally {
+      setEnviandoEspecialista(false);
+    }
   }
 
   function cadastrarAgronomo(event: FormEvent<HTMLFormElement>) {
@@ -404,7 +454,13 @@ export function AgronomosParceiros() {
                   <p className="text-sm text-muted-foreground">{agronomo.especialidade}</p>
                   <p className="mt-1 inline-flex items-center gap-1 text-sm text-severity-medium">
                     <Star className="h-4 w-4 fill-current" />
-                    {agronomo.avaliacao.toFixed(1)} ({agronomo.totalAvaliacoes})
+                    {agronomo.totalAvaliacoes > 0 ? (
+                      <>
+                        {agronomo.avaliacao.toFixed(1)} ({agronomo.totalAvaliacoes} aval.)
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground font-normal">Sem avaliações ainda</span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -484,6 +540,13 @@ export function AgronomosParceiros() {
               <Button variant="secondary" onClick={() => setModalPerfilAberto(false)}>
                 Fechar
               </Button>
+              <Button
+                variant="secondary"
+                loading={enviandoEspecialista}
+                onClick={() => void enviarParaEspecialista()}
+              >
+                Enviar para Especialista
+              </Button>
               <Button onClick={abrirWhatsapp}>
                 <MessageCircle className="h-4 w-4" />
                 Conversar no WhatsApp
@@ -515,7 +578,14 @@ export function AgronomosParceiros() {
                   </div>
                   <p className="inline-flex items-center gap-1 text-sm text-severity-medium">
                     <Star className="h-4 w-4 fill-current" />
-                    {agronomoSelecionado.avaliacao.toFixed(1)} ({agronomoSelecionado.totalAvaliacoes})
+                    {agronomoSelecionado.totalAvaliacoes > 0 ? (
+                      <>
+                        {agronomoSelecionado.avaliacao.toFixed(1)} ({agronomoSelecionado.totalAvaliacoes}{' '}
+                        aval.)
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground font-normal">Sem avaliações ainda</span>
+                    )}
                   </p>
                   <p className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
                     <MapPin className="h-4 w-4" />

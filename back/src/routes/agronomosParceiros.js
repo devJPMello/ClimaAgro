@@ -10,11 +10,18 @@ function onlyDigits(value) {
 
 router.get('/', async (req, res) => {
   try {
-    const { uf, especialidade } = req.query;
+    const { uf, especialidade, ativo } = req.query;
     const where = {
       tipo: 'agronomo',
       parceiro: true,
     };
+
+    const ativoFilter = String(ativo || 'true').toLowerCase();
+    if (ativoFilter === 'true' || ativoFilter === '1' || ativoFilter === 'sim') {
+      where.parceiroAtivo = true;
+    } else if (ativoFilter === 'false' || ativoFilter === '0') {
+      where.parceiroAtivo = false;
+    }
 
     if (String(uf || '').trim()) {
       where.uf = String(uf).trim().toUpperCase();
@@ -30,17 +37,25 @@ router.get('/', async (req, res) => {
     });
 
     return res.json({
-      agronomos: rows.map((item) => ({
-        id: item.id,
-        nome: item.nome,
-        email: item.email,
-        whatsapp: item.whatsapp,
-        telefone: item.telefone,
-        municipio: item.municipio,
-        uf: item.uf,
-        crea: item.crea,
-        especialidade: item.especialidade,
-      })),
+      agronomos: rows.map((item) => {
+        const soma = item.parceiroAvaliacaoSoma ?? 0;
+        const qtd = item.parceiroAvaliacaoQtd ?? 0;
+        const avaliacao = qtd > 0 ? Math.round((soma / qtd) * 10) / 10 : null;
+        return {
+          id: item.id,
+          nome: item.nome,
+          email: item.email,
+          whatsapp: item.whatsapp,
+          telefone: item.telefone,
+          municipio: item.municipio,
+          uf: item.uf,
+          crea: item.crea,
+          especialidade: item.especialidade,
+          parceiroAtivo: Boolean(item.parceiroAtivo),
+          avaliacao,
+          totalAvaliacoes: qtd,
+        };
+      }),
     });
   } catch (error) {
     return res.status(500).json({ message: 'Falha ao listar agrônomos parceiros.' });
@@ -78,6 +93,7 @@ router.post('/cadastro', async (req, res) => {
         especialidade,
         crea,
         parceiro: true,
+        parceiroAtivo: true,
         whatsapp,
       },
     });
@@ -91,6 +107,7 @@ router.post('/cadastro', async (req, res) => {
         especialidade,
         crea,
         parceiro: true,
+        parceiroAtivo: true,
         whatsapp,
       });
     }
