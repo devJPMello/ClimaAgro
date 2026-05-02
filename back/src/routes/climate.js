@@ -291,7 +291,7 @@ router.get('/series', [
   query('start').exists().isISO8601(),
   query('end').exists().isISO8601(),
   query('variavel').exists().isString(),
-  query('limit').optional().isInt({ min: 1, max: 1000 }),
+  query('limit').optional().isInt({ min: 1, max: 20000 }),
   query('offset').optional().isInt({ min: 0 }),
   validateRequest
 ], async (req, res) => {
@@ -330,12 +330,26 @@ router.get('/series', [
       where[Op.and] = [sequelize.where(fn('COALESCE', col('ClimateData.uf'), col('geoData.state')), uf)];
     }
 
+    /**
+     * Brasil (ALL): uma média nacional por dia. Agrupar também por UF explodia o número de linhas
+     * (dia × estados) e o `limit` 1000 truncava o intervalo — a UI de séries temporais ficava vazia/incompleta.
+     * Por UF: uma média por (dia, estado), como antes.
+     */
+    const groupBy = uf === 'ALL' ? [col('ClimateData.date')] : [col('ClimateData.date'), geoStateExpr];
+    const attributes =
+      uf === 'ALL'
+        ? [
+            [col('ClimateData.date'), 'date'],
+            [fn('AVG', col(`ClimateData.${variableColumn}`)), 'value']
+          ]
+        : [
+            'date',
+            [geoStateExpr, 'uf'],
+            [fn('AVG', col(`ClimateData.${variableColumn}`)), 'value']
+          ];
+
     const rows = await ClimateData.findAll({
-      attributes: [
-        'date',
-        [geoStateExpr, 'uf'],
-        [fn('AVG', col(`ClimateData.${variableColumn}`)), 'value']
-      ],
+      attributes,
       include: [{
         model: GeoData,
         as: 'geoData',
@@ -344,10 +358,11 @@ router.get('/series', [
         required: true
       }],
       where,
-      group: ['date', geoStateExpr],
+      group: groupBy,
       order: [['date', 'ASC']],
       limit,
       offset,
+      subQuery: false,
       raw: true
     });
 
@@ -371,7 +386,7 @@ router.get('/series', [
       },
       serieTemporal: rows.map((row) => ({
         date: row.date,
-        uf: String(row.uf || '').toUpperCase(),
+        uf: uf === 'ALL' ? 'ALL' : String(row.uf || '').toUpperCase(),
         value: row.value != null ? Number(row.value) : null
       })),
       estatisticas: {
