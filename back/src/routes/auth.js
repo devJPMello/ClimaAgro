@@ -14,7 +14,18 @@ const generateToken = (id) => {
 
 router.post('/register', validateRegister, async (req, res) => {
   try {
-    const { name, email, password, phone, favoriteMunicipality } = req.body;
+    const {
+      name,
+      email,
+      password,
+      phone,
+      favoriteMunicipality,
+      profileType = 'standard',
+      creaRegistrationNumber,
+      creaUf,
+      cpf,
+      creaDocumentStorageKey
+    } = req.body;
 
     const existingUser = await User.findOne({ where: { email } });
     if (existingUser) {
@@ -24,19 +35,29 @@ router.post('/register', validateRegister, async (req, res) => {
       });
     }
 
+    const isAgronomist = profileType === 'agronomist';
+
     const user = await User.create({
       name,
       email,
       password,
-      phone,
-      favoriteMunicipality
+      phone: phone || null,
+      favoriteMunicipality,
+      role: isAgronomist ? 'agronomist' : 'user',
+      agronomistApprovalStatus: isAgronomist ? 'pending' : null,
+      creaRegistrationNumber: isAgronomist ? creaRegistrationNumber : null,
+      creaUf: isAgronomist && creaUf ? String(creaUf).trim().toUpperCase() : null,
+      cpf: isAgronomist ? cpf : null,
+      creaDocumentStorageKey: isAgronomist ? creaDocumentStorageKey : null
     });
 
     const token = generateToken(user.id);
 
     res.status(201).json({
       success: true,
-      message: 'Usuário criado com sucesso',
+      message: isAgronomist
+        ? 'Cadastro recebido. Seu perfil de agrônomo está aguardando aprovação.'
+        : 'Usuário criado com sucesso',
       data: {
         user: {
           id: user.id,
@@ -45,7 +66,10 @@ router.post('/register', validateRegister, async (req, res) => {
           phone: user.phone,
           role: user.role,
           favoriteMunicipality: user.favoriteMunicipality,
-          registrationDate: user.createdAt
+          registrationDate: user.createdAt,
+          agronomistApprovalStatus: user.agronomistApprovalStatus,
+          creaUf: user.creaUf,
+          creaRegistrationNumber: user.creaRegistrationNumber
         },
         token
       }
@@ -102,7 +126,8 @@ router.post('/login', validateLogin, async (req, res) => {
           role: user.role,
           favoriteMunicipality: user.favoriteMunicipality,
           lastAccess: user.lastAccess,
-          exportedReports: user.exportedReports
+          exportedReports: user.exportedReports,
+          agronomistApprovalStatus: user.agronomistApprovalStatus
         },
         token
       }
@@ -131,7 +156,8 @@ router.get('/me', auth, async (req, res) => {
           notificationPreference: req.user.notificationPreference,
           lastAccess: req.user.lastAccess,
           registrationDate: req.user.createdAt,
-          exportedReports: req.user.exportedReports
+          exportedReports: req.user.exportedReports,
+          agronomistApprovalStatus: req.user.agronomistApprovalStatus
         }
       }
     });

@@ -16,8 +16,8 @@ const handleValidationErrors = (req, res, next) => {
 const validateRegister = [
   body('name')
     .trim()
-    .isLength({ min: 2, max: 50 })
-    .withMessage('Nome deve ter entre 2 e 50 caracteres'),
+    .isLength({ min: 2, max: 120 })
+    .withMessage('Nome deve ter entre 2 e 120 caracteres'),
   body('email')
     .isEmail()
     .normalizeEmail()
@@ -26,9 +26,41 @@ const validateRegister = [
     .isLength({ min: 6 })
     .withMessage('Senha deve ter pelo menos 6 caracteres'),
   body('phone')
-    .optional()
+    .if((value, { req }) => req.body.profileType === 'agronomist')
+    .trim()
+    .notEmpty()
+    .withMessage('Telefone é obrigatório para agrônomos')
     .isMobilePhone('pt-BR')
     .withMessage('Telefone inválido'),
+  body('phone')
+    .if((value, { req }) => req.body.profileType !== 'agronomist')
+    .optional({ values: 'falsy' })
+    .isMobilePhone('pt-BR')
+    .withMessage('Telefone inválido'),
+  body('profileType')
+    .optional()
+    .isIn(['standard', 'agronomist'])
+    .withMessage('Tipo de perfil inválido'),
+  body('creaRegistrationNumber')
+    .if(body('profileType').equals('agronomist'))
+    .trim()
+    .notEmpty()
+    .withMessage('Número do registro CREA é obrigatório'),
+  body('creaUf')
+    .if(body('profileType').equals('agronomist'))
+    .trim()
+    .isLength({ min: 2, max: 2 })
+    .matches(/^[A-Z]{2}$/i)
+    .withMessage('UF do CREA inválida'),
+  body('cpf')
+    .if(body('profileType').equals('agronomist'))
+    .matches(/^\d{3}\.\d{3}\.\d{3}-\d{2}$/)
+    .withMessage('CPF inválido'),
+  body('creaDocumentStorageKey')
+    .if(body('profileType').equals('agronomist'))
+    .trim()
+    .matches(/^crea-documents\/[a-zA-Z0-9_.\-]+$/)
+    .withMessage('Identificador do documento CREA inválido'),
   handleValidationErrors
 ];
 

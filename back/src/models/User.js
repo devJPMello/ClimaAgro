@@ -9,15 +9,15 @@ const User = sequelize.define('User', {
     primaryKey: true
   },
   name: {
-    type: DataTypes.STRING(50),
+    type: DataTypes.STRING(120),
     allowNull: false,
     validate: {
       notEmpty: {
         msg: 'Nome é obrigatório'
       },
       len: {
-        args: [2, 50],
-        msg: 'Nome deve ter entre 2 e 50 caracteres'
+        args: [2, 120],
+        msg: 'Nome deve ter entre 2 e 120 caracteres'
       }
     }
   },
@@ -54,8 +54,29 @@ const User = sequelize.define('User', {
     }
   },
   role: {
-    type: DataTypes.ENUM('user', 'admin'),
+    type: DataTypes.ENUM('user', 'admin', 'agronomist'),
     defaultValue: 'user'
+  },
+  agronomistApprovalStatus: {
+    type: DataTypes.ENUM('pending', 'approved', 'rejected'),
+    allowNull: true
+  },
+  creaRegistrationNumber: {
+    type: DataTypes.STRING(32),
+    allowNull: true
+  },
+  creaUf: {
+    type: DataTypes.STRING(2),
+    allowNull: true
+  },
+  cpf: {
+    type: DataTypes.STRING(14),
+    allowNull: true
+  },
+  /** Chave relativa em disco (ex.: crea-documents/uuid.jpg) para auditoria. */
+  creaDocumentStorageKey: {
+    type: DataTypes.STRING(255),
+    allowNull: true
   },
   favoriteMunicipality: {
     type: DataTypes.STRING(100)
