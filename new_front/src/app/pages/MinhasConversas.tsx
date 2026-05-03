@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -53,6 +53,7 @@ export function MinhasConversas() {
   const [encerrando, setEncerrando] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const threadIdRef = useRef<string | null>(null);
+  const selectedRef = useRef<HybridConversationListItem | null>(null);
 
   const humanHandoff =
     Boolean(hybridConversation?.intervencaoHumana && hybridConversation?.atendimentoAtivo);
@@ -77,6 +78,7 @@ export function MinhasConversas() {
     async (item: HybridConversationListItem) => {
       if (!user?.id) return;
       setSelected(item);
+      selectedRef.current = item;
       threadIdRef.current = item.iaThreadId;
       setLoadingChat(true);
       try {
@@ -135,8 +137,25 @@ export function MinhasConversas() {
     if (!user?.id) return;
     const base = resolveSocketBaseUrl();
     const socket: Socket = io(base, { path: '/socket.io', transports: ['websocket', 'polling'] });
-    socket.on('connect', () => socket.emit('join:produtor', user.id));
+    let isFirstConnect = true;
+    socket.on('connect', () => {
+      console.log('[Socket.IO] Conectado, entrando na sala produtor:', user.id);
+      socket.emit('join:produtor', user.id);
+      if (!isFirstConnect) {
+        const currentSelected = selectedRef.current;
+        if (currentSelected && user.id) {
+          getHybridTimeline(currentSelected.iaThreadId, user.id)
+            .then((r) => setMessages(r.messages || []))
+            .catch(() => {/* silencioso */});
+        }
+      }
+      isFirstConnect = false;
+    });
+    socket.on('disconnect', (reason) => {
+      console.warn('[Socket.IO] Desconectado:', reason);
+    });
     socket.on('hybrid:message', (payload: { threadId?: string; message?: UnifiedChatMessage }) => {
+      console.log('[Socket.IO] hybrid:message recebido:', payload?.message?.id, payload?.threadId);
       if (!payload?.message) return;
       const active = threadIdRef.current;
       if (payload.threadId && active && payload.threadId !== active) return;
@@ -149,6 +168,25 @@ export function MinhasConversas() {
       socket.disconnect();
     };
   }, [user?.id]);
+
+  // Polling de backup: recarrega o histórico a cada 5s enquanto há conversa ativa aberta.
+  // Garante que mensagens apareçam mesmo se o Socket.IO não entregar o evento.
+  useEffect(() => {
+    if (!selected || !user?.id) return;
+    const interval = setInterval(async () => {
+      const cur = selectedRef.current;
+      if (!cur || !user?.id) return;
+      try {
+        const r = await getHybridTimeline(cur.iaThreadId, user.id);
+        setMessages((prev) => {
+          const newMsgs = (r.messages || []).filter((m) => !prev.some((p) => p.id === m.id));
+          if (newMsgs.length === 0) return prev;
+          return [...prev, ...newMsgs];
+        });
+      } catch {/* silencioso */}
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [selected, user?.id]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -330,8 +368,7 @@ export function MinhasConversas() {
 
                 {humanHandoff && (
                   <div className="rounded-lg border border-green-600/40 bg-green-500/10 px-3 py-2 text-xs text-foreground shrink-0">
-                    Mensagens aqui seguem para o WhatsApp do agrônomo quando o servidor Twilio estiver
-                    configurado.
+                    Atendimento humano ativo. Mensagens enviadas aqui chegam ao WhatsApp do agrônomo e as respostas aparecem abaixo em tempo real.
                   </div>
                 )}
 
@@ -353,6 +390,30 @@ export function MinhasConversas() {
                           ? displayUserMessageText(message.text)
                           : message.text;
                       const alignEnd = message.sender === 'user';
+                      const mdComponents = {
+                        h1: ({ children }: { children?: React.ReactNode }) => <h1 className="text-base font-semibold mt-3 mb-1">{children}</h1>,
+                        h2: ({ children }: { children?: React.ReactNode }) => <h2 className="text-sm font-semibold mt-3 mb-1">{children}</h2>,
+                        h3: ({ children }: { children?: React.ReactNode }) => <h3 className="text-sm font-medium mt-2 mb-1">{children}</h3>,
+                        p: ({ children }: { children?: React.ReactNode }) => <p className="mb-2 leading-relaxed">{children}</p>,
+                        ul: ({ children }: { children?: React.ReactNode }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
+                        ol: ({ children }: { children?: React.ReactNode }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
+                        li: ({ children }: { children?: React.ReactNode }) => <li className="leading-relaxed">{children}</li>,
+                        strong: ({ children }: { children?: React.ReactNode }) => <strong className="font-semibold text-foreground">{children}</strong>,
+                        em: ({ children }: { children?: React.ReactNode }) => <em className="italic">{children}</em>,
+                        code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
+                          const isBlock = className?.includes('language-');
+                          return isBlock
+                            ? <code className="block bg-muted rounded-md px-3 py-2 text-xs font-mono overflow-x-auto my-2">{children}</code>
+                            : <code className="bg-muted rounded px-1 py-0.5 text-xs font-mono">{children}</code>;
+                        },
+                        pre: ({ children }: { children?: React.ReactNode }) => <pre className="bg-muted rounded-md p-3 text-xs overflow-x-auto my-2 font-mono">{children}</pre>,
+                        blockquote: ({ children }: { children?: React.ReactNode }) => <blockquote className="border-l-2 border-primary/40 pl-3 text-muted-foreground italic my-2">{children}</blockquote>,
+                        hr: () => <hr className="border-border my-3" />,
+                        a: ({ href, children }: { href?: string; children?: React.ReactNode }) => <a href={href} className="text-primary underline underline-offset-2" target="_blank" rel="noopener noreferrer">{children}</a>,
+                        table: ({ children }: { children?: React.ReactNode }) => <div className="overflow-x-auto my-2"><table className="w-full text-xs border-collapse">{children}</table></div>,
+                        th: ({ children }: { children?: React.ReactNode }) => <th className="border border-border bg-muted px-2 py-1 text-left font-semibold">{children}</th>,
+                        td: ({ children }: { children?: React.ReactNode }) => <td className="border border-border px-2 py-1">{children}</td>,
+                      };
 
                       return (
                         <div
@@ -364,8 +425,8 @@ export function MinhasConversas() {
                               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary">
                                 <Cloud className="h-4 w-4 text-white" />
                               </div>
-                              <div className="w-fit max-w-full break-words rounded-lg bg-card border border-border px-3 py-2 text-sm prose prose-sm prose-neutral max-w-none dark:prose-invert [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.text}</ReactMarkdown>
+                              <div className="w-fit max-w-full break-words rounded-lg bg-card border border-border px-3 py-2 text-sm text-card-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{message.text}</ReactMarkdown>
                               </div>
                             </div>
                           ) : message.sender === 'agronomo' ? (
@@ -383,8 +444,8 @@ export function MinhasConversas() {
                                     />
                                   </div>
                                 ) : null}
-                                <div className="w-fit rounded-lg border border-green-700/35 bg-green-600/10 px-3 py-2 text-sm whitespace-pre-wrap">
-                                  {message.text}
+                                <div className="w-fit max-w-full break-words rounded-lg border border-green-700/35 bg-green-600/10 px-3 py-2 text-sm text-foreground [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{message.text}</ReactMarkdown>
                                 </div>
                               </div>
                             </div>
