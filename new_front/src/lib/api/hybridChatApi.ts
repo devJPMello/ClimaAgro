@@ -81,6 +81,12 @@ export type EscalatePayload = {
   autoPickBySpecialty?: boolean;
 };
 
+export type WhatsAppDeliveryResult = {
+  sent?: boolean;
+  reason?: string;
+  detail?: string;
+};
+
 export async function escalateToSpecialist(payload: EscalatePayload, clerkUserId: string) {
   return httpClient.post<{
     success: boolean;
@@ -91,6 +97,7 @@ export async function escalateToSpecialist(payload: EscalatePayload, clerkUserId
     atendimentoAtivo: boolean;
     agronomoNome?: string;
     agronomoEspecialidade?: string;
+    whatsapp?: WhatsAppDeliveryResult;
   }>('hybrid-chat/escalate', payload, { headers: clerkHeaders(clerkUserId) });
 }
 
@@ -133,7 +140,7 @@ export async function sendProducerToWhatsapp(
   return httpClient.post<{
     success: boolean;
     message: { id: string; conteudo: string; createdAt: string };
-    twilio?: { sent?: boolean; reason?: string };
+    whatsapp?: WhatsAppDeliveryResult;
   }>(`hybrid-chat/conversations/${encodeURIComponent(conversationId)}/messages`, { conteudo }, {
     headers: clerkHeaders(clerkUserId),
   });

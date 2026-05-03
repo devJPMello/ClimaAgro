@@ -43,6 +43,7 @@ import {
   type UnifiedChatMessage,
 } from '../../lib/api/hybridChatApi';
 import { listarAgronomosParceiros, type AgronomoParceiroApi } from '../../lib/api/agronomosParceirosApi';
+import { notifyWhatsappDelivery } from '../../lib/whatsappNotify';
 import { HybridMediaAttachment } from '../components/chat/HybridMediaAttachment';
 import { EncerrarAtendimentoModal } from '../components/chat/EncerrarAtendimentoModal';
 import { useNavigate } from 'react-router';
@@ -353,11 +354,7 @@ export function IAgro() {
             m.id === optimisticId ? { ...m, id: response.message.id } : m
           )
         );
-        if (response.twilio && !response.twilio.sent && response.twilio.reason === 'twilio_not_configured') {
-          toast.message('Mensagem registrada', {
-            description: 'Configure Twilio no servidor para entregar no WhatsApp do agrônomo.',
-          });
-        }
+        notifyWhatsappDelivery(response.whatsapp);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Falha ao enviar mensagem.';
         toast.error(msg);
@@ -564,6 +561,7 @@ export function IAgro() {
         user.id
       );
       setConciergeSuggestion(null);
+      notifyWhatsappDelivery(out.whatsapp);
       toast.success(
         out.agronomoNome
           ? `Conversa com ${out.agronomoNome} disponível em Minhas conversas.`
@@ -645,6 +643,7 @@ export function IAgro() {
       });
       setEscalateOpen(false);
       setConciergeSuggestion(null);
+      notifyWhatsappDelivery(out.whatsapp);
       toast.success('Abrindo Minhas conversas para continuar com o especialista.');
       navigate(`/minhas-conversas?thread=${encodeURIComponent(threadId)}`);
     } catch (e) {

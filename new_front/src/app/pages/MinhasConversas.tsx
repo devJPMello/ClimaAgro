@@ -20,6 +20,7 @@ import {
   type HybridConversationListItem,
   type UnifiedChatMessage,
 } from '../../lib/api/hybridChatApi';
+import { notifyWhatsappDelivery } from '../../lib/whatsappNotify';
 
 function maskWhatsapp(digits: string) {
   const d = String(digits || '').replace(/\D/g, '');
@@ -167,14 +168,12 @@ export function MinhasConversas() {
     setLoadingSend(true);
     try {
       const response = await sendProducerToWhatsapp(hybridConversation.id, texto, user.id);
-      setMessages((prev) =>
-        prev.map((m) => (m.id === optimisticId ? { ...m, id: response.message.id } : m))
-      );
-      if (response.twilio && !response.twilio.sent && response.twilio.reason === 'twilio_not_configured') {
-        toast.message('Mensagem registrada', {
-          description: 'Configure Twilio no servidor para entregar no WhatsApp do agrônomo.',
-        });
-      }
+      setMessages((prev) => {
+        const withoutOptimistic = prev.filter((m) => m.id !== optimisticId);
+        if (withoutOptimistic.some((m) => m.id === response.message.id)) return withoutOptimistic;
+        return prev.map((m) => (m.id === optimisticId ? { ...m, id: response.message.id } : m));
+      });
+      notifyWhatsappDelivery(response.whatsapp);
       void carregarLista();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Falha ao enviar.');

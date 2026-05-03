@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { useUser } from '@clerk/clerk-react';
 import {
@@ -13,6 +13,7 @@ import {
   Phone,
   Search,
   Star,
+  Upload,
   User,
   UserPlus,
 } from 'lucide-react';
@@ -25,6 +26,8 @@ import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { cadastrarAgronomoParceiro, listarAgronomosParceiros } from '../../lib/api/agronomosParceirosApi';
 import { escalateToSpecialist } from '../../lib/api/hybridChatApi';
+import { notifyWhatsappDelivery } from '../../lib/whatsappNotify';
+import { scanCreaCarteira } from '../../lib/api/agronomistOnboardingApi';
 import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 import { formatMunicipioComUf, formatUfLabel, UF_NOME } from '../../lib/geo/brazilStatesMalha';
 
@@ -68,6 +71,9 @@ export function AgronomosParceiros() {
   const [agronomoSelecionado, setAgronomoSelecionado] = useState<Agronomo | null>(null);
   const [modalPerfilAberto, setModalPerfilAberto] = useState(false);
   const [modalCadastroAberto, setModalCadastroAberto] = useState(false);
+  const [cadastroStep, setCadastroStep] = useState<'upload' | 'form'>('upload');
+  const [scanningCrea, setScanningCrea] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [enviandoEspecialista, setEnviandoEspecialista] = useState(false);
   const [busca, setBusca] = useState('');
   const [estadoSelecionado, setEstadoSelecionado] = useState('todos');
@@ -217,7 +223,7 @@ export function AgronomosParceiros() {
     }
     setEnviandoEspecialista(true);
     try {
-      await escalateToSpecialist(
+      const out = await escalateToSpecialist(
         {
           threadId,
           whatsappAgronomo: agronomoSelecionado.whatsapp.trim(),
@@ -227,6 +233,7 @@ export function AgronomosParceiros() {
         },
         user.id
       );
+      notifyWhatsappDelivery(out.whatsapp);
       toast.success('Histórico preparado. Abrindo Minhas conversas.');
       setModalPerfilAberto(false);
       navigate(`/minhas-conversas?thread=${encodeURIComponent(threadId)}`);
@@ -235,6 +242,33 @@ export function AgronomosParceiros() {
       toast.error(msg);
     } finally {
       setEnviandoEspecialista(false);
+    }
+  }
+
+  function abrirCadastro() {
+    setCadastroStep('upload');
+    setCadastro({ nome: '', email: '', whatsapp: '', telefoneFormatado: '', municipio: '', uf: '', crea: '', especialidade: '', sobre: '' });
+    setModalCadastroAberto(true);
+  }
+
+  async function handleCreaFile(file: File) {
+    setScanningCrea(true);
+    try {
+      const res = await scanCreaCarteira(file);
+      const { extracted } = res.data;
+      setCadastro((prev) => ({
+        ...prev,
+        nome: extracted.fullName ?? prev.nome,
+        crea: extracted.creaRegistrationNumber ?? prev.crea,
+        uf: extracted.creaUf ?? prev.uf,
+      }));
+      if (res.data.warnings?.length) toast.info(res.data.warnings[0]);
+      setCadastroStep('form');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao ler a carteira. Preencha manualmente.');
+      setCadastroStep('form');
+    } finally {
+      setScanningCrea(false);
     }
   }
 
@@ -321,7 +355,7 @@ export function AgronomosParceiros() {
               </div>
             </div>
             <div className="space-y-2">
-              <Button type="button" onClick={() => setModalCadastroAberto(true)}>
+              <Button type="button" onClick={abrirCadastro}>
                 <UserPlus className="h-4 w-4" />
                 Você é Agrônomo? Cadastre-se
               </Button>
@@ -697,91 +731,137 @@ export function AgronomosParceiros() {
         title="Cadastro de Agrônomo Parceiro"
         size="xl"
       >
-        <form className="space-y-4" onSubmit={cadastrarAgronomo}>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Input
-              label="Nome"
-              value={cadastro.nome}
-              onChange={(e) => setCadastro((prev) => ({ ...prev, nome: e.target.value }))}
-              required
+        {cadastroStep === 'upload' ? (
+          <div className="flex flex-col items-center gap-6 py-6">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+              <Upload className="h-8 w-8 text-primary" />
+            </div>
+            <div className="text-center space-y-1">
+              <p className="font-medium text-foreground">Envie a foto da sua carteira do CREA</p>
+              <p className="text-sm text-muted-foreground">
+                Extraímos seus dados automaticamente. Você poderá revisar antes de salvar.
+              </p>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void handleCreaFile(file);
+              }}
             />
-            <Input
-              label="Email"
-              type="email"
-              value={cadastro.email}
-              onChange={(e) => setCadastro((prev) => ({ ...prev, email: e.target.value }))}
-              required
-            />
-            <Input
-              label="WhatsApp (somente números)"
-              value={cadastro.whatsapp}
-              onChange={(e) => setCadastro((prev) => ({ ...prev, whatsapp: e.target.value }))}
-              required
-            />
-            <Input
-              label="Telefone formatado"
-              value={cadastro.telefoneFormatado}
-              onChange={(e) => setCadastro((prev) => ({ ...prev, telefoneFormatado: e.target.value }))}
-            />
-            <Select
-              label="Município"
-              value={cadastro.municipio}
-              onChange={(e) => setCadastro((prev) => ({ ...prev, municipio: e.target.value }))}
-              options={[
-                {
-                  value: '',
-                  label: !cadastro.uf
-                    ? 'Selecione a UF primeiro'
-                    : loadingMunicipiosCadastro
-                      ? 'Carregando municípios...'
-                      : 'Selecione um município',
-                },
-                ...municipiosCadastroOptions.map((m) => ({ value: m.value, label: m.label })),
-              ]}
-              disabled={!cadastro.uf || loadingMunicipiosCadastro}
-            />
-            <Select
-              label="UF"
-              value={cadastro.uf}
-              onChange={(e) => setCadastro((prev) => ({ ...prev, uf: e.target.value }))}
-              options={[
-                { value: '', label: 'Selecione a UF' },
-                ...ufOptionsOrdenadas,
-              ]}
-            />
-            <Input
-              label="CREA"
-              value={cadastro.crea}
-              onChange={(e) => setCadastro((prev) => ({ ...prev, crea: e.target.value }))}
-              required
-            />
-            <Select
-              label="Especialidade"
-              value={cadastro.especialidade}
-              onChange={(e) => setCadastro((prev) => ({ ...prev, especialidade: e.target.value }))}
-              options={[
-                { value: '', label: 'Selecione uma especialidade' },
-                ...ESPECIALIDADES_PRINCIPAIS.map((esp) => ({ value: esp, label: esp })),
-              ]}
-              required
-            />
+            <div className="flex flex-col gap-3 w-full max-w-xs">
+              <Button
+                type="button"
+                loading={scanningCrea}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="h-4 w-4" />
+                {scanningCrea ? 'Lendo carteira...' : 'Selecionar imagem'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setCadastroStep('form')}
+              >
+                Preencher manualmente
+              </Button>
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <label className="block text-sm text-muted-foreground">Sobre</label>
-            <textarea
-              value={cadastro.sobre}
-              onChange={(e) => setCadastro((prev) => ({ ...prev, sobre: e.target.value }))}
-              rows={4}
-              className="w-full rounded-lg border border-border bg-input-background px-4 py-2.5"
-            />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <Button type="button" variant="ghost" onClick={() => setModalCadastroAberto(false)}>
-              Cancelar
-            </Button>
-            <Button type="submit">Salvar cadastro</Button>
-          </div>
-        </form>
+        ) : (
+          <form className="space-y-4" onSubmit={cadastrarAgronomo}>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Input
+                label="Nome"
+                value={cadastro.nome}
+                onChange={(e) => setCadastro((prev) => ({ ...prev, nome: e.target.value }))}
+                required
+              />
+              <Input
+                label="Email"
+                type="email"
+                value={cadastro.email}
+                onChange={(e) => setCadastro((prev) => ({ ...prev, email: e.target.value }))}
+                required
+              />
+              <Input
+                label="WhatsApp (somente números)"
+                value={cadastro.whatsapp}
+                onChange={(e) => setCadastro((prev) => ({ ...prev, whatsapp: e.target.value }))}
+                required
+              />
+              <Input
+                label="Telefone formatado"
+                value={cadastro.telefoneFormatado}
+                onChange={(e) => setCadastro((prev) => ({ ...prev, telefoneFormatado: e.target.value }))}
+              />
+              <Select
+                label="Município"
+                value={cadastro.municipio}
+                onChange={(e) => setCadastro((prev) => ({ ...prev, municipio: e.target.value }))}
+                options={[
+                  {
+                    value: '',
+                    label: !cadastro.uf
+                      ? 'Selecione a UF primeiro'
+                      : loadingMunicipiosCadastro
+                        ? 'Carregando municípios...'
+                        : 'Selecione um município',
+                  },
+                  ...municipiosCadastroOptions.map((m) => ({ value: m.value, label: m.label })),
+                ]}
+                disabled={!cadastro.uf || loadingMunicipiosCadastro}
+              />
+              <Select
+                label="UF"
+                value={cadastro.uf}
+                onChange={(e) => setCadastro((prev) => ({ ...prev, uf: e.target.value }))}
+                options={[
+                  { value: '', label: 'Selecione a UF' },
+                  ...ufOptionsOrdenadas,
+                ]}
+              />
+              <Input
+                label="CREA"
+                value={cadastro.crea}
+                onChange={(e) => setCadastro((prev) => ({ ...prev, crea: e.target.value }))}
+                required
+              />
+              <Select
+                label="Especialidade"
+                value={cadastro.especialidade}
+                onChange={(e) => setCadastro((prev) => ({ ...prev, especialidade: e.target.value }))}
+                options={[
+                  { value: '', label: 'Selecione uma especialidade' },
+                  ...ESPECIALIDADES_PRINCIPAIS.map((esp) => ({ value: esp, label: esp })),
+                ]}
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm text-muted-foreground">Sobre</label>
+              <textarea
+                value={cadastro.sobre}
+                onChange={(e) => setCadastro((prev) => ({ ...prev, sobre: e.target.value }))}
+                rows={4}
+                className="w-full rounded-lg border border-border bg-input-background px-4 py-2.5"
+              />
+            </div>
+            <div className="flex justify-between gap-3 pt-2">
+              <Button type="button" variant="ghost" onClick={() => setCadastroStep('upload')}>
+                ← Voltar
+              </Button>
+              <div className="flex gap-3">
+                <Button type="button" variant="ghost" onClick={() => setModalCadastroAberto(false)}>
+                  Cancelar
+                </Button>
+                <Button type="submit">Salvar cadastro</Button>
+              </div>
+            </div>
+          </form>
+        )}
       </Modal>
     </div>
   );

@@ -51,6 +51,11 @@ function resolveUrl(path: string): string {
   return `${base}/${p}`;
 }
 
+/** URL para `fetch` manual (ex.: multipart sem JSON). */
+export function resolveApiUrl(path: string): string {
+  return resolveUrl(path);
+}
+
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
