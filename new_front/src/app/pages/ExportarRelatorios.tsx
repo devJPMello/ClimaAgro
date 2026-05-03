@@ -3,7 +3,7 @@ import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '../compo
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
-import { FileText, Download, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { FileText, Download, Clock, CheckCircle, XCircle, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { createReportExport, listReportExports } from '../../lib/api/reportExportsApi';
 import type { ReportExportItemDto } from '../../lib/api/contracts/reportExports';
@@ -41,6 +41,15 @@ export function ExportarRelatorios() {
   const [loading, setLoading] = useState(false);
   const [loadingHistorico, setLoadingHistorico] = useState(true);
   const [exportacoes, setExportacoes] = useState<ReportExportItemDto[]>([]);
+
+  const PAGE_SIZE_HISTORICO = 4;
+  const [paginaHistorico, setPaginaHistorico] = useState(1);
+  const totalPaginasHistorico = Math.max(1, Math.ceil(exportacoes.length / PAGE_SIZE_HISTORICO));
+  const paginaCorrigidaHistorico = Math.min(paginaHistorico, totalPaginasHistorico);
+  const exportacoesPagina = exportacoes.slice(
+    (paginaCorrigidaHistorico - 1) * PAGE_SIZE_HISTORICO,
+    paginaCorrigidaHistorico * PAGE_SIZE_HISTORICO
+  );
 
   const carregarHistorico = useCallback(async () => {
     setLoadingHistorico(true);
@@ -298,7 +307,7 @@ export function ExportarRelatorios() {
                   </tr>
                 </thead>
                 <tbody>
-                  {exportacoes.map((exp) => (
+                  {exportacoesPagina.map((exp) => (
                     <tr key={exp.id} className="border-b border-border last:border-0">
                       <td className="py-4 text-sm">{exp.tipo}</td>
                       <td className="py-4 text-sm">{exp.local}</td>
@@ -349,6 +358,89 @@ export function ExportarRelatorios() {
                   ))}
                 </tbody>
               </table>
+
+              {totalPaginasHistorico > 1 && (() => {
+                const WINDOW = 4;
+                const half = Math.floor(WINDOW / 2);
+                let start = Math.max(1, paginaCorrigidaHistorico - half);
+                const end = Math.min(totalPaginasHistorico, start + WINDOW - 1);
+                if (end - start < WINDOW - 1) start = Math.max(1, end - WINDOW + 1);
+                const pageNums = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+
+                return (
+                  <div className="pt-4 border-t border-border flex items-center justify-between text-sm text-muted-foreground">
+                    <span>
+                      {(paginaCorrigidaHistorico - 1) * PAGE_SIZE_HISTORICO + 1}–
+                      {Math.min(paginaCorrigidaHistorico * PAGE_SIZE_HISTORICO, exportacoes.length)} de{' '}
+                      {exportacoes.length} exportações
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setPaginaHistorico((p) => Math.max(1, p - 1))}
+                        disabled={paginaCorrigidaHistorico === 1}
+                        className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                        Anterior
+                      </button>
+
+                      {start > 1 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setPaginaHistorico(1)}
+                            className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground transition-colors"
+                          >
+                            1
+                          </button>
+                          {start > 2 && <span className="px-1 select-none">…</span>}
+                        </>
+                      )}
+
+                      {pageNums.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setPaginaHistorico(n)}
+                          className={`w-8 h-8 rounded text-sm font-medium transition-colors ${
+                            n === paginaCorrigidaHistorico
+                              ? 'bg-primary text-primary-foreground'
+                              : 'hover:bg-muted text-muted-foreground'
+                          }`}
+                        >
+                          {n}
+                        </button>
+                      ))}
+
+                      {end < totalPaginasHistorico && (
+                        <>
+                          {end < totalPaginasHistorico - 1 && (
+                            <span className="px-1 select-none">…</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setPaginaHistorico(totalPaginasHistorico)}
+                            className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground transition-colors"
+                          >
+                            {totalPaginasHistorico}
+                          </button>
+                        </>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setPaginaHistorico((p) => Math.min(totalPaginasHistorico, p + 1))}
+                        disabled={paginaCorrigidaHistorico === totalPaginasHistorico}
+                        className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Próxima
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </CardBody>
