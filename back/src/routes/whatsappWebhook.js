@@ -1,8 +1,6 @@
 const express = require('express');
 const HybridConversation = require('../models/HybridConversation');
 const HybridMessage = require('../models/HybridMessage');
-const { saveBuffer } = require('../services/hybridMediaStorage');
-const { getMediaBuffer } = require('../services/evolutionApi');
 
 const router = express.Router();
 
@@ -20,106 +18,63 @@ function phonesMatch(stored, inbound) {
   return false;
 }
 
-// remoteJid format: "5511999999999@s.whatsapp.net" or "5511999999999@c.us"
-function extractPhone(remoteJid) {
-  return normalizeDigits(String(remoteJid || '').split('@')[0]);
-}
+const TWIML_OK = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
 
-function extractText(message, messageType) {
-  if (!message) return '';
-  if (messageType === 'conversation') return String(message.conversation || '');
-  if (messageType === 'extendedTextMessage') return String(message.extendedTextMessage?.text || '');
-  if (messageType === 'imageMessage') return String(message.imageMessage?.caption || '');
-  if (messageType === 'videoMessage') return String(message.videoMessage?.caption || '');
-  if (messageType === 'audioMessage') return '';
-  if (messageType === 'documentMessage') return String(message.documentMessage?.caption || '');
-  return '';
-}
-
-const MEDIA_TYPES = new Set([
-  'imageMessage',
-  'audioMessage',
-  'videoMessage',
-  'documentMessage',
-  'stickerMessage',
-]);
-
-function mimeFromMessage(messageType, message) {
-  if (messageType === 'imageMessage') return message.imageMessage?.mimetype || 'image/jpeg';
-  if (messageType === 'audioMessage') return message.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
-  if (messageType === 'videoMessage') return message.videoMessage?.mimetype || 'video/mp4';
-  if (messageType === 'documentMessage') return message.documentMessage?.mimetype || 'application/octet-stream';
-  return 'application/octet-stream';
-}
-
-function tipoFromMime(mime) {
-  const m = String(mime || '').toLowerCase();
-  if (m.startsWith('audio/')) return 'audio';
-  if (m.startsWith('image/')) return 'imagem';
-  return 'imagem';
+function twimlOk(res) {
+  res.setHeader('Content-Type', 'text/xml');
+  return res.status(200).send(TWIML_OK);
 }
 
 /** GET — verificação manual no navegador. */
-router.get('/', (req, res) => {
+router.get('/', (_req, res) => {
   res.status(200).json({
     ok: true,
     service: 'climaagro-whatsapp-webhook',
-    provider: 'evolution-api',
-    hint: 'Configure no painel Evolution API: Webhook Global → POST para esta URL.',
+    provider: 'twilio',
+    hint: 'Configure no Console Twilio: Messaging → Try it out → Sandbox Settings → campo "WHEN A MESSAGE COMES IN".',
   });
 });
 
-router.post('/', express.json({ limit: '8mb' }), async (req, res) => {
-  // Segurança: validar apikey enviada pela Evolution API
-  const expectedKey = process.env.EVOLUTION_API_KEY || '';
-  const receivedKey = String(req.body?.apikey || req.headers['apikey'] || '');
-  if (expectedKey && receivedKey !== expectedKey) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+// Twilio envia application/x-www-form-urlencoded — NÃO é JSON
+router.post('/', express.urlencoded({ extended: false }), async (req, res) => {
+  // TODO (pós-TCC / produção): validar X-Twilio-Signature com twilio.validateRequest()
+  // para garantir que a requisição realmente vem do Twilio.
 
-  // Só processar o evento de nova mensagem
-  if (req.body?.event !== 'messages.upsert') {
-    return res.status(200).json({ ok: true, skipped: true });
-  }
+  const from = String(req.body?.From || '');
+  const body = String(req.body?.Body || '').trim();
+  const messageSid = String(req.body?.MessageSid || '');
+  const numMedia = parseInt(req.body?.NumMedia || '0', 10);
 
-  const data = req.body?.data;
-  if (!data?.key) {
-    return res.status(400).json({ error: 'Payload inválido.' });
-  }
+  // "From" vem como "whatsapp:+5563999999999" — extrair só os dígitos
+  const agronomoDigits = normalizeDigits(from.replace(/^whatsapp:/i, ''));
+  console.log(`[Twilio webhook] Mensagem recebida | de=${agronomoDigits} sid=${messageSid} numMedia=${numMedia} body="${body.slice(0, 60)}"`);
 
-  // Ignorar mensagens enviadas pelo próprio número (evita loop)
-  if (data.key.fromMe === true) {
-    return res.status(200).json({ ok: true, skipped: true });
-  }
-
-  const remoteJid = String(data.key.remoteJid || '');
-
-  // Ignorar mensagens de grupos
-  if (remoteJid.endsWith('@g.us')) {
-    return res.status(200).json({ ok: true, skipped: true });
-  }
-
-  const messageId = String(data.key.id || '');
-  const agronomoDigits = extractPhone(remoteJid);
   if (!agronomoDigits || agronomoDigits.length < 8) {
-    return res.status(400).json({ error: 'Número de telefone inválido.' });
+    console.warn('[Twilio webhook] Número inválido, ignorando.');
+    return twimlOk(res);
   }
 
-  // Idempotência: ignorar mensagem já processada
-  if (messageId) {
-    const existing = await HybridMessage.findOne({ where: { externalMessageId: messageId } });
-    if (existing) {
-      return res.status(200).json({ ok: true, duplicate: true });
+  // Idempotência: ignorar MessageSid já processado (Twilio pode reenviar em timeout)
+  if (messageSid) {
+    try {
+      const existing = await HybridMessage.findOne({ where: { externalMessageId: messageSid } });
+      if (existing) {
+        console.log(`[Twilio webhook] SID ${messageSid} já processado — ignorando duplicata.`);
+        return twimlOk(res);
+      }
+    } catch (e) {
+      console.warn('[Twilio webhook] Não foi possível checar idempotência (coluna pode estar faltando):', e.message);
     }
   }
 
-  const message = data.message || {};
-  const messageType = String(data.messageType || '');
-  const text = extractText(message, messageType);
-  const isMedia = MEDIA_TYPES.has(messageType);
+  // Montar texto: corpo da mensagem ou placeholder se só mídia
+  const text =
+    body ||
+    (numMedia > 0 ? `📎 Mídia recebida (${numMedia} arquivo${numMedia > 1 ? 's' : ''})` : '');
 
-  if (!isMedia && !text.trim()) {
-    return res.status(200).json({ ok: true });
+  if (!text) {
+    console.warn('[Twilio webhook] Mensagem sem body e sem mídia, ignorando.');
+    return twimlOk(res);
   }
 
   try {
@@ -128,71 +83,42 @@ router.post('/', express.json({ limit: '8mb' }), async (req, res) => {
       order: [['updatedAt', 'DESC']],
       limit: 40,
     });
+    console.log(`[Twilio webhook] ${candidates.length} conversa(s) ativa(s) encontrada(s). Buscando match para ${agronomoDigits}...`);
+
     const conv = candidates.find((c) => phonesMatch(c.whatsappAgronomo, agronomoDigits));
 
     if (!conv) {
-      console.warn('[whatsapp webhook] Nenhuma conversa ativa para o agrônomo', agronomoDigits);
-      return res.status(200).json({ ok: true });
+      const stored = candidates.map((c) => c.whatsappAgronomo).join(', ') || '(nenhuma)';
+      console.warn(`[Twilio webhook] Nenhuma conversa ativa para o agrônomo ${agronomoDigits}. Números no banco: ${stored}`);
+      return twimlOk(res);
     }
 
-    const io = req.app.get('io');
+    console.log(`[Twilio webhook] Match encontrado: conversa ${conv.id} | produtor ${conv.produtorClerkId}`);
 
-    if (!isMedia) {
-      const msg = await HybridMessage.create({
+    // Tenta salvar com externalMessageId; se a coluna ainda não existir no banco,
+    // faz fallback sem ela para garantir que a mensagem seja salva e o Socket.IO seja emitido.
+    let msg;
+    try {
+      msg = await HybridMessage.create({
         conversationId: conv.id,
         remetenteId: agronomoDigits,
         conteudo: text.slice(0, 8000),
         tipo: 'texto',
         origem: 'whatsapp',
-        externalMessageId: messageId || null,
+        externalMessageId: messageSid || null,
       });
-      if (io) {
-        io.to(`produtor:${conv.produtorClerkId}`).emit('hybrid:message', {
-          conversationId: conv.id,
-          threadId: conv.iaThreadId,
-          message: {
-            id: msg.id,
-            sender: 'agronomo',
-            kind: 'hybrid',
-            text: msg.conteudo,
-            tipo: msg.tipo,
-            origem: msg.origem,
-            createdAt: msg.createdAt,
-            hasMidia: false,
-            midiaMimeType: null,
-          },
-        });
-      }
-      return res.status(200).json({ ok: true });
+    } catch (createErr) {
+      console.warn('[Twilio webhook] create com externalMessageId falhou, tentando sem ela:', createErr.message);
+      msg = await HybridMessage.create({
+        conversationId: conv.id,
+        remetenteId: agronomoDigits,
+        conteudo: text.slice(0, 8000),
+        tipo: 'texto',
+        origem: 'whatsapp',
+      });
     }
 
-    // Mensagem de mídia
-    const mimeType = mimeFromMessage(messageType, message);
-    const caption =
-      text.trim().slice(0, 8000) ||
-      (tipoFromMime(mimeType) === 'audio' ? '🎤 Áudio recebido' : '📷 Imagem recebida');
-
-    let storageKey = null;
-    let resolvedMime = mimeType;
-    try {
-      const result = await getMediaBuffer(data.key, message);
-      resolvedMime = result.mimeType || mimeType;
-      storageKey = await saveBuffer(result.buffer, resolvedMime);
-    } catch (e) {
-      console.error('[whatsapp webhook] download de mídia falhou:', e.message);
-    }
-
-    const msg = await HybridMessage.create({
-      conversationId: conv.id,
-      remetenteId: agronomoDigits,
-      conteudo: caption,
-      tipo: tipoFromMime(resolvedMime),
-      origem: 'whatsapp',
-      midiaStorageKey: storageKey,
-      midiaMimeType: resolvedMime,
-      externalMessageId: messageId || null,
-    });
-
+    const io = req.app.get('io');
     if (io) {
       io.to(`produtor:${conv.produtorClerkId}`).emit('hybrid:message', {
         conversationId: conv.id,
@@ -205,16 +131,20 @@ router.post('/', express.json({ limit: '8mb' }), async (req, res) => {
           tipo: msg.tipo,
           origem: msg.origem,
           createdAt: msg.createdAt,
-          hasMidia: Boolean(storageKey),
-          midiaMimeType: resolvedMime,
+          hasMidia: false,
+          midiaMimeType: null,
         },
       });
+      console.log(`[Twilio webhook] Socket.IO emitido para sala produtor:${conv.produtorClerkId}`);
+    } else {
+      console.warn('[Twilio webhook] io não disponível — Socket.IO não configurado no app.');
     }
 
-    return res.status(200).json({ ok: true });
+    return twimlOk(res);
   } catch (e) {
-    console.error('[whatsapp webhook]', e);
-    return res.status(500).json({ error: 'Erro ao processar webhook.' });
+    console.error('[Twilio webhook] Erro ao processar mensagem:', e.message, e.stack);
+    // Sempre responder 200 pro Twilio — evita reenvios em loop
+    return twimlOk(res);
   }
 });
 

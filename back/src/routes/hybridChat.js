@@ -1,6 +1,6 @@
 const express = require('express');
 const { Op } = require('sequelize');
-const evolutionApi = require('../services/evolutionApi');
+const twilioService = require('../services/twilioService');
 const ChatHistory = require('../models/ChatHistory');
 const HybridConversation = require('../models/HybridConversation');
 const HybridMessage = require('../models/HybridMessage');
@@ -101,8 +101,8 @@ function buildRichWhatsappBody({ produtorNome, casoDestaque, iaLines }) {
   const lastIa = [...iaLines].filter((l) => l.role === 'iagro').pop();
   const caso =
     (casoDestaque && String(casoDestaque).trim()) ||
-    (lastIa && lastIa.text ? String(lastIa.text).slice(0, 420).trim() : '') ||
-    (lastUser && lastUser.text ? String(lastUser.text).slice(0, 420).trim() : '');
+    (lastIa && lastIa.text ? String(lastIa.text).slice(0, 250).trim() : '') ||
+    (lastUser && lastUser.text ? String(lastUser.text).slice(0, 250).trim() : '');
 
   const anexosMencao =
     (lastUser && /\[Anexos:|foto|imagem|jpeg|png/i.test(lastUser.text || '')) ||
@@ -120,7 +120,7 @@ function buildRichWhatsappBody({ produtorNome, casoDestaque, iaLines }) {
     iaLines
       .map((item) => {
         const label = item.role === 'produtor' ? 'Produtor' : 'IAgro';
-        return `${label}: ${String(item.text || '').trim().slice(0, 1000)}`;
+        return `${label}: ${String(item.text || '').trim().slice(0, 180)}`;
       })
       .join('\n\n'),
     '',
@@ -214,7 +214,7 @@ router.post('/escalate', async (req, res) => {
 
     const waUrl = `https://wa.me/${whatsappAgronomo}?text=${encodeURIComponent(summary)}`;
 
-    const whatsapp = await evolutionApi.sendMessage(whatsappAgronomo, summary);
+    const whatsapp = await twilioService.sendMessage(whatsappAgronomo, summary);
 
     return res.json({
       success: true,
@@ -393,7 +393,7 @@ router.post('/conversations/:id/messages', async (req, res) => {
       origem: 'sistema',
     });
 
-    const whatsapp = await evolutionApi.sendMessage(conv.whatsappAgronomo, `[ClimaAgro | Produtor]\n${conteudo}`);
+    const whatsapp = await twilioService.sendMessage(conv.whatsappAgronomo, `[ClimaAgro | Produtor]\n${conteudo}`);
 
     const io = req.app.get('io');
     if (io) {

@@ -40,8 +40,8 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Export-Client-Id', 'X-Clerk-User-Id']
   })
 );
-// Webhook WhatsApp (parser específico na rota; Twilio = urlencoded, Z-API = JSON)
-app.use('/webhook/whatsapp', require('./routes/whatsappWebhook'));
+// Webhook Twilio WhatsApp (application/x-www-form-urlencoded — parser específico na rota)
+app.use('/webhook/twilio', require('./routes/whatsappWebhook'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -135,24 +135,21 @@ server.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📊 API: http://localhost:${PORT}/api  ·  health: http://localhost:${PORT}/api/health`);
-  console.log(`💬 WebSocket: /socket.io  ·  Webhook WhatsApp: POST http://localhost:${PORT}/webhook/whatsapp`);
+  console.log(`💬 WebSocket: /socket.io  ·  Webhook Twilio: POST http://localhost:${PORT}/webhook/twilio`);
 
   const publicBase = String(process.env.PUBLIC_API_BASE_URL || '').trim().replace(/\/+$/, '');
   if (publicBase) {
-    console.log(`📲 Evolution API — URL do webhook (configure no painel Evolution):`);
-    console.log(`   POST ${publicBase}/webhook/whatsapp`);
+    console.log(`📲 Twilio — configure o webhook no Console Twilio (Sandbox Settings):`);
+    console.log(`   POST ${publicBase}/webhook/twilio`);
   } else {
-    console.log(`📲 WhatsApp webhook: defina PUBLIC_API_BASE_URL no .env para ver a URL pública do webhook.`);
+    console.log(`📲 Twilio webhook: defina PUBLIC_API_BASE_URL no .env para ver a URL pública (ngrok) do webhook.`);
   }
 
-  const evolutionOk =
-    process.env.EVOLUTION_API_URL &&
-    process.env.EVOLUTION_API_KEY &&
-    process.env.EVOLUTION_INSTANCE_NAME;
-  if (evolutionOk) {
-    console.log(`✉️  Evolution API: envio de WhatsApp habilitado (instância: ${process.env.EVOLUTION_INSTANCE_NAME}).`);
+  const twilioOk = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN;
+  if (twilioOk) {
+    console.log(`✉️  Twilio: envio de WhatsApp habilitado (from: ${process.env.TWILIO_WHATSAPP_FROM || 'whatsapp:+14155238886'}).`);
   } else {
-    console.log(`⚠️  Evolution API: envio desabilitado — defina EVOLUTION_API_URL, EVOLUTION_API_KEY e EVOLUTION_INSTANCE_NAME`);
+    console.log(`⚠️  Twilio: envio desabilitado — defina TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN no .env`);
   }
 
   startClimateAutoSyncScheduler({ sequelize, models });

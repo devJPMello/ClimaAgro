@@ -42,6 +42,26 @@ const sequelize = new Sequelize(dbUrl, {
 // Disponibilizar `sequelize` antes de `require` dos modelos (evita circular: database → User → database com exports ainda vazio).
 module.exports.sequelize = sequelize;
 
+async function ensureExternalMessageIdColumn() {
+  const qi = sequelize.getQueryInterface();
+  const tableDesc = await qi.describeTable('hybrid_messages').catch(() => null);
+  if (!tableDesc) {
+    console.log('ℹ️  Tabela hybrid_messages ainda não existe — será criada pelo sync.');
+    return;
+  }
+  if (tableDesc.external_message_id) {
+    return; // coluna já existe
+  }
+  console.log('⚙️  Criando coluna external_message_id em hybrid_messages...');
+  const { DataTypes } = require('sequelize');
+  await qi.addColumn('hybrid_messages', 'external_message_id', {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+    unique: true,
+  });
+  console.log('✅ Coluna external_message_id criada com sucesso.');
+}
+
 const connectDB = async () => {
   try {
     await sequelize.authenticate();
@@ -67,6 +87,9 @@ const connectDB = async () => {
       await sequelize.sync({ alter: true });
       console.log('✅ Modelos sincronizados');
     }
+
+    // Migração: garante coluna external_message_id em hybrid_messages (todos os ambientes)
+    await ensureExternalMessageIdColumn();
   } catch (error) {
     console.error('❌ Erro ao conectar com PostgreSQL:', error.message);
     process.exit(1);
