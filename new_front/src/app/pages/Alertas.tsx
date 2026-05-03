@@ -138,7 +138,7 @@ export function Alertas() {
           Alertas Climáticos
         </h1>
         <p className="text-muted-foreground">
-          Monitoramento por UF — «Todos os estados» mostra o Brasil; escolha uma UF para filtrar.
+          Monitoramento por UF.
         </p>
       </div>
 
