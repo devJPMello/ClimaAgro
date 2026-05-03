@@ -95,7 +95,11 @@ export function Cadastro() {
     if (senha !== confirmarSenha) newErrors.confirmarSenha = 'As senhas não coincidem';
 
     if (isAgronomo) {
-      if (!telefone.trim()) newErrors.telefone = 'Telefone é obrigatório para agrônomos';
+      if (!telefone.trim()) {
+        newErrors.telefone = 'Telefone é obrigatório para agrônomos';
+      } else if (!/^\d{10,13}$/.test(telefone.trim())) {
+        newErrors.telefone = 'Use somente dígitos com DDD (ex: 63999999999)';
+      }
       if (!numeroCrea.trim()) newErrors.numeroCrea = 'Informe o número do registro CREA';
       if (!ufCrea) newErrors.ufCrea = 'Selecione a UF do CREA';
       if (!cpf.trim()) newErrors.cpf = 'Informe o CPF';
@@ -208,7 +212,7 @@ export function Cadastro() {
           />
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             className="w-full"
             disabled={ocrLoading}
             onClick={() => fileInputRef.current?.click()}
@@ -301,15 +305,17 @@ export function Cadastro() {
         <div className="relative">
           <Phone className="absolute left-3 top-[42px] w-5 h-5 text-muted-foreground" />
           <Input
-            label={perfil === 'agronomo' ? 'Telefone (WhatsApp)' : 'Telefone (opcional)'}
+            label={perfil === 'agronomo' ? 'WhatsApp (somente dígitos, com DDD)' : 'Telefone (opcional)'}
             type="tel"
-            placeholder="(11) 98765-4321"
+            placeholder="Ex: 63999999999"
+            inputMode="numeric"
+            maxLength={13}
             value={telefone}
-            onChange={(e) => setTelefone(e.target.value)}
+            onChange={(e) => setTelefone(e.target.value.replace(/\D/g, ''))}
             className="pl-11"
             autoComplete="tel"
             error={errors.telefone}
-            helperText={perfil === 'agronomo' ? 'Obrigatório para contato profissional' : undefined}
+            helperText={perfil === 'agronomo' ? 'DDD + número, sem espaços ou traços (ex: 63999999999)' : undefined}
             required={perfil === 'agronomo'}
           />
         </div>

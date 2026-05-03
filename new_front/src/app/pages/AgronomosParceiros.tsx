@@ -84,7 +84,6 @@ export function AgronomosParceiros() {
     nome: '',
     email: '',
     whatsapp: '',
-    telefoneFormatado: '',
     municipio: '',
     uf: '',
     crea: '',
@@ -247,7 +246,7 @@ export function AgronomosParceiros() {
 
   function abrirCadastro() {
     setCadastroStep('upload');
-    setCadastro({ nome: '', email: '', whatsapp: '', telefoneFormatado: '', municipio: '', uf: '', crea: '', especialidade: '', sobre: '' });
+    setCadastro({ nome: '', email: '', whatsapp: '', municipio: '', uf: '', crea: '', especialidade: '', sobre: '' });
     setModalCadastroAberto(true);
   }
 
@@ -284,13 +283,16 @@ export function AgronomosParceiros() {
       toast.error('Preencha os campos obrigatórios para cadastro.');
       return;
     }
+    if (!/^\d{10,13}$/.test(cadastro.whatsapp.trim())) {
+      toast.error('WhatsApp inválido. Use somente dígitos com DDD (ex: 63999999999).');
+      return;
+    }
     void (async () => {
       try {
         await cadastrarAgronomoParceiro({
           nome: cadastro.nome.trim(),
           email: cadastro.email.trim(),
           whatsapp: cadastro.whatsapp.trim(),
-          telefone: cadastro.telefoneFormatado.trim(),
           municipio: cadastro.municipio.trim(),
           uf: cadastro.uf.trim().toUpperCase(),
           crea: cadastro.crea.trim(),
@@ -303,7 +305,6 @@ export function AgronomosParceiros() {
           nome: '',
           email: '',
           whatsapp: '',
-          telefoneFormatado: '',
           municipio: '',
           uf: '',
           crea: '',
@@ -787,15 +788,25 @@ export function AgronomosParceiros() {
                 required
               />
               <Input
-                label="WhatsApp (somente números)"
+                label="WhatsApp (somente dígitos, com DDD)"
+                placeholder="Ex: 63999999999"
+                inputMode="numeric"
+                maxLength={13}
                 value={cadastro.whatsapp}
-                onChange={(e) => setCadastro((prev) => ({ ...prev, whatsapp: e.target.value }))}
+                onChange={(e) =>
+                  setCadastro((prev) => ({ ...prev, whatsapp: e.target.value.replace(/\D/g, '') }))
+                }
+                helperText="DDD + número, sem espaços ou traços (ex: 63999999999)"
                 required
               />
-              <Input
-                label="Telefone formatado"
-                value={cadastro.telefoneFormatado}
-                onChange={(e) => setCadastro((prev) => ({ ...prev, telefoneFormatado: e.target.value }))}
+              <Select
+                label="UF"
+                value={cadastro.uf}
+                onChange={(e) => setCadastro((prev) => ({ ...prev, uf: e.target.value, municipio: '' }))}
+                options={[
+                  { value: '', label: 'Selecione a UF' },
+                  ...ufOptionsOrdenadas,
+                ]}
               />
               <Select
                 label="Município"
@@ -813,15 +824,6 @@ export function AgronomosParceiros() {
                   ...municipiosCadastroOptions.map((m) => ({ value: m.value, label: m.label })),
                 ]}
                 disabled={!cadastro.uf || loadingMunicipiosCadastro}
-              />
-              <Select
-                label="UF"
-                value={cadastro.uf}
-                onChange={(e) => setCadastro((prev) => ({ ...prev, uf: e.target.value }))}
-                options={[
-                  { value: '', label: 'Selecione a UF' },
-                  ...ufOptionsOrdenadas,
-                ]}
               />
               <Input
                 label="CREA"
