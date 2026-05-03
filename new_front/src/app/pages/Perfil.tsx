@@ -228,40 +228,27 @@ export function Perfil() {
               </div>
 
               {editando && (
-                <div className="flex gap-3 pt-4">
-                  <Button variant="primary" onClick={handleSalvar}>
-                    Salvar Alterações
-                  </Button>
-                  <Button variant="ghost" onClick={() => setEditando(false)}>
-                    Cancelar
-                  </Button>
-                </div>
-              )}
-            </CardBody>
-          </Card>
+                <>
+                  <div className="flex gap-3 pt-4">
+                    <Button variant="primary" onClick={handleSalvar}>
+                      Salvar Alterações
+                    </Button>
+                    <Button variant="ghost" onClick={() => setEditando(false)}>
+                      Cancelar
+                    </Button>
+                  </div>
 
-          {/* Preferências de Notificação */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Preferências de Notificação</CardTitle>
-              <CardDescription>Escolha como deseja receber notificações</CardDescription>
-            </CardHeader>
-            <CardBody className="space-y-4">
-              <Checkbox
-                label="Alertas climáticos críticos"
-                checked={notifAlertasCriticos}
-                onChange={(e) => setNotifAlertasCriticos(e.target.checked)}
-              />
-              <Checkbox
-                label="Relatórios prontos para download"
-                checked={notifRelatorios}
-                onChange={(e) => setNotifRelatorios(e.target.checked)}
-              />
-              <Checkbox
-                label="Atualizações do sistema e novidades"
-                checked={notifAtualizacoes}
-                onChange={(e) => setNotifAtualizacoes(e.target.checked)}
-              />
+                  <hr className="border-border" />
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Zona de perigo</p>
+                    <Button variant="danger" className="w-full">Excluir Conta</Button>
+                    <p className="text-xs text-muted-foreground">
+                      Esta ação é irreversível e todos os seus dados serão removidos.
+                    </p>
+                  </div>
+                </>
+              )}
             </CardBody>
           </Card>
 
@@ -340,33 +327,31 @@ export function Perfil() {
             </CardBody>
           </Card>
 
+          {/* Preferências de Notificação */}
           <Card>
             <CardHeader>
-              <CardTitle>Segurança</CardTitle>
+              <CardTitle>Preferências de Notificação</CardTitle>
+              <CardDescription>Escolha como deseja receber notificações</CardDescription>
             </CardHeader>
-            <CardBody className="space-y-3">
-              <Button variant="secondary" className="w-full">
-                Alterar Senha
-              </Button>
-              <Button variant="ghost" className="w-full">
-                Configurar 2FA
-              </Button>
+            <CardBody className="space-y-4">
+              <Checkbox
+                label="Alertas climáticos críticos"
+                checked={notifAlertasCriticos}
+                onChange={(e) => setNotifAlertasCriticos(e.target.checked)}
+              />
+              <Checkbox
+                label="Relatórios prontos para download"
+                checked={notifRelatorios}
+                onChange={(e) => setNotifRelatorios(e.target.checked)}
+              />
+              <Checkbox
+                label="Atualizações do sistema e novidades"
+                checked={notifAtualizacoes}
+                onChange={(e) => setNotifAtualizacoes(e.target.checked)}
+              />
             </CardBody>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Conta</CardTitle>
-            </CardHeader>
-            <CardBody>
-              <Button variant="danger" className="w-full">
-                Excluir Conta
-              </Button>
-              <p className="text-xs text-muted-foreground mt-3">
-                Esta ação é irreversível e todos os seus dados serão removidos.
-              </p>
-            </CardBody>
-          </Card>
         </div>
       </div>
     </div>
