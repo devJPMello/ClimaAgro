@@ -1,0 +1,116 @@
+version: '3.8'
+
+# Evolution API + dependências (PostgreSQL + Redis próprios da Evolution)
+# O banco principal do ClimaAgro continua no Neon (não é gerenciado aqui).
+#
+# Uso:
+#   cp .env.docker.example .env.docker
+#   docker compose --env-file .env.docker up -d
+#   docker compose logs -f evolution-api
+
+services:
+  evolution-api:
+    image: atendai/evolution-api:v2.2.3
+    container_name: evolution-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # URL pública da Evolution (usada em links de QR code e mídia)
+      SERVER_URL: ${EVOLUTION_SERVER_URL:-http://localhost:8080}
+
+      # Autenticação global da API
+      AUTHENTICATION_TYPE: apikey
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+
+      # Banco de dados interno da Evolution (separado do banco principal do ClimaAgro)
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:-ev_change_me}@evolution-db:5432/evolution_db
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+
+      # Cache Redis
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: evolution
+
+      # Webhook global → aponta para o backend ClimaAgro
+      # Em dev local: host.docker.internal resolve para o host (funciona no Docker Desktop Windows/Mac).
+      # Em Linux: adicione extra_hosts abaixo e use host.docker.internal.
+      WEBHOOK_GLOBAL_URL: ${WEBHOOK_GLOBAL_URL:-http://host.docker.internal:5000/webhook/whatsapp}
+      WEBHOOK_GLOBAL_ENABLED: "true"
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
+
+      # Habilitar apenas o evento que o backend consome
+      WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
+      WEBHOOK_EVENTS_MESSAGES_UPDATE: "false"
+      WEBHOOK_EVENTS_MESSAGES_DELETE: "false"
+      WEBHOOK_EVENTS_CONNECTION_UPDATE: "false"
+      WEBHOOK_EVENTS_QRCODE_UPDATED: "false"
+      WEBHOOK_EVENTS_APPLICATION_STARTUP: "false"
+      WEBHOOK_EVENTS_SEND_MESSAGE: "false"
+      WEBHOOK_EVENTS_CONTACTS_UPSERT: "false"
+      WEBHOOK_EVENTS_CHATS_UPSERT: "false"
+      WEBHOOK_EVENTS_GROUPS_UPSERT: "false"
+      WEBHOOK_EVENTS_GROUP_UPDATE: "false"
+      WEBHOOK_EVENTS_ERRORS: "false"
+
+      LOG_LEVEL: ERROR
+      LOG_COLOR: "true"
+      LOG_BAILEYS: error
+      LANGUAGE: pt-BR
+      DEL_INSTANCE: "false"
+      DEL_TEMP_INSTANCES: "false"
+
+    # Linux: descomente para que host.docker.internal aponte para o host
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+
+    depends_on:
+      evolution-db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - evolution-net
+
+  evolution-db:
+    image: postgres:16-alpine
+    container_name: evolution-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:-ev_change_me}
+      POSTGRES_DB: evolution_db
+    volumes:
+      - evolution-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - evolution-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: evolution-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - evolution-net
+
+volumes:
+  evolution-db-data:
+  redis-data:
+
+networks:
+  evolution-net:
+    driver: bridge

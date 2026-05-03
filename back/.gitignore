@@ -305,3 +305,6 @@ seeders/
 
 # Logs directory
 logs/
+
+
+.env.docker
