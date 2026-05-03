@@ -15,6 +15,7 @@
     "seed:all": "npm run seed:geo && npm run seed:productivity",
     "db:reset": "npm run seed:all",
     "sync:climate": "node src/scripts/syncRealClimateData.js",
+    "backfill:climate": "node src/scripts/backfillClimateHistory.js",
     "purge:seed": "node src/scripts/purgeInventedSeedData.js",
     "import:ibge1612": "node src/scripts/importIbgeSidra1612Csv.js",
     "sync:productivity-ibge": "node src/scripts/syncProductivityFromIbgeSidra1612.js",

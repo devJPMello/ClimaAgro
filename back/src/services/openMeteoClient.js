@@ -57,7 +57,16 @@ async function fetchHistoricalDailyByCoords({ lat, lon, startDate, endDate }) {
     timezone: process.env.OPEN_METEO_TIMEZONE || 'America/Sao_Paulo',
     start_date: String(startDate),
     end_date: String(endDate),
-    daily: ['temperature_2m_mean', 'precipitation_sum', 'relative_humidity_2m_mean'].join(',')
+    daily: [
+      'temperature_2m_max',
+      'temperature_2m_min',
+      'temperature_2m_mean',
+      'precipitation_sum',
+      'relative_humidity_2m_mean',
+      'wind_speed_10m_max',
+      'wind_direction_10m_dominant',
+      'surface_pressure_mean'
+    ].join(',')
   });
 
   const res = await axiosWithRetries(
