@@ -5,12 +5,14 @@ import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { io, type Socket } from 'socket.io-client';
 import { useUser } from '@clerk/clerk-react';
-import { Cloud, Loader2, MessageCircle, SendHorizonal } from 'lucide-react';
+import { Cloud, Loader2, MessageCircle, SendHorizonal, Trash2 } from 'lucide-react';
 import { Card, CardBody } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
+import { Modal } from '../components/ui/Modal';
 import { HybridMediaAttachment } from '../components/chat/HybridMediaAttachment';
 import { EncerrarAtendimentoModal } from '../components/chat/EncerrarAtendimentoModal';
 import {
+  deleteHybridConversation,
   getHybridTimeline,
   listHybridConversations,
   patchHybridConversationStatus,
@@ -51,6 +53,8 @@ export function MinhasConversas() {
   const [loadingSend, setLoadingSend] = useState(false);
   const [encerrarModalOpen, setEncerrarModalOpen] = useState(false);
   const [encerrando, setEncerrando] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<HybridConversationListItem | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const threadIdRef = useRef<string | null>(null);
   const selectedRef = useRef<HybridConversationListItem | null>(null);
@@ -262,6 +266,29 @@ export function MinhasConversas() {
     }
   }
 
+  async function confirmarDelete() {
+    if (!user?.id || !deleteTarget) return;
+    const id = deleteTarget.id;
+    setDeleteTarget(null);
+    setDeletingId(id);
+    try {
+      await deleteHybridConversation(id, user.id);
+      setLista((prev) => prev.filter((c) => c.id !== id));
+      if (selected?.id === id) {
+        setSelected(null);
+        selectedRef.current = null;
+        threadIdRef.current = null;
+        setMessages([]);
+        setHybridConversation(null);
+      }
+      toast.success('Conversa excluída.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao excluir.');
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4 min-h-0 h-[calc(100dvh-8rem)] max-h-[calc(100dvh-8rem)] overflow-hidden">
       <div className="shrink-0">
@@ -300,35 +327,52 @@ export function MinhasConversas() {
                 const titulo =
                   item.casoResumoSnapshot?.slice(0, 52) ||
                   `Atendimento ${maskWhatsapp(item.whatsappAgronomo)}`;
+                const isDeleting = deletingId === item.id;
                 return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => void abrirConversa(item)}
-                    className={`w-full rounded-lg border text-left px-3 py-2.5 transition-colors ${
-                      active ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted'
-                    }`}
-                  >
-                    <p className="text-xs font-medium text-foreground line-clamp-2">{titulo}</p>
-                    <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                      <span>Especialista {maskWhatsapp(item.whatsappAgronomo)}</span>
-                      <span
-                        className={
-                          item.atendimentoAtivo ? 'text-green-600 dark:text-green-400' : ''
-                        }
-                      >
-                        {item.atendimentoAtivo ? 'Ativo' : 'Encerrado'}
+                  <div key={item.id} className="relative group">
+                    <button
+                      type="button"
+                      onClick={() => void abrirConversa(item)}
+                      className={`w-full rounded-lg border text-left px-3 py-2.5 pr-8 transition-colors ${
+                        active ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted'
+                      }`}
+                    >
+                      <p className="text-xs font-medium text-foreground line-clamp-2">{titulo}</p>
+                      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                        <span>Especialista {maskWhatsapp(item.whatsappAgronomo)}</span>
+                        <span
+                          className={
+                            item.atendimentoAtivo ? 'text-green-600 dark:text-green-400' : ''
+                          }
+                        >
+                          {item.atendimentoAtivo ? 'Ativo' : 'Encerrado'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {new Date(item.updatedAt).toLocaleString('pt-BR', {
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </p>
+                    </button>
+
+                    {isDeleting ? (
+                      <span className="absolute top-2 right-2 pointer-events-none">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
                       </span>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      {new Date(item.updatedAt).toLocaleString('pt-BR', {
-                        day: '2-digit',
-                        month: 'short',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </p>
-                  </button>
+                    ) : (
+                      <button
+                        type="button"
+                        title="Excluir conversa"
+                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(item); }}
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 focus:opacity-100 rounded p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 );
               })}
           </div>
@@ -508,6 +552,29 @@ export function MinhasConversas() {
         onConfirmComAvaliacao={(a) => void encerrarComAvaliacao(a)}
         loading={encerrando}
       />
+
+      <Modal
+        isOpen={Boolean(deleteTarget)}
+        onClose={() => { if (!deletingId) setDeleteTarget(null); }}
+        title="Excluir conversa"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={Boolean(deletingId)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={() => void confirmarDelete()} loading={Boolean(deletingId)}>
+              Excluir
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted-foreground">
+          Tem certeza que deseja excluir a conversa
+          {deleteTarget?.casoResumoSnapshot ? ` "${deleteTarget.casoResumoSnapshot.slice(0, 80)}"` : ''}?
+          <br />
+          Essa ação remove a conversa e todas as mensagens do histórico.
+        </p>
+      </Modal>
     </div>
   );
 }

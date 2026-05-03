@@ -163,6 +163,13 @@ function getApiBasePath(): string {
   return '/api';
 }
 
+export async function deleteHybridConversation(conversationId: string, clerkUserId: string) {
+  return httpClient.delete<{ success: boolean }>(
+    `hybrid-chat/conversations/${encodeURIComponent(conversationId)}`,
+    { headers: clerkHeaders(clerkUserId) }
+  );
+}
+
 /** Baixa mídia do agrônomo (autenticado pelo Clerk no header). */
 export async function fetchHybridMediaBlob(messageId: string, clerkUserId: string): Promise<Blob | null> {
   const base = getApiBasePath();

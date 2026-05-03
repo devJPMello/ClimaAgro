@@ -538,6 +538,30 @@ router.get('/media/:messageId', async (req, res) => {
   }
 });
 
+/**
+ * DELETE /api/hybrid-chat/conversations/:id
+ * Remove a conversa e todas as mensagens associadas.
+ */
+router.delete('/conversations/:id', async (req, res) => {
+  const produtorClerkId = headerProdutorId(req);
+  const conversationId = String(req.params.id || '').trim();
+  if (!produtorClerkId) {
+    return res.status(400).json({ message: 'Header X-Clerk-User-Id obrigatório.' });
+  }
+  try {
+    const conv = await HybridConversation.findByPk(conversationId);
+    if (!conv || conv.produtorClerkId !== produtorClerkId) {
+      return res.status(404).json({ message: 'Conversa não encontrada.' });
+    }
+    await HybridMessage.destroy({ where: { conversationId: conv.id } });
+    await conv.destroy();
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('hybridChat delete:', e);
+    return res.status(500).json({ message: 'Falha ao excluir conversa.' });
+  }
+});
+
 /** Lista conversas híbridas do produtor (painel esquerdo) */
 router.get('/conversations', async (req, res) => {
   const produtorClerkId = headerProdutorId(req);

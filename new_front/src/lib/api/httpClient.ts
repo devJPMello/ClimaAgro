@@ -237,4 +237,6 @@ export const httpClient = {
     httpRequest<T>('POST', path, { ...options, body, retry: false }),
   patch: <T>(path: string, body?: unknown, options?: HttpClientOptions) =>
     httpRequest<T>('PATCH', path, { ...options, body, retry: false }),
+  delete: <T>(path: string, options?: HttpClientOptions) =>
+    httpRequest<T>('DELETE', path, { ...options, retry: false }),
 };
