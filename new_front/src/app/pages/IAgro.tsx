@@ -12,6 +12,7 @@ import {
   MessageCircle,
   Mic,
   MicOff,
+  FileText,
   Paperclip,
   SendHorizonal,
   Sprout,
@@ -45,8 +46,11 @@ import {
 import { listarAgronomosParceiros, type AgronomoParceiroApi } from '../../lib/api/agronomosParceirosApi';
 import { notifyWhatsappDelivery } from '../../lib/whatsappNotify';
 import { HybridMediaAttachment } from '../components/chat/HybridMediaAttachment';
+import { LocalAttachmentThumbnail, type LocalAttachmentKind } from '../components/chat/LocalAttachmentThumbnail';
 import { EncerrarAtendimentoModal } from '../components/chat/EncerrarAtendimentoModal';
 import { useNavigate } from 'react-router';
+
+type LocalMediaItem = { url: string; kind: LocalAttachmentKind };
 
 export function IAgro() {
   const navigate = useNavigate();
@@ -61,7 +65,7 @@ export function IAgro() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [pendingPreviews, setPendingPreviews] = useState<Map<File, string>>(new Map());
-  const [messageImages, setMessageImages] = useState<Map<string, string[]>>(new Map());
+  const [messageMediaPreviews, setMessageMediaPreviews] = useState<Map<string, LocalMediaItem[]>>(new Map());
   const [historyOpen, setHistoryOpen] = useState(false);
   const [threadToDelete, setThreadToDelete] = useState<IAgroThread | null>(null);
   const [deletingThread, setDeletingThread] = useState(false);
@@ -150,16 +154,19 @@ export function IAgro() {
       setThreadId(nextThreadId);
       setMessages(list);
       const cachedImages = loadCachedThreadImages(nextThreadId);
-      const hydratedImages = new Map<string, string[]>();
+      const hydrated = new Map<string, LocalMediaItem[]>();
       for (const msg of list) {
         if (msg.sender !== 'user') continue;
         const key = buildMessageImageKey(msg.text);
         const found = cachedImages[key];
         if (Array.isArray(found) && found.length > 0) {
-          hydratedImages.set(msg.id, found);
+          hydrated.set(
+            msg.id,
+            found.map((url) => ({ url, kind: dataUrlToLocalKind(url) }))
+          );
         }
       }
-      setMessageImages(hydratedImages);
+      setMessageMediaPreviews(hydrated);
       setHistoryOpen(false);
     } finally {
       setLoadingHistory(false);
@@ -274,6 +281,10 @@ export function IAgro() {
     return String(text || '').trim();
   }
 
+  function dataUrlToLocalKind(dataUrl: string): LocalAttachmentKind {
+    return dataUrl.startsWith('data:application/pdf') ? 'pdf' : 'image';
+  }
+
   /** Remove a linha `[Anexos: ...]` que o backend grava; não exibir ao reabrir o histórico. */
   function displayUserMessageText(raw: string): string {
     return String(raw || '')
@@ -315,7 +326,7 @@ export function IAgro() {
     return await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(new Error('Falha ao converter imagem.'));
+      reader.onerror = () => reject(new Error('Falha ao ler o arquivo.'));
       reader.readAsDataURL(file);
     });
   }
@@ -370,34 +381,48 @@ export function IAgro() {
       return;
     }
 
-    const imageFiles = pendingFiles.filter((f) => f.type.startsWith('image/'));
-    const imageUrls = imageFiles
-      .map((f) => pendingPreviews.get(f))
-      .filter((u): u is string => Boolean(u));
+    const localItems: LocalMediaItem[] = [];
+    for (const f of pendingFiles) {
+      const url = pendingPreviews.get(f);
+      if (!url) continue;
+      if (f.type.startsWith('image/')) localItems.push({ url, kind: 'image' });
+      else if (f.type === 'application/pdf') localItems.push({ url, kind: 'pdf' });
+    }
+
+    const hasImage = pendingFiles.some((f) => f.type.startsWith('image/'));
+    const hasPdf = pendingFiles.some((f) => f.type === 'application/pdf');
+    let attachHint = 'Arquivos anexados';
+    if (hasImage && hasPdf) attachHint = 'Imagem e PDF enviados para análise';
+    else if (hasImage) attachHint = 'Imagem enviada para análise';
+    else if (hasPdf) attachHint = 'PDF enviado para análise';
 
     const optimisticId = `tmp-${Date.now()}`;
     const optimistic: UnifiedChatMessage = {
       id: optimisticId,
       sender: 'user',
       kind: 'ia',
-      text: messageText || (imageFiles.length > 0 ? 'Imagem enviada para análise' : 'Arquivos anexados'),
+      text: messageText || attachHint,
       createdAt: new Date().toISOString(),
     };
 
-    if (imageUrls.length > 0) {
-      setMessageImages((prev) => new Map(prev).set(optimisticId, imageUrls));
+    if (localItems.length > 0) {
+      setMessageMediaPreviews((prev) => new Map(prev).set(optimisticId, localItems));
     }
 
     const filesToSend = [...pendingFiles];
     const persistedUserText = buildPersistedUserText(messageText, filesToSend);
-    const imageDataUrls = await Promise.all(
-      imageFiles.map(async (file) => await fileToDataUrl(file).catch(() => ''))
+    const cacheableFiles = pendingFiles.filter(
+      (f) => f.type.startsWith('image/') || f.type === 'application/pdf'
     );
-    const filteredImageDataUrls = imageDataUrls.filter(Boolean);
-    const keptUrls = new Set(imageUrls);
+    const filteredMediaDataUrls = (
+      await Promise.all(cacheableFiles.map(async (file) => await fileToDataUrl(file).catch(() => '')))
+    ).filter(Boolean);
+    const keepBlobUrls = new Set(localItems.map((x) => x.url));
     setMessages((prev) => [...prev, optimistic]);
     setInput('');
-    pendingPreviews.forEach((url) => { if (!keptUrls.has(url)) URL.revokeObjectURL(url); });
+    pendingPreviews.forEach((url) => {
+      if (!keepBlobUrls.has(url)) URL.revokeObjectURL(url);
+    });
     setPendingFiles([]);
     setPendingPreviews(new Map());
     setLoadingSend(true);
@@ -421,8 +446,8 @@ export function IAgro() {
       };
       setMessages((prev) => [...prev, assistant]);
       if (!threadId || threadId !== response.threadId) setThreadId(response.threadId);
-      if (filteredImageDataUrls.length > 0) {
-        saveCachedThreadImages(response.threadId, buildMessageImageKey(persistedUserText), filteredImageDataUrls);
+      if (filteredMediaDataUrls.length > 0) {
+        saveCachedThreadImages(response.threadId, buildMessageImageKey(persistedUserText), filteredMediaDataUrls);
       }
       await refreshThreads();
     } catch (err) {
@@ -440,7 +465,9 @@ export function IAgro() {
     if (files.length === 0) return;
     const newPreviews = new Map(pendingPreviews);
     files.forEach((f) => {
-      if (f.type.startsWith('image/')) newPreviews.set(f, URL.createObjectURL(f));
+      if (f.type.startsWith('image/') || f.type === 'application/pdf') {
+        newPreviews.set(f, URL.createObjectURL(f));
+      }
     });
     setPendingPreviews(newPreviews);
     setPendingFiles((prev) => [...prev, ...files].slice(0, 6));
@@ -828,12 +855,13 @@ export function IAgro() {
                   </div>
                 ) : (
                   <div className="w-fit max-w-[78%] ml-auto flex flex-col items-end gap-1">
-                    {(messageImages.get(message.id) ?? []).map((url) => (
-                      <img
-                        key={url}
-                        src={url}
-                        alt="Imagem enviada"
-                        className="h-40 w-40 object-cover rounded-xl border border-white/20 shadow-sm"
+                    {(messageMediaPreviews.get(message.id) ?? []).map((item) => (
+                      <LocalAttachmentThumbnail
+                        key={item.url}
+                        url={item.url}
+                        kind={item.kind}
+                        name="Anexo enviado"
+                        size="relaxed"
                       />
                     ))}
                     {userDisplayText && (
@@ -945,11 +973,16 @@ export function IAgro() {
                       className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-2 py-1 text-xs"
                     >
                       {pendingPreviews.get(file) ? (
-                        <img
-                          src={pendingPreviews.get(file)}
-                          alt={file.name}
-                          className="h-10 w-10 object-cover rounded-lg shrink-0"
+                        <LocalAttachmentThumbnail
+                          url={pendingPreviews.get(file)!}
+                          kind={file.type === 'application/pdf' ? 'pdf' : 'image'}
+                          name={file.name}
+                          size="compact"
                         />
+                      ) : file.type === 'application/pdf' ? (
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-muted">
+                          <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
+                        </span>
                       ) : null}
                       <span className="max-w-[120px] truncate">{file.name}</span>
                       <button
