@@ -114,7 +114,25 @@ WEATHER_API_URL=https://api.openweathermap.org/data/2.5
 
 # CORS
 FRONTEND_URL=http://localhost:3000
+
+# URL pública do backend (sem /api) — só para você saber o link do webhook no console ao subir o servidor
+PUBLIC_API_BASE_URL=https://seu-ngrok.ngrok-free.app
+
+# Twilio WhatsApp (escalação + respostas do agrônomo)
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 ```
+
+### Twilio (WhatsApp)
+
+1. No [Console Twilio](https://console.twilio.com/), copie **Account SID** e **Auth Token**.
+2. **`TWILIO_WHATSAPP_FROM`**: número WhatsApp da Twilio no formato `whatsapp:+DDI...` (sandbox ou número aprovado).
+3. **Inbound (agrônomo responde):** em Messaging → WhatsApp → configure **When a message comes in** → **HTTP POST** para:
+   - Produção: `https://SEU_DOMINIO/webhook/whatsapp`
+   - Dev: use [ngrok](https://ngrok.com/) ou Cloudflare Tunnel na porta do backend e use essa URL **HTTPS**.
+4. Opcional: no `.env`, defina **`PUBLIC_API_BASE_URL`** com essa mesma base (ex.: `https://abc.ngrok-free.app`). Ao iniciar o servidor, o log mostra o POST completo para colar no Twilio.
+5. **Sandbox:** só conversa com números que mandaram o código `join …` do sandbox.
 
 ## 📚 API Endpoints
 
