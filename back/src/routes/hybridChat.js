@@ -1,6 +1,6 @@
 const express = require('express');
-const axios = require('axios');
 const { Op } = require('sequelize');
+const evolutionApi = require('../services/evolutionApi');
 const ChatHistory = require('../models/ChatHistory');
 const HybridConversation = require('../models/HybridConversation');
 const HybridMessage = require('../models/HybridMessage');
@@ -129,28 +129,6 @@ function buildRichWhatsappBody({ produtorNome, casoDestaque, iaLines }) {
   ].join('\n');
 }
 
-async function sendTwilioWhatsapp(toDigits, body) {
-  const sid = process.env.TWILIO_ACCOUNT_SID;
-  const token = process.env.TWILIO_AUTH_TOKEN;
-  const from = process.env.TWILIO_WHATSAPP_FROM;
-  if (!sid || !token || !from) {
-    return { sent: false, reason: 'twilio_not_configured' };
-  }
-  const digits = normalizeDigits(toDigits);
-  if (!digits) return { sent: false, reason: 'invalid_number' };
-  const to = digits.startsWith('55') ? `whatsapp:+${digits}` : `whatsapp:+55${digits}`;
-  const params = new URLSearchParams({
-    From: from,
-    To: to,
-    Body: body.slice(0, 1600),
-  });
-  await axios.post(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, params.toString(), {
-    auth: { username: sid, password: token },
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    timeout: 20000,
-  });
-  return { sent: true };
-}
 
 /**
  * POST /api/hybrid-chat/escalate
@@ -236,6 +214,8 @@ router.post('/escalate', async (req, res) => {
 
     const waUrl = `https://wa.me/${whatsappAgronomo}?text=${encodeURIComponent(summary)}`;
 
+    const whatsapp = await evolutionApi.sendMessage(whatsappAgronomo, summary);
+
     return res.json({
       success: true,
       conversationId: conversation.id,
@@ -246,6 +226,7 @@ router.post('/escalate', async (req, res) => {
       agronomoParceiroId: agronomoParceiroId || conversation.agronomoParceiroId,
       agronomoNome: picked ? picked.nome : undefined,
       agronomoEspecialidade: picked ? picked.especialidade : undefined,
+      whatsapp,
     });
   } catch (e) {
     console.error('hybridChat escalate:', e);
@@ -412,7 +393,7 @@ router.post('/conversations/:id/messages', async (req, res) => {
       origem: 'sistema',
     });
 
-    const twilio = await sendTwilioWhatsapp(conv.whatsappAgronomo, `[ClimaAgro | Produtor]\n${conteudo}`);
+    const whatsapp = await evolutionApi.sendMessage(conv.whatsappAgronomo, `[ClimaAgro | Produtor]\n${conteudo}`);
 
     const io = req.app.get('io');
     if (io) {
@@ -430,7 +411,7 @@ router.post('/conversations/:id/messages', async (req, res) => {
           hasMidia: Boolean(msg.midiaStorageKey),
           midiaMimeType: msg.midiaMimeType || null,
         },
-        twilio,
+        whatsapp,
       });
     }
 
@@ -441,7 +422,7 @@ router.post('/conversations/:id/messages', async (req, res) => {
         conteudo: msg.conteudo,
         createdAt: msg.createdAt,
       },
-      twilio,
+      whatsapp,
     });
   } catch (e) {
     console.error('hybridChat send:', e);

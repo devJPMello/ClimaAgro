@@ -1,18 +1,10 @@
 const express = require('express');
-const axios = require('axios');
 const HybridConversation = require('../models/HybridConversation');
 const HybridMessage = require('../models/HybridMessage');
-const { saveBuffer, fetchRemoteToBuffer } = require('../services/hybridMediaStorage');
+const { saveBuffer } = require('../services/hybridMediaStorage');
+const { getMediaBuffer } = require('../services/evolutionApi');
 
 const router = express.Router();
-
-function dualBodyParser(req, res, next) {
-  const ct = String(req.get('content-type') || '');
-  if (ct.includes('application/json')) {
-    return express.json({ limit: '8mb' })(req, res, next);
-  }
-  return express.urlencoded({ extended: true, limit: '8mb' })(req, res, next);
-}
 
 function normalizeDigits(value) {
   return String(value || '').replace(/\D/g, '');
@@ -28,6 +20,38 @@ function phonesMatch(stored, inbound) {
   return false;
 }
 
+// remoteJid format: "5511999999999@s.whatsapp.net" or "5511999999999@c.us"
+function extractPhone(remoteJid) {
+  return normalizeDigits(String(remoteJid || '').split('@')[0]);
+}
+
+function extractText(message, messageType) {
+  if (!message) return '';
+  if (messageType === 'conversation') return String(message.conversation || '');
+  if (messageType === 'extendedTextMessage') return String(message.extendedTextMessage?.text || '');
+  if (messageType === 'imageMessage') return String(message.imageMessage?.caption || '');
+  if (messageType === 'videoMessage') return String(message.videoMessage?.caption || '');
+  if (messageType === 'audioMessage') return '';
+  if (messageType === 'documentMessage') return String(message.documentMessage?.caption || '');
+  return '';
+}
+
+const MEDIA_TYPES = new Set([
+  'imageMessage',
+  'audioMessage',
+  'videoMessage',
+  'documentMessage',
+  'stickerMessage',
+]);
+
+function mimeFromMessage(messageType, message) {
+  if (messageType === 'imageMessage') return message.imageMessage?.mimetype || 'image/jpeg';
+  if (messageType === 'audioMessage') return message.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
+  if (messageType === 'videoMessage') return message.videoMessage?.mimetype || 'video/mp4';
+  if (messageType === 'documentMessage') return message.documentMessage?.mimetype || 'application/octet-stream';
+  return 'application/octet-stream';
+}
+
 function tipoFromMime(mime) {
   const m = String(mime || '').toLowerCase();
   if (m.startsWith('audio/')) return 'audio';
@@ -35,166 +59,72 @@ function tipoFromMime(mime) {
   return 'imagem';
 }
 
-/**
- * Extrai remetente, texto e mídias (Twilio / genérico).
- */
-function parseInbound(body) {
-  if (!body || typeof body !== 'object') return null;
+/** GET — verificação manual no navegador. */
+router.get('/', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: 'climaagro-whatsapp-webhook',
+    provider: 'evolution-api',
+    hint: 'Configure no painel Evolution API: Webhook Global → POST para esta URL.',
+  });
+});
 
-  const twilioFrom = body.From || body.from;
-  if (twilioFrom) {
-    const digits = normalizeDigits(twilioFrom);
-    const numMedia = Number(body.NumMedia || body.numMedia || 0);
-    const media = [];
-    for (let i = 0; i < numMedia; i++) {
-      const url = body[`MediaUrl${i}`];
-      const ct = body[`MediaContentType${i}`] || 'application/octet-stream';
-      if (url) media.push({ url, contentType: ct });
-    }
-    const text = String(body.Body ?? body.body ?? '');
-    return { fromDigits: digits, text, media, provider: 'twilio' };
+router.post('/', express.json({ limit: '8mb' }), async (req, res) => {
+  // Segurança: validar apikey enviada pela Evolution API
+  const expectedKey = process.env.EVOLUTION_API_KEY || '';
+  const receivedKey = String(req.body?.apikey || req.headers['apikey'] || '');
+  if (expectedKey && receivedKey !== expectedKey) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const phone =
-    body.phone ||
-    body.de ||
-    body.sender ||
-    body.from ||
-    (body.data && (body.data.phone || body.data.sender)) ||
-    '';
-  const text =
-    body.message ||
-    body.texto ||
-    body.text ||
-    body.body ||
-    (body.data && (body.data.message || body.data.text)) ||
-    '';
-
-  const media = [];
-  const singleUrl = body.mediaUrl || body.media_url || body.url || (body.data && body.data.mediaUrl);
-  const singleMime =
-    body.mimeType || body.mime || body.contentType || 'image/jpeg';
-
-  if (singleUrl) {
-    media.push({ url: singleUrl, contentType: singleMime });
+  // Só processar o evento de nova mensagem
+  if (req.body?.event !== 'messages.upsert') {
+    return res.status(200).json({ ok: true, skipped: true });
   }
 
-  if (phone && (text || media.length > 0)) {
-    return {
-      fromDigits: normalizeDigits(phone),
-      text: String(text || ''),
-      media,
-      provider: 'generic',
-    };
+  const data = req.body?.data;
+  if (!data?.key) {
+    return res.status(400).json({ error: 'Payload inválido.' });
   }
 
-  return null;
-}
-
-async function persistInboundMessages(conv, parsed, req) {
-  const io = req.app.get('io');
-  const sid = process.env.TWILIO_ACCOUNT_SID;
-  const token = process.env.TWILIO_AUTH_TOKEN;
-
-  const agronomoDigits = parsed.fromDigits;
-
-  if (parsed.media.length === 0) {
-    const msg = await HybridMessage.create({
-      conversationId: conv.id,
-      remetenteId: agronomoDigits,
-      conteudo: parsed.text.slice(0, 8000),
-      tipo: 'texto',
-      origem: 'whatsapp',
-    });
-    if (io) {
-      io.to(`produtor:${conv.produtorClerkId}`).emit('hybrid:message', {
-        conversationId: conv.id,
-        threadId: conv.iaThreadId,
-        message: {
-          id: msg.id,
-          sender: 'agronomo',
-          kind: 'hybrid',
-          text: msg.conteudo,
-          tipo: msg.tipo,
-          origem: msg.origem,
-          createdAt: msg.createdAt,
-          hasMidia: false,
-          midiaMimeType: null,
-        },
-        provider: parsed.provider,
-      });
-    }
-    return;
+  // Ignorar mensagens enviadas pelo próprio número (evita loop)
+  if (data.key.fromMe === true) {
+    return res.status(200).json({ ok: true, skipped: true });
   }
 
-  for (let i = 0; i < parsed.media.length; i++) {
-    const m = parsed.media[i];
-    let buffer;
-    try {
-      if (parsed.provider === 'twilio' && sid && token) {
-        buffer = await fetchRemoteToBuffer(m.url, { auth: { username: sid, password: token } });
-      } else {
-        buffer = await fetchRemoteToBuffer(m.url);
-      }
-    } catch (e) {
-      console.error('[whatsapp webhook] download media failed', e.message);
-      continue;
-    }
+  const remoteJid = String(data.key.remoteJid || '');
 
-    const storageKey = await saveBuffer(buffer, m.contentType);
-    const tipo = tipoFromMime(m.contentType);
-    const caption =
-      i === 0 && parsed.text.trim()
-        ? parsed.text.trim().slice(0, 8000)
-        : tipo === 'audio'
-          ? '🎤 Áudio recebido'
-          : '📷 Imagem recebida';
+  // Ignorar mensagens de grupos
+  if (remoteJid.endsWith('@g.us')) {
+    return res.status(200).json({ ok: true, skipped: true });
+  }
 
-    const msg = await HybridMessage.create({
-      conversationId: conv.id,
-      remetenteId: agronomoDigits,
-      conteudo: caption,
-      tipo,
-      origem: 'whatsapp',
-      midiaStorageKey: storageKey,
-      midiaMimeType: m.contentType || null,
-    });
+  const messageId = String(data.key.id || '');
+  const agronomoDigits = extractPhone(remoteJid);
+  if (!agronomoDigits || agronomoDigits.length < 8) {
+    return res.status(400).json({ error: 'Número de telefone inválido.' });
+  }
 
-    if (io) {
-      io.to(`produtor:${conv.produtorClerkId}`).emit('hybrid:message', {
-        conversationId: conv.id,
-        threadId: conv.iaThreadId,
-        message: {
-          id: msg.id,
-          sender: 'agronomo',
-          kind: 'hybrid',
-          text: msg.conteudo,
-          tipo: msg.tipo,
-          origem: msg.origem,
-          createdAt: msg.createdAt,
-          hasMidia: true,
-          midiaMimeType: msg.midiaMimeType,
-        },
-        provider: parsed.provider,
-      });
+  // Idempotência: ignorar mensagem já processada
+  if (messageId) {
+    const existing = await HybridMessage.findOne({ where: { externalMessageId: messageId } });
+    if (existing) {
+      return res.status(200).json({ ok: true, duplicate: true });
     }
   }
-}
 
-router.post('/', dualBodyParser, async (req, res) => {
-  const parsed = parseInbound(req.body);
-  if (!parsed || !parsed.fromDigits) {
-    return res.status(400).json({ success: false, message: 'Payload não reconhecido.' });
+  const message = data.message || {};
+  const messageType = String(data.messageType || '');
+  const text = extractText(message, messageType);
+  const isMedia = MEDIA_TYPES.has(messageType);
+
+  if (!isMedia && !text.trim()) {
+    return res.status(200).json({ ok: true });
   }
-
-  const agronomoDigits = parsed.fromDigits;
 
   try {
     const candidates = await HybridConversation.findAll({
-      where: {
-        atendimentoAtivo: true,
-        intervencaoHumana: true,
-      },
+      where: { atendimentoAtivo: true, intervencaoHumana: true },
       order: [['updatedAt', 'DESC']],
       limit: 40,
     });
@@ -202,19 +132,89 @@ router.post('/', dualBodyParser, async (req, res) => {
 
     if (!conv) {
       console.warn('[whatsapp webhook] Nenhuma conversa ativa para o agrônomo', agronomoDigits);
-      return res.status(200).type('text/plain').send('OK');
+      return res.status(200).json({ ok: true });
     }
 
-    if (parsed.media.length === 0 && !parsed.text.trim()) {
-      return res.status(200).type('text/plain').send('OK');
+    const io = req.app.get('io');
+
+    if (!isMedia) {
+      const msg = await HybridMessage.create({
+        conversationId: conv.id,
+        remetenteId: agronomoDigits,
+        conteudo: text.slice(0, 8000),
+        tipo: 'texto',
+        origem: 'whatsapp',
+        externalMessageId: messageId || null,
+      });
+      if (io) {
+        io.to(`produtor:${conv.produtorClerkId}`).emit('hybrid:message', {
+          conversationId: conv.id,
+          threadId: conv.iaThreadId,
+          message: {
+            id: msg.id,
+            sender: 'agronomo',
+            kind: 'hybrid',
+            text: msg.conteudo,
+            tipo: msg.tipo,
+            origem: msg.origem,
+            createdAt: msg.createdAt,
+            hasMidia: false,
+            midiaMimeType: null,
+          },
+        });
+      }
+      return res.status(200).json({ ok: true });
     }
 
-    await persistInboundMessages(conv, parsed, req);
+    // Mensagem de mídia
+    const mimeType = mimeFromMessage(messageType, message);
+    const caption =
+      text.trim().slice(0, 8000) ||
+      (tipoFromMime(mimeType) === 'audio' ? '🎤 Áudio recebido' : '📷 Imagem recebida');
 
-    return res.status(200).type('text/plain').send('OK');
+    let storageKey = null;
+    let resolvedMime = mimeType;
+    try {
+      const result = await getMediaBuffer(data.key, message);
+      resolvedMime = result.mimeType || mimeType;
+      storageKey = await saveBuffer(result.buffer, resolvedMime);
+    } catch (e) {
+      console.error('[whatsapp webhook] download de mídia falhou:', e.message);
+    }
+
+    const msg = await HybridMessage.create({
+      conversationId: conv.id,
+      remetenteId: agronomoDigits,
+      conteudo: caption,
+      tipo: tipoFromMime(resolvedMime),
+      origem: 'whatsapp',
+      midiaStorageKey: storageKey,
+      midiaMimeType: resolvedMime,
+      externalMessageId: messageId || null,
+    });
+
+    if (io) {
+      io.to(`produtor:${conv.produtorClerkId}`).emit('hybrid:message', {
+        conversationId: conv.id,
+        threadId: conv.iaThreadId,
+        message: {
+          id: msg.id,
+          sender: 'agronomo',
+          kind: 'hybrid',
+          text: msg.conteudo,
+          tipo: msg.tipo,
+          origem: msg.origem,
+          createdAt: msg.createdAt,
+          hasMidia: Boolean(storageKey),
+          midiaMimeType: resolvedMime,
+        },
+      });
+    }
+
+    return res.status(200).json({ ok: true });
   } catch (e) {
     console.error('[whatsapp webhook]', e);
-    return res.status(500).json({ success: false, message: 'Erro ao processar webhook.' });
+    return res.status(500).json({ error: 'Erro ao processar webhook.' });
   }
 });
 

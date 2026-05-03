@@ -43,12 +43,22 @@ const HybridMessage = sequelize.define(
       allowNull: true,
       field: 'midia_mime_type',
     },
+    externalMessageId: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      unique: true,
+      field: 'external_message_id',
+    },
   },
   {
     tableName: 'hybrid_messages',
     timestamps: true,
     updatedAt: false,
-    indexes: [{ fields: ['conversationId'] }, { fields: ['createdAt'] }],
+    indexes: [
+      { fields: ['conversationId'] },
+      { fields: ['createdAt'] },
+      { fields: ['external_message_id'] },
+    ],
   }
 );
 

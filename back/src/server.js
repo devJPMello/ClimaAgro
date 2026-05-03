@@ -135,7 +135,26 @@ server.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📊 API: http://localhost:${PORT}/api  ·  health: http://localhost:${PORT}/api/health`);
-  console.log(`💬 WebSocket: /socket.io  ·  Webhook: POST /webhook/whatsapp`);
+  console.log(`💬 WebSocket: /socket.io  ·  Webhook WhatsApp: POST http://localhost:${PORT}/webhook/whatsapp`);
+
+  const publicBase = String(process.env.PUBLIC_API_BASE_URL || '').trim().replace(/\/+$/, '');
+  if (publicBase) {
+    console.log(`📲 Evolution API — URL do webhook (configure no painel Evolution):`);
+    console.log(`   POST ${publicBase}/webhook/whatsapp`);
+  } else {
+    console.log(`📲 WhatsApp webhook: defina PUBLIC_API_BASE_URL no .env para ver a URL pública do webhook.`);
+  }
+
+  const evolutionOk =
+    process.env.EVOLUTION_API_URL &&
+    process.env.EVOLUTION_API_KEY &&
+    process.env.EVOLUTION_INSTANCE_NAME;
+  if (evolutionOk) {
+    console.log(`✉️  Evolution API: envio de WhatsApp habilitado (instância: ${process.env.EVOLUTION_INSTANCE_NAME}).`);
+  } else {
+    console.log(`⚠️  Evolution API: envio desabilitado — defina EVOLUTION_API_URL, EVOLUTION_API_KEY e EVOLUTION_INSTANCE_NAME`);
+  }
+
   startClimateAutoSyncScheduler({ sequelize, models });
 });
 

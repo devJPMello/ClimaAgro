@@ -5,7 +5,10 @@ const { body, validationResult } = require('express-validator');
 const { randomUUID } = require('crypto');
 const { Op } = require('sequelize');
 const multer = require('multer');
+const pdfParse = require('pdf-parse');
 const ChatHistory = require('../models/ChatHistory');
+
+const MAX_ATTACHMENT_TEXT_CHARS = 12000;
 
 const router = express.Router();
 const upload = multer({
@@ -179,7 +182,30 @@ async function callGeminiParts(parts) {
   return extractGeminiText(response.data);
 }
 
-function fileToTextAttachment(file) {
+function isPdfFile(file) {
+  const mime = String(file.mimetype || '').toLowerCase();
+  return (
+    mime === 'application/pdf' ||
+    mime === 'application/x-pdf' ||
+    String(file.originalname || '')
+      .toLowerCase()
+      .endsWith('.pdf')
+  );
+}
+
+/** Camada de texto (rápida). PDF escaneado costuma vir vazio — o modelo ainda recebe o PDF inline. */
+async function extractPdfPlainText(buffer) {
+  const data = await pdfParse(buffer);
+  const raw = String(data.text || '')
+    .replace(/\u00a0/g, ' ')
+    .trim();
+  return raw.replace(/\s+/g, ' ').slice(0, MAX_ATTACHMENT_TEXT_CHARS);
+}
+
+/**
+ * Extrai texto de anexos que não são PDF (txt, json, etc.).
+ */
+function extractNonPdfTextAttachment(file) {
   const mime = String(file.mimetype || '').toLowerCase();
   const name = file.originalname || 'arquivo';
   const isTextLike =
@@ -188,9 +214,9 @@ function fileToTextAttachment(file) {
     mime.includes('xml') ||
     mime.includes('javascript');
   if (!isTextLike) return null;
-  const text = file.buffer.toString('utf8').slice(0, 12000);
-  if (!text.trim()) return null;
-  return `--- Arquivo anexado: ${name} (${mime || 'desconhecido'}) ---\n${text}`;
+  const plain = file.buffer.toString('utf8').slice(0, MAX_ATTACHMENT_TEXT_CHARS);
+  if (!plain.trim()) return null;
+  return `--- Arquivo anexado: ${name} (${mime || 'desconhecido'}) ---\n${plain}`;
 }
 
 function buildPrompt(payload) {
@@ -261,6 +287,7 @@ router.post(
       const threadIsFavorite = Boolean(recentRecords[0]?.isFavorite);
       const context = buildThreadContext(orderedContext);
       const hasImages = files.some((f) => String(f.mimetype || '').startsWith('image/'));
+      const hasPdf = files.some((f) => isPdfFile(f));
 
       const systemRole = [
         'Você é o IAgro, assistente agrônomo especialista do ClimaAgro.',
@@ -278,11 +305,13 @@ router.post(
         'Histórico da conversa:',
         context,
         '',
-        `Pergunta atual do usuário: ${message || (hasImages ? 'Analise a imagem desta planta.' : '')}`,
+        `Pergunta atual do usuário: ${message || (hasImages ? 'Analise a imagem desta planta.' : hasPdf ? 'Analise o(s) documento(s) PDF anexado(s).' : '')}`,
       ].join('\n');
 
       const textParts = [prompt];
       const imageParts = [];
+      const pdfInlineParts = [];
+      let pdfInstructionAdded = false;
 
       for (const file of files) {
         if (String(file.mimetype || '').startsWith('image/')) {
@@ -292,8 +321,43 @@ router.post(
               data: file.buffer.toString('base64'),
             },
           });
+        } else if (isPdfFile(file) && file.buffer?.length) {
+          const name = file.originalname || 'documento.pdf';
+          let plain = '';
+          let parseFailed = false;
+          try {
+            plain = await extractPdfPlainText(file.buffer);
+          } catch (e) {
+            parseFailed = true;
+            console.error('pdf-parse error:', e.message);
+            textParts.push(
+              `[PDF "${name}": falha na extração local de texto (${e.message || 'erro'}). O PDF completo foi anexado para leitura pelo modelo.]`
+            );
+          }
+          if (plain) {
+            textParts.push(`--- Texto extraído do PDF (${name}) ---\n${plain}`);
+          } else if (!parseFailed) {
+            textParts.push(
+              `[PDF "${name}": pouco ou nenhum texto na camada digital — o arquivo PDF foi anexado; interprete também páginas escaneadas ou figuras.]`
+            );
+          }
+          if (!pdfInstructionAdded) {
+            textParts.push(
+              [
+                '## PDF anexo (multimodal)',
+                'Além do texto acima (quando houver), use o PDF enviado como parte da mensagem: leia texto, tabelas e descreva imagens manuscritas ou impressas visíveis nas páginas.',
+              ].join('\n')
+            );
+            pdfInstructionAdded = true;
+          }
+          pdfInlineParts.push({
+            inlineData: {
+              mimeType: 'application/pdf',
+              data: file.buffer.toString('base64'),
+            },
+          });
         } else {
-          const extracted = fileToTextAttachment(file);
+          const extracted = extractNonPdfTextAttachment(file);
           if (extracted) {
             textParts.push(extracted);
           } else {
@@ -358,8 +422,11 @@ router.post(
         ].join('\n'));
       }
 
-      const parts = [{ text: textParts.join('\n\n') }, ...imageParts];
-      const responseText = imageParts.length > 0 || files.length > 0 ? await callGeminiParts(parts) : await callGemini(prompt);
+      const parts = [{ text: textParts.join('\n\n') }, ...imageParts, ...pdfInlineParts];
+      const responseText =
+        imageParts.length > 0 || pdfInlineParts.length > 0 || files.length > 0
+          ? await callGeminiParts(parts)
+          : await callGemini(prompt);
       if (!responseText) {
         return res.status(502).json({ message: 'Resposta vazia do modelo.' });
       }
