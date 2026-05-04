@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { useUser } from '@clerk/clerk-react';
 import {
@@ -7,6 +7,7 @@ import {
   CheckCircle,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Mail,
   MapPin,
   MessageCircle,
@@ -16,9 +17,13 @@ import {
   Upload,
   User,
   UserPlus,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardBody } from '../components/ui/Card';
+import { EmptyState } from '../components/ui/EmptyState';
+import { SkeletonCard } from '../components/ui/Skeleton';
+import { Tooltip } from '../components/ui/Tooltip';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
@@ -44,6 +49,22 @@ const UF_IBGE_ID_BY_SIGLA: Record<string, string> = {
   MA: '21', MT: '51', MS: '50', MG: '31', PA: '15', PB: '25', PR: '41', PE: '26', PI: '22',
   RJ: '33', RN: '24', RS: '43', RO: '11', RR: '14', SC: '42', SP: '35', SE: '28', TO: '17',
 };
+
+const PRIVACY_POLICY_URL = (import.meta.env.VITE_PRIVACY_POLICY_URL as string | undefined)?.trim() ?? '';
+
+function maskEmail(email: string): string {
+  const s = email.trim();
+  if (!s) return '—';
+  const lower = s.toLowerCase();
+  if (lower.includes('email-nao-informado') || lower.includes('nao-informado')) return s;
+  const i = s.indexOf('@');
+  if (i < 1) return s;
+  const local = s.slice(0, i);
+  const domain = s.slice(i + 1);
+  if (!domain) return s;
+  const maskedLocal = local.length === 1 ? `${local}***` : `${local[0]}***`;
+  return `${maskedLocal}@${domain}`;
+}
 
 interface Agronomo {
   id: string;
@@ -75,6 +96,8 @@ export function AgronomosParceiros() {
   const [scanningCrea, setScanningCrea] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [enviandoEspecialista, setEnviandoEspecialista] = useState(false);
+  const [enviandoCadastro, setEnviandoCadastro] = useState(false);
+  const [iagroThreadId, setIagroThreadId] = useState<string | null>(null);
   const [busca, setBusca] = useState('');
   const [estadoSelecionado, setEstadoSelecionado] = useState('todos');
   const [municipioSelecionado, setMunicipioSelecionado] = useState('todos');
@@ -104,42 +127,55 @@ export function AgronomosParceiros() {
     []
   );
 
-  useEffect(() => {
-    async function carregar() {
-      setLoadingLista(true);
-      try {
-        const response = await listarAgronomosParceiros();
-        const normalizados = (response.agronomos || []).map((item): Agronomo => ({
-          id: String(item.id),
-          nome: item.nome || 'Agrônomo',
-          email: item.email || 'email-nao-informado@climaagro.com',
-          whatsapp: item.whatsapp || '',
-          telefoneFormatado: item.telefoneFormatado || item.telefone || 'Não informado',
-          municipio: item.municipio || 'Não informado',
-          uf: item.uf || '--',
-          crea: item.crea || 'Não informado',
-          especialidade: item.especialidade || 'Especialidade não informada',
-          avaliacao:
-            typeof item.avaliacao === 'number' && !Number.isNaN(item.avaliacao) ? item.avaliacao : 0,
-          totalAvaliacoes: typeof item.totalAvaliacoes === 'number' ? item.totalAvaliacoes : 0,
-          totalAtendimentos: typeof item.totalAtendimentos === 'number' ? item.totalAtendimentos : 0,
-          tempoResposta: item.tempoResposta || 'N/A',
-          sobre: item.sobre || 'Profissional parceiro da rede ClimaAgro.',
-          areasAtuacao: Array.isArray(item.areasAtuacao) && item.areasAtuacao.length > 0
-            ? item.areasAtuacao
-            : [item.especialidade || 'Consultoria Agronômica'],
-        }));
-        setAgronomos(normalizados);
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : 'Erro ao carregar agrônomos.';
-        toast.error(msg);
-        setAgronomos([]);
-      } finally {
-        setLoadingLista(false);
-      }
+  const carregarLista = useCallback(async () => {
+    setLoadingLista(true);
+    try {
+      const response = await listarAgronomosParceiros();
+      const normalizados = (response.agronomos || []).map((item): Agronomo => ({
+        id: String(item.id),
+        nome: item.nome || 'Agrônomo',
+        email: item.email || 'email-nao-informado@climaagro.com',
+        whatsapp: item.whatsapp || '',
+        telefoneFormatado: item.telefoneFormatado || item.telefone || 'Não informado',
+        municipio: item.municipio || 'Não informado',
+        uf: item.uf || '--',
+        crea: item.crea || 'Não informado',
+        especialidade: item.especialidade || 'Especialidade não informada',
+        avaliacao:
+          typeof item.avaliacao === 'number' && !Number.isNaN(item.avaliacao) ? item.avaliacao : 0,
+        totalAvaliacoes: typeof item.totalAvaliacoes === 'number' ? item.totalAvaliacoes : 0,
+        totalAtendimentos: typeof item.totalAtendimentos === 'number' ? item.totalAtendimentos : 0,
+        tempoResposta: item.tempoResposta || 'N/A',
+        sobre: item.sobre || 'Profissional parceiro da rede ClimaAgro.',
+        areasAtuacao: Array.isArray(item.areasAtuacao) && item.areasAtuacao.length > 0
+          ? item.areasAtuacao
+          : [item.especialidade || 'Consultoria Agronômica'],
+      }));
+      setAgronomos(normalizados);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Erro ao carregar agrônomos.';
+      toast.error(msg);
+      setAgronomos([]);
+    } finally {
+      setLoadingLista(false);
     }
-    void carregar();
   }, []);
+
+  useEffect(() => {
+    void carregarLista();
+  }, [carregarLista]);
+
+  useEffect(() => {
+    if (!modalPerfilAberto) {
+      setIagroThreadId(null);
+      return;
+    }
+    try {
+      setIagroThreadId(sessionStorage.getItem('climaagro.iagro.activeThreadId'));
+    } catch {
+      setIagroThreadId(null);
+    }
+  }, [modalPerfilAberto]);
 
   const estados = useMemo(
     () => [{ value: 'todos', label: 'Todos os Estados' }, ...ufOptionsOrdenadas],
@@ -156,6 +192,23 @@ export function AgronomosParceiros() {
     []
   );
 
+  const filtrosAtivos = useMemo(
+    () =>
+      busca.trim() !== '' ||
+      estadoSelecionado !== 'todos' ||
+      municipioSelecionado !== 'todos' ||
+      especialidadeSelecionada !== 'todas',
+    [busca, estadoSelecionado, municipioSelecionado, especialidadeSelecionada]
+  );
+
+  function limparFiltros() {
+    setBusca('');
+    setEstadoSelecionado('todos');
+    setMunicipioSelecionado('todos');
+    setEspecialidadeSelecionada('todas');
+    setPaginaAtual(1);
+  }
+
   useEffect(() => {
     if (municipioSelecionado !== 'todos' && !municipios.includes(municipioSelecionado)) {
       setMunicipioSelecionado('todos');
@@ -170,7 +223,10 @@ export function AgronomosParceiros() {
         const bateBusca =
           !termo ||
           item.nome.toLowerCase().includes(termo) ||
-          item.especialidade.toLowerCase().includes(termo);
+          item.especialidade.toLowerCase().includes(termo) ||
+          item.crea.toLowerCase().includes(termo) ||
+          item.municipio.toLowerCase().includes(termo) ||
+          item.areasAtuacao.some((a) => a.toLowerCase().includes(termo));
         const bateEstado = estadoSelecionado === 'todos' || item.uf === estadoSelecionado;
         const bateMunicipio = municipioSelecionado === 'todos' || item.municipio === municipioSelecionado;
         const bateEspecialidade =
@@ -179,6 +235,18 @@ export function AgronomosParceiros() {
       }),
     [agronomos, busca, estadoSelecionado, municipioSelecionado, especialidadeSelecionada]
   );
+
+  const escalacaoBloqueio = useMemo(() => {
+    if (!agronomoSelecionado || !modalPerfilAberto) return null as string | null;
+    if (!user?.id) return 'Faça login para enviar o histórico ao especialista.';
+    if (!iagroThreadId?.trim()) {
+      return 'Abra o IAgro, converse com a IA e volte aqui para enviar o histórico.';
+    }
+    if (!agronomoSelecionado.whatsapp?.trim()) return 'Este agrônomo não possui WhatsApp cadastrado.';
+    return null;
+  }, [agronomoSelecionado, modalPerfilAberto, user?.id, iagroThreadId]);
+
+  const podeEscalarParaEspecialista = escalacaoBloqueio === null && !!agronomoSelecionado && modalPerfilAberto;
 
   const totalPaginas = Math.max(1, Math.ceil(agronomosFiltrados.length / PAGE_SIZE));
   const paginaCorrigida = Math.min(paginaAtual, totalPaginas);
@@ -288,6 +356,7 @@ export function AgronomosParceiros() {
       return;
     }
     void (async () => {
+      setEnviandoCadastro(true);
       try {
         await cadastrarAgronomoParceiro({
           nome: cadastro.nome.trim(),
@@ -299,7 +368,9 @@ export function AgronomosParceiros() {
           especialidade: cadastro.especialidade.trim(),
           sobre: cadastro.sobre.trim(),
         });
-        toast.success('Cadastro recebido! Em breve entraremos em contato.');
+        toast.success(
+          'Cadastro recebido! Em breve entraremos em contato. Após aprovação da equipe, o perfil poderá aparecer nesta lista.'
+        );
         setModalCadastroAberto(false);
         setCadastro({
           nome: '',
@@ -311,11 +382,24 @@ export function AgronomosParceiros() {
           especialidade: '',
           sobre: '',
         });
+        await carregarLista();
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'Falha ao enviar cadastro.';
         toast.error(msg);
+      } finally {
+        setEnviandoCadastro(false);
       }
     })();
+  }
+
+  async function copiarEmailAgronomo() {
+    if (!agronomoSelecionado?.email?.trim()) return;
+    try {
+      await navigator.clipboard.writeText(agronomoSelecionado.email.trim());
+      toast.success('Email copiado para a área de transferência.');
+    } catch {
+      toast.error('Não foi possível copiar. Copie manualmente se precisar.');
+    }
   }
 
   return (
@@ -377,7 +461,7 @@ export function AgronomosParceiros() {
                   setBusca(e.target.value);
                   setPaginaAtual(1);
                 }}
-                placeholder="Buscar por nome ou especialidade..."
+                placeholder="Nome, especialidade, CREA, município ou área de atuação..."
                 className="pl-10"
               />
             </div>
@@ -421,20 +505,63 @@ export function AgronomosParceiros() {
       </Card>
 
       <Card>
-        <div className="p-5">
+        <CardBody className="space-y-4 p-5">
+          {!loadingLista && agronomos.length > 0 && (
+            <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
+              {filtrosAtivos ? (
+                <>
+                  Mostrando <strong className="text-foreground">{agronomosFiltrados.length}</strong> de{' '}
+                  <strong className="text-foreground">{agronomos.length}</strong> agrônomo
+                  {agronomos.length === 1 ? '' : 's'} com os filtros atuais.
+                </>
+              ) : (
+                <>
+                  <strong className="text-foreground">{agronomos.length}</strong> agrônomo
+                  {agronomos.length === 1 ? '' : 's'} na rede.
+                </>
+              )}
+            </p>
+          )}
+
           {loadingLista && (
-            <p className="text-sm text-muted-foreground">Carregando agrônomos parceiros...</p>
+            <div
+              className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3"
+              aria-busy="true"
+              aria-label="A carregar lista de agrônomos"
+            >
+              {Array.from({ length: 6 }).map((_, i) => (
+                <SkeletonCard key={i} />
+              ))}
+            </div>
           )}
-          {!loadingLista && agronomosFiltrados.length === 0 && (
-            <p className="text-sm text-muted-foreground">Nenhum agrônomo parceiro encontrado.</p>
+
+          {!loadingLista && agronomos.length === 0 && (
+            <EmptyState
+              icon={Users}
+              title="Ainda não há parceiros cadastrados"
+              description="Quando existirem agrônomos aprovados na rede, eles aparecerão aqui. Se você é agrônomo, use o botão «Você é Agrônomo? Cadastre-se» acima."
+            />
           )}
+
+          {!loadingLista && agronomos.length > 0 && agronomosFiltrados.length === 0 && (
+            <EmptyState
+              icon={Search}
+              title="Nenhum resultado com os filtros atuais"
+              description="Experimente outros termos de busca, estado, município ou especialidade — ou limpe os filtros para voltar a ver todos."
+              action={
+                <Button type="button" onClick={limparFiltros}>
+                  Limpar filtros
+                </Button>
+              }
+            />
+          )}
+
           {!loadingLista && agronomosFiltrados.length > 0 && (
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
               {agronomosPaginados.map((agronomo) => (
                 <Card
                   key={agronomo.id}
-                  className="cursor-pointer transition-all duration-200 hover:shadow-lg"
-                  onClick={() => abrirDetalhes(agronomo)}
+                  className="transition-all duration-200 hover:shadow-md"
                 >
                   <CardBody className="space-y-4">
                     <div className="flex items-start gap-4">
@@ -498,7 +625,7 @@ export function AgronomosParceiros() {
               ))}
             </div>
           )}
-        </div>
+        </CardBody>
 
         {!loadingLista &&
           agronomosFiltrados.length > 0 &&
@@ -511,20 +638,25 @@ export function AgronomosParceiros() {
             const pageNums = Array.from({ length: end - start + 1 }, (_, i) => start + i);
 
             return (
-              <div className="px-6 py-3 border-t border-border flex items-center justify-between text-sm text-muted-foreground">
+              <div
+                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border px-6 py-3 text-sm text-muted-foreground"
+                role="navigation"
+                aria-label="Paginação da lista de agrônomos"
+              >
                 <span>
                   {(paginaCorrigida - 1) * PAGE_SIZE + 1}–
                   {Math.min(paginaCorrigida * PAGE_SIZE, agronomosFiltrados.length)} de {agronomosFiltrados.length}{' '}
                   agrônomos
                 </span>
-                <div className="flex items-center gap-1">
+                <div className="flex flex-wrap items-center gap-1">
                   <button
                     type="button"
                     onClick={() => setPaginaAtual((p) => Math.max(1, p - 1))}
                     disabled={paginaCorrigida === 1}
-                    className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    aria-label="Página anterior"
+                    className="flex h-8 items-center gap-1 rounded px-2 text-sm font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    <ChevronLeft className="w-4 h-4" />
+                    <ChevronLeft className="h-4 w-4" aria-hidden />
                     Anterior
                   </button>
 
@@ -533,11 +665,12 @@ export function AgronomosParceiros() {
                       <button
                         type="button"
                         onClick={() => setPaginaAtual(1)}
-                        className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground transition-colors"
+                        aria-label="Ir para a página 1"
+                        className="h-8 w-8 rounded text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
                       >
                         1
                       </button>
-                      {start > 2 && <span className="px-1 text-muted-foreground select-none">…</span>}
+                      {start > 2 && <span className="select-none px-1 text-muted-foreground">…</span>}
                     </>
                   )}
 
@@ -546,10 +679,12 @@ export function AgronomosParceiros() {
                       key={n}
                       type="button"
                       onClick={() => setPaginaAtual(n)}
-                      className={`w-8 h-8 rounded text-sm font-medium transition-colors ${
+                      aria-label={`Ir para a página ${n}`}
+                      aria-current={n === paginaCorrigida ? 'page' : undefined}
+                      className={`h-8 w-8 rounded text-sm font-medium transition-colors ${
                         n === paginaCorrigida
                           ? 'bg-primary text-primary-foreground'
-                          : 'hover:bg-muted text-muted-foreground'
+                          : 'text-muted-foreground hover:bg-muted'
                       }`}
                     >
                       {n}
@@ -559,12 +694,13 @@ export function AgronomosParceiros() {
                   {end < totalPaginas && (
                     <>
                       {end < totalPaginas - 1 && (
-                        <span className="px-1 text-muted-foreground select-none">…</span>
+                        <span className="select-none px-1 text-muted-foreground">…</span>
                       )}
                       <button
                         type="button"
                         onClick={() => setPaginaAtual(totalPaginas)}
-                        className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground transition-colors"
+                        aria-label={`Ir para a página ${totalPaginas}`}
+                        className="h-8 w-8 rounded text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
                       >
                         {totalPaginas}
                       </button>
@@ -575,10 +711,11 @@ export function AgronomosParceiros() {
                     type="button"
                     onClick={() => setPaginaAtual((p) => Math.min(totalPaginas, p + 1))}
                     disabled={paginaCorrigida === totalPaginas}
-                    className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    aria-label="Página seguinte"
+                    className="flex h-8 items-center gap-1 rounded px-2 text-sm font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Próxima
-                    <ChevronRight className="w-4 h-4" />
+                    <ChevronRight className="h-4 w-4" aria-hidden />
                   </button>
                 </div>
               </div>
@@ -597,13 +734,30 @@ export function AgronomosParceiros() {
               <Button variant="secondary" onClick={() => setModalPerfilAberto(false)}>
                 Fechar
               </Button>
-              <Button
-                variant="secondary"
-                loading={enviandoEspecialista}
-                onClick={() => void enviarParaEspecialista()}
-              >
-                Enviar para Especialista
-              </Button>
+              {escalacaoBloqueio ? (
+                <Tooltip content={escalacaoBloqueio} position="top">
+                  <span className="inline-flex">
+                    <Button
+                      variant="secondary"
+                      loading={enviandoEspecialista}
+                      disabled={!podeEscalarParaEspecialista}
+                      title={!podeEscalarParaEspecialista ? escalacaoBloqueio : undefined}
+                      onClick={() => void enviarParaEspecialista()}
+                    >
+                      Enviar para Especialista
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Button
+                  variant="secondary"
+                  loading={enviandoEspecialista}
+                  disabled={!podeEscalarParaEspecialista}
+                  onClick={() => void enviarParaEspecialista()}
+                >
+                  Enviar para Especialista
+                </Button>
+              )}
               <Button onClick={abrirWhatsapp}>
                 <MessageCircle className="h-4 w-4" />
                 Conversar no WhatsApp
@@ -627,12 +781,15 @@ export function AgronomosParceiros() {
                     {agronomoSelecionado.nome}
                   </h3>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="success" className="inline-flex items-center gap-1">
-                      <CheckCircle className="h-3.5 w-3.5" />
-                      Parceiro Certificado
+                    <Badge variant="info" className="inline-flex items-center gap-1">
+                      <User className="h-3.5 w-3.5" />
+                      Parceiro na rede ClimaAgro
                     </Badge>
-                    <Badge variant="info">{agronomoSelecionado.especialidade}</Badge>
+                    <Badge variant="default">{agronomoSelecionado.especialidade}</Badge>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Perfis listados após revisão cadastral; a plataforma não substitui a fiscalização do CREA/CONFEA.
+                  </p>
                   <p className="inline-flex items-center gap-1 text-sm text-severity-medium">
                     <Star className="h-4 w-4 fill-current" />
                     {agronomoSelecionado.totalAvaliacoes > 0 ? (
@@ -662,13 +819,37 @@ export function AgronomosParceiros() {
               </div>
             </div>
 
+            <div
+              className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground"
+              role="note"
+            >
+              <p className="mb-1 font-medium text-foreground">Enviar para especialista</p>
+              <p>
+                Encaminha o histórico da conversa <strong>ativa no IAgro</strong> (neste navegador) para o WhatsApp
+                deste agrônomo. É preciso estar <strong>logado</strong> e ter usado o IAgro nesta sessão; caso
+                contrário, o botão fica indisponível (passe o cursor sobre o botão para ver o motivo).
+              </p>
+            </div>
+
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div className="rounded-xl bg-muted/50 p-4">
                 <p className="mb-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Mail className="h-4 w-4" />
+                  <Mail className="h-4 w-4" aria-hidden />
                   Email
                 </p>
-                <p className="font-medium truncate">{agronomoSelecionado.email}</p>
+                <p className="break-all font-medium text-foreground">{maskEmail(agronomoSelecionado.email)}</p>
+                {agronomoSelecionado.email &&
+                  !agronomoSelecionado.email.toLowerCase().includes('email-nao-informado') && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="mt-2 h-9 px-2 text-sm"
+                      onClick={() => void copiarEmailAgronomo()}
+                    >
+                      <Copy className="h-4 w-4" aria-hidden />
+                      Copiar email completo
+                    </Button>
+                  )}
               </div>
               <div className="rounded-xl bg-muted/50 p-4">
                 <p className="mb-1 inline-flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -770,6 +951,25 @@ export function AgronomosParceiros() {
                 Preencher manualmente
               </Button>
             </div>
+            <p className="max-w-md text-center text-xs leading-relaxed text-muted-foreground">
+              Ao enviar foto ou PDF da carteira CREA, você autoriza o processamento automático só para extração dos
+              dados de cadastro.{' '}
+              {PRIVACY_POLICY_URL ? (
+                <a
+                  href={PRIVACY_POLICY_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary underline hover:no-underline"
+                >
+                  Política de Privacidade
+                </a>
+              ) : (
+                <span>
+                  Os dados são tratados em conformidade com a LGPD, exclusivamente para validação e contato da equipe
+                  ClimaAgro.
+                </span>
+              )}
+            </p>
           </div>
         ) : (
           <form className="space-y-4" onSubmit={cadastrarAgronomo}>
@@ -859,7 +1059,9 @@ export function AgronomosParceiros() {
                 <Button type="button" variant="ghost" onClick={() => setModalCadastroAberto(false)}>
                   Cancelar
                 </Button>
-                <Button type="submit">Salvar cadastro</Button>
+                <Button type="submit" loading={enviandoCadastro}>
+                  Salvar cadastro
+                </Button>
               </div>
             </div>
           </form>

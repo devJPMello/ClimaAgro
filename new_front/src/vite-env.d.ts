@@ -19,6 +19,8 @@ interface ImportMetaEnv {
   readonly VITE_IBGE_LOCALIDADES_MUNICIPIOS_URL?: string;
   /** Malha municipal em GeoJSON (IBGE malhas v3, ex. `intrarregiao=Municipio`). */
   readonly VITE_IBGE_MALHA_UF_MUNICIPIOS_GEOJSON_URL?: string;
+  /** URL pública da política de privacidade (ex.: site institucional). Opcional. */
+  readonly VITE_PRIVACY_POLICY_URL?: string;
 }
 
 interface ImportMeta {
