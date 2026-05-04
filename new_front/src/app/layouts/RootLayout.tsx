@@ -1,10 +1,26 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Outlet, Link, useLocation } from 'react-router';
-import { Cloud, LayoutDashboard, MapPin, TrendingUp, LineChart, Bell, FileText, User, LogOut, Menu, X, Bot, Handshake, MessagesSquare } from 'lucide-react';
+import {
+  Cloud,
+  LayoutDashboard,
+  MapPin,
+  TrendingUp,
+  LineChart,
+  Bell,
+  FileText,
+  User,
+  LogOut,
+  Menu,
+  X,
+  Bot,
+  Handshake,
+  MessagesSquare,
+  ClipboardList,
+} from 'lucide-react';
 import { useClerk, useUser } from '@clerk/clerk-react';
+import { useClerkAdmin } from '../../hooks/useClerkAdmin';
 
-
-const navigation = [
+const navigationMain = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
   { name: 'Mapa Climático', path: '/mapa-climatico', icon: MapPin },
   { name: 'Mapa de Produtividade', path: '/mapa-produtividade', icon: TrendingUp },
@@ -14,13 +30,24 @@ const navigation = [
   { name: 'Agrônomos Parceiros', path: '/parceiros', icon: Handshake },
   { name: 'Minhas conversas', path: '/minhas-conversas', icon: MessagesSquare },
   { name: 'Exportar Relatório', path: '/exportar', icon: FileText },
-  { name: 'Perfil', path: '/perfil', icon: User },
 ];
+
+const perfilNavItem = { name: 'Perfil', path: '/perfil', icon: User };
+const consultaNavItem = { name: 'Consulta', path: '/admin/consultas', icon: ClipboardList };
 
 export function RootLayout() {
   const location = useLocation();
   const { signOut } = useClerk();
   const { user } = useUser();
+  const { isAdmin: clerkIsAdmin } = useClerkAdmin(user?.id);
+
+  const navigation = useMemo(() => {
+    const tail = [perfilNavItem];
+    if (user?.id && clerkIsAdmin) {
+      tail.unshift(consultaNavItem);
+    }
+    return [...navigationMain, ...tail];
+  }, [user?.id, clerkIsAdmin]);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
