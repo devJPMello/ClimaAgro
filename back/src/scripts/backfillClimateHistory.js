@@ -5,6 +5,7 @@
  * Variáveis de ambiente opcionais:
  *   BACKFILL_START_DATE  — padrão: 2024-01-01
  *   BACKFILL_END_DATE    — padrão: ontem (America/Sao_Paulo)
+ *   OPEN_METEO_SYNC_DELAY_MS — pausa entre UFs (padrão 1200); aumente se receber HTTP 429 da Open-Meteo.
  */
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
@@ -134,7 +135,8 @@ async function run() {
             weatherStation: `Open-Meteo Archive ${uf}`,
             stationCode: `OPENMETEO-ARCHIVE:${uf}`,
             dataQuality: 90,
-            status: 'historico',
+            // ENUM climate_data.status no PostgreSQL: preliminar | confirmado | revisado | final (sem "historico")
+            status: 'final',
             metadata: md,
           },
         });
@@ -170,8 +172,8 @@ async function run() {
       console.error(`  ❌  ${uf}: ${e.message || e}`);
     }
 
-    // Respeitar rate-limit da Open-Meteo Archive (~10 req/s free tier)
-    await sleep(Number(process.env.OPEN_METEO_SYNC_DELAY_MS || 300));
+    // Respeitar rate-limit da Open-Meteo Archive (429 se for rápido demais)
+    await sleep(Number(process.env.OPEN_METEO_SYNC_DELAY_MS || 1200));
   }
 
   console.log(`\n✅ Backfill concluído.`);
