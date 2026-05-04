@@ -14,6 +14,7 @@ export interface ProductivityListResponse {
     municipalityIbgeCode?: string | null;
     /** Safra agrícola (ex.: `2024/25`), como na tabela `productivity`. */
     season?: string;
+    /** Referência mensal `YYYY-MM` quando a linha é indexada por mês (`period_ref`). */
     periodRef?: string | null;
     /** Texto do back (ex. nota SIDRA quando produtividade é 0 neste município). */
     observations?: string | null;

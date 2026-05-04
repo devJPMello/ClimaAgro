@@ -20,10 +20,21 @@ import {
   reportTipoFromStoredLabel,
 } from '../../lib/report/gatherReportData';
 
+const PAGE_SIZE_HISTORICO = 4;
+
+type FiltroTipoHistorico = 'todos' | ReportTipoKey;
+type OrdenacaoHistorico = 'recente' | 'tipo_asc' | 'local_asc';
+
 function labelTipoRelatorio(value: string): string {
   if (value === 'clima') return 'Relatório de Clima';
   if (value === 'produtividade') return 'Relatório de Produtividade';
   return 'Relatório Comparativo';
+}
+
+function labelFormatoResumo(value: string): string {
+  if (value === 'pdf') return 'PDF';
+  if (value === 'csv') return 'CSV (separador ;)';
+  return 'Excel (arquivo .csv compatível com Excel / LibreOffice)';
 }
 
 export function ExportarRelatorios() {
@@ -41,15 +52,69 @@ export function ExportarRelatorios() {
   const [loading, setLoading] = useState(false);
   const [loadingHistorico, setLoadingHistorico] = useState(true);
   const [exportacoes, setExportacoes] = useState<ReportExportItemDto[]>([]);
-
-  const PAGE_SIZE_HISTORICO = 4;
   const [paginaHistorico, setPaginaHistorico] = useState(1);
-  const totalPaginasHistorico = Math.max(1, Math.ceil(exportacoes.length / PAGE_SIZE_HISTORICO));
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [filtroTipoHistorico, setFiltroTipoHistorico] = useState<FiltroTipoHistorico>('todos');
+  const [ordenacaoHistorico, setOrdenacaoHistorico] = useState<OrdenacaoHistorico>('recente');
+
+  const onAnoInicioChange = (value: string) => {
+    setAnoInicio(value);
+    const yi = parseInt(value, 10);
+    const yf = parseInt(anoFim, 10);
+    if (Number.isFinite(yi) && Number.isFinite(yf) && yi > yf) {
+      setAnoFim(value);
+    }
+  };
+
+  const onAnoFimChange = (value: string) => {
+    setAnoFim(value);
+    const yi = parseInt(anoInicio, 10);
+    const yf = parseInt(value, 10);
+    if (Number.isFinite(yi) && Number.isFinite(yf) && yf < yi) {
+      setAnoInicio(value);
+    }
+  };
+
+  const historicoFiltrado = useMemo(() => {
+    let rows = [...exportacoes];
+    if (filtroTipoHistorico !== 'todos') {
+      rows = rows.filter((r) => reportTipoFromStoredLabel(r.tipo) === filtroTipoHistorico);
+    }
+    if (ordenacaoHistorico === 'tipo_asc') {
+      rows.sort((a, b) => a.tipo.localeCompare(b.tipo, 'pt-BR'));
+    } else if (ordenacaoHistorico === 'local_asc') {
+      rows.sort((a, b) => a.local.localeCompare(b.local, 'pt-BR'));
+    }
+    return rows;
+  }, [exportacoes, filtroTipoHistorico, ordenacaoHistorico]);
+
+  const totalPaginasHistorico = Math.max(1, Math.ceil(historicoFiltrado.length / PAGE_SIZE_HISTORICO));
   const paginaCorrigidaHistorico = Math.min(paginaHistorico, totalPaginasHistorico);
-  const exportacoesPagina = exportacoes.slice(
+  const exportacoesPagina = historicoFiltrado.slice(
     (paginaCorrigidaHistorico - 1) * PAGE_SIZE_HISTORICO,
     paginaCorrigidaHistorico * PAGE_SIZE_HISTORICO
   );
+
+  const resumoPedido = useMemo(() => {
+    const y0 = Math.min(parseInt(anoInicio, 10), parseInt(anoFim, 10));
+    const y1 = Math.max(parseInt(anoInicio, 10), parseInt(anoFim, 10));
+    const periodo =
+      Number.isFinite(y0) && Number.isFinite(y1) ? `De 1º de jan de ${y0} a 31 de dez de ${y1}` : '—';
+    return {
+      uf: localidadeValida ? displayLocalidadeLabel(localidade) : 'Selecione uma UF',
+      tipo: labelTipoRelatorio(tipoRelatorio),
+      periodo,
+      formato: labelFormatoResumo(formato),
+    };
+  }, [anoFim, anoInicio, formato, localidade, localidadeValida, tipoRelatorio]);
+
+  useEffect(() => {
+    setPaginaHistorico((p) => Math.min(Math.max(1, p), totalPaginasHistorico));
+  }, [historicoFiltrado.length, totalPaginasHistorico]);
+
+  useEffect(() => {
+    setPaginaHistorico(1);
+  }, [filtroTipoHistorico, ordenacaoHistorico]);
 
   const carregarHistorico = useCallback(async () => {
     setLoadingHistorico(true);
@@ -101,7 +166,9 @@ export function ExportarRelatorios() {
       });
 
       if (fmt === 'xlsx') {
-        toast.message('Ficheiro CSV gerado (abre no Excel com importação UTF-8).');
+        toast.message(
+          'Arquivo CSV gerado (separador ;), em UTF-8. No Excel, use Dados > De texto/CSV ou abra direto conforme a versão.'
+        );
       }
 
       await createReportExport({
@@ -111,8 +178,9 @@ export function ExportarRelatorios() {
         formato: formato.toUpperCase(),
         status: 'concluido',
       });
-      toast.success('Download iniciado e registo guardado no histórico.');
+      toast.success('Download iniciado e registro salvo no histórico.');
       await carregarHistorico();
+      setPaginaHistorico(1);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao gerar ou registrar exportação.');
     } finally {
@@ -125,6 +193,7 @@ export function ExportarRelatorios() {
       toast.message('Este pedido falhou; gere um novo relatório.');
       return;
     }
+    setDownloadingId(item.id);
     try {
       const parsed = parseExportPeriodoLabel(item.periodo);
       const tipoItem = reportTipoFromStoredLabel(item.tipo);
@@ -150,6 +219,8 @@ export function ExportarRelatorios() {
       toast.success('Download iniciado.');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao montar o relatório.');
+    } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -160,16 +231,16 @@ export function ExportarRelatorios() {
           Exportar Relatórios
         </h1>
         <p className="text-muted-foreground">
-          Gere relatórios personalizados em diferentes formatos
+          Gere relatórios com dados reais da API; o arquivo é montado no seu navegador e um registro é enviado ao servidor.
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-5">
           <Card>
             <CardHeader>
-              <CardTitle>Configurar Relatório</CardTitle>
-              <CardDescription>Selecione os parâmetros para gerar seu relatório</CardDescription>
+              <CardTitle>Configurar relatório</CardTitle>
+              <CardDescription>Selecione os parâmetros e confira o resumo antes de gerar</CardDescription>
             </CardHeader>
             <CardBody className="space-y-5">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -181,13 +252,13 @@ export function ExportarRelatorios() {
                 />
 
                 <Select
-                  label="Tipo de Relatório"
+                  label="Tipo de relatório"
                   value={tipoRelatorio}
                   onChange={(e) => setTipoRelatorio(e.target.value)}
                   options={[
                     { value: 'clima', label: 'Relatório de Clima' },
                     { value: 'produtividade', label: 'Relatório de Produtividade' },
-                    { value: 'comparativo', label: 'Relatório Comparativo' },
+                    { value: 'comparativo', label: 'Relatório comparativo' },
                   ]}
                 />
               </div>
@@ -196,17 +267,22 @@ export function ExportarRelatorios() {
                 <Select
                   label="Ano inicial"
                   value={anoInicio}
-                  onChange={(e) => setAnoInicio(e.target.value)}
+                  onChange={(e) => onAnoInicioChange(e.target.value)}
                   options={yearOptions}
                 />
 
                 <Select
                   label="Ano final"
                   value={anoFim}
-                  onChange={(e) => setAnoFim(e.target.value)}
+                  onChange={(e) => onAnoFimChange(e.target.value)}
                   options={yearOptions}
                 />
               </div>
+              <p className="text-xs text-muted-foreground -mt-2">
+                Os anos definem o intervalo civil completo (1º de janeiro a 31 de dezembro dos extremos) usado nas
+                consultas de clima e produtividade. Se o ano inicial for maior que o final, o outro campo é ajustado
+                automaticamente.
+              </p>
 
               <Select
                 label="Formato"
@@ -214,10 +290,31 @@ export function ExportarRelatorios() {
                 onChange={(e) => setFormato(e.target.value)}
                 options={[
                   { value: 'pdf', label: 'PDF' },
-                  { value: 'csv', label: 'CSV' },
-                  { value: 'xlsx', label: 'XLSX (Excel)' },
+                  { value: 'csv', label: 'CSV (texto; separador ;)' },
+                  {
+                    value: 'xlsx',
+                    label: 'Excel (mesmo conteúdo em .csv para abrir no Excel — não é planilha .xlsx binária)',
+                  },
                 ]}
               />
+
+              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2">
+                <p className="text-sm font-medium">Resumo do pedido</p>
+                <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                  <li>
+                    <span className="text-foreground font-medium">Local:</span> {resumoPedido.uf}
+                  </li>
+                  <li>
+                    <span className="text-foreground font-medium">Tipo:</span> {resumoPedido.tipo}
+                  </li>
+                  <li>
+                    <span className="text-foreground font-medium">Período:</span> {resumoPedido.periodo}
+                  </li>
+                  <li>
+                    <span className="text-foreground font-medium">Formato:</span> {resumoPedido.formato}
+                  </li>
+                </ul>
+              </div>
 
               <Button
                 variant="primary"
@@ -227,7 +324,7 @@ export function ExportarRelatorios() {
                 disabled={!localidadeValida}
               >
                 <FileText className="w-4 h-4" />
-                Gerar Relatório
+                Gerar relatório
               </Button>
             </CardBody>
           </Card>
@@ -240,37 +337,55 @@ export function ExportarRelatorios() {
             </CardHeader>
             <CardBody className="space-y-4">
               <div>
-                <p className="text-sm mb-2">Formatos Disponíveis</p>
+                <p className="text-sm mb-2 font-medium">Formatos</p>
                 <div className="space-y-2 text-sm text-muted-foreground">
                   <div className="flex items-start gap-2">
-                    <span className="w-12 font-medium">PDF:</span>
-                    <span>Visualização e impressão</span>
+                    <span className="w-14 shrink-0 font-medium text-foreground">PDF</span>
+                    <span>Texto estruturado com cabeçalho e bloco &quot;Dados climáticos e agrícolas&quot; vindos da API.</span>
                   </div>
                   <div className="flex items-start gap-2">
-                    <span className="w-12 font-medium">CSV:</span>
-                    <span>Análise em planilhas</span>
+                    <span className="w-14 shrink-0 font-medium text-foreground">CSV</span>
+                    <span>Algumas linhas-chave (metadados + dados agregados em uma coluna), separador ponto e vírgula.</span>
                   </div>
                   <div className="flex items-start gap-2">
-                    <span className="w-12 font-medium">XLSX:</span>
-                    <span>Excel com formatação</span>
+                    <span className="w-14 shrink-0 font-medium text-foreground">Excel</span>
+                    <span>
+                      Na prática, o mesmo CSV (UTF-8, separador ;) salvo com extensão .csv — adequado para abrir no
+                      Excel; não há arquivo .xlsx binário nem macros.
+                    </span>
                   </div>
                 </div>
               </div>
 
               <div className="pt-4 border-t border-border">
-                <p className="text-sm mb-2">Conteúdo do Relatório</p>
-                <ul className="space-y-1 text-sm text-muted-foreground">
-                  <li>• Dados climáticos históricos</li>
-                  <li>• Análises de produtividade</li>
-                  <li>• Gráficos e tendências</li>
-                  <li>• Recomendações técnicas</li>
+                <p className="text-sm mb-2 font-medium">O que entra no relatório</p>
+                <ul className="space-y-1.5 text-sm text-muted-foreground list-disc list-inside">
+                  <li>
+                    <strong className="text-foreground">Clima:</strong> resumo do período e tabela mensal agregada
+                    (API de clima).
+                  </li>
+                  <li>
+                    <strong className="text-foreground">Produtividade:</strong> resumo mensal, detalhe por cultura,
+                    ano e município (API de produtividade).
+                  </li>
+                  <li>
+                    <strong className="text-foreground">Comparativo:</strong> tabela mensal com clima e produtividade
+                    na mesma linha (por intervalo de anos); com safra, série mensal da API climate-vs-productivity; mais
+                    detalhe de produtividade por registo.
+                  </li>
                 </ul>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Não há gráficos embutidos no PDF nem recomendações agronômicas automáticas — apenas texto e números
+                  obtidos das APIs.
+                </p>
               </div>
 
               <div className="pt-4 border-t border-border">
-                <p className="text-xs text-muted-foreground">
-                  O histórico usa o cabeçalho X-Export-Client-Id. O PDF/CSV é gerado no navegador; «Gerar relatório»
-                  descarrega o ficheiro e marca o pedido como concluído.
+                <p className="text-sm mb-2 font-medium">Histórico neste navegador</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  A lista é ligada a este aparelho e navegador (identificador guardado em armazenamento local). Limpar
+                  dados do site ou trocar de navegador apaga ou altera esse histórico. O servidor só guarda o registro
+                  enviado após o download.
                 </p>
               </div>
             </CardBody>
@@ -280,17 +395,53 @@ export function ExportarRelatorios() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Histórico de Exportações</CardTitle>
-          <CardDescription>Registros persistidos no banco para este navegador</CardDescription>
+          <CardTitle>Histórico de exportações</CardTitle>
+          <CardDescription>
+            Registros no servidor associados ao identificador deste navegador — use filtros para localizar itens
+          </CardDescription>
         </CardHeader>
-        <CardBody>
+        <CardBody className="space-y-4">
+          {!loadingHistorico && exportacoes.length > 0 && (
+            <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+              <Select
+                label="Filtrar por tipo"
+                value={filtroTipoHistorico}
+                onChange={(e) => setFiltroTipoHistorico(e.target.value as FiltroTipoHistorico)}
+                className="sm:max-w-xs"
+                options={[
+                  { value: 'todos', label: 'Todos' },
+                  { value: 'clima', label: 'Clima' },
+                  { value: 'produtividade', label: 'Produtividade' },
+                  { value: 'comparativo', label: 'Comparativo' },
+                ]}
+              />
+              <Select
+                label="Ordenar"
+                value={ordenacaoHistorico}
+                onChange={(e) => setOrdenacaoHistorico(e.target.value as OrdenacaoHistorico)}
+                className="sm:max-w-xs"
+                options={[
+                  { value: 'recente', label: 'Mais recentes primeiro' },
+                  { value: 'tipo_asc', label: 'Tipo (A–Z)' },
+                  { value: 'local_asc', label: 'Local (A–Z)' },
+                ]}
+              />
+            </div>
+          )}
+
           {loadingHistorico ? (
             <p className="text-sm text-muted-foreground py-8 text-center">Carregando histórico…</p>
           ) : exportacoes.length === 0 ? (
             <EmptyState
               icon={FileText}
               title="Nenhuma exportação ainda"
-              description="Use «Gerar relatório» para registrar uma solicitação. Ela aparecerá aqui após salvar no servidor."
+              description='Use "Gerar relatório" para baixar o arquivo e salvar um registro. Ele aparecerá aqui após o envio ao servidor.'
+            />
+          ) : historicoFiltrado.length === 0 ? (
+            <EmptyState
+              icon={FileText}
+              title="Nenhum resultado com este filtro"
+              description="Altere o tipo ou limpe o filtro para ver todas as exportações."
             />
           ) : (
             <div className="overflow-x-auto">
@@ -317,13 +468,13 @@ export function ExportarRelatorios() {
                       </td>
                       <td className="py-4">
                         {exp.status === 'processando' && (
-                          <Badge variant="default">
+                          <Badge variant="default" title="Status enviado pelo servidor; fluxo principal não usa fila assíncrona.">
                             <Loader2 className="w-3 h-3 animate-spin mr-1" />
                             Processando
                           </Badge>
                         )}
                         {exp.status === 'registrado' && (
-                          <Badge variant="medium">
+                          <Badge variant="medium" title="Registro criado; o download pode ter sido feito por outro fluxo.">
                             <Clock className="w-3 h-3 mr-1" />
                             Registrado
                           </Badge>
@@ -348,7 +499,10 @@ export function ExportarRelatorios() {
                             variant="ghost"
                             className="px-3 py-1"
                             onClick={() => void handleDownload(exp)}
-                            title="Descarregar de novo com dados atuais da API"
+                            disabled={downloadingId === exp.id}
+                            loading={downloadingId === exp.id}
+                            title="Baixar de novo com os dados atuais da API (pode levar alguns segundos)"
+                            aria-label={`Baixar novamente: ${exp.tipo}`}
                           >
                             <Download className="w-4 h-4" />
                           </Button>
@@ -368,20 +522,21 @@ export function ExportarRelatorios() {
                 const pageNums = Array.from({ length: end - start + 1 }, (_, i) => start + i);
 
                 return (
-                  <div className="pt-4 border-t border-border flex items-center justify-between text-sm text-muted-foreground">
+                  <div className="pt-4 border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-muted-foreground">
                     <span>
                       {(paginaCorrigidaHistorico - 1) * PAGE_SIZE_HISTORICO + 1}–
-                      {Math.min(paginaCorrigidaHistorico * PAGE_SIZE_HISTORICO, exportacoes.length)} de{' '}
-                      {exportacoes.length} exportações
+                      {Math.min(paginaCorrigidaHistorico * PAGE_SIZE_HISTORICO, historicoFiltrado.length)} de{' '}
+                      {historicoFiltrado.length} exportações
                     </span>
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-1">
                       <button
                         type="button"
                         onClick={() => setPaginaHistorico((p) => Math.max(1, p - 1))}
                         disabled={paginaCorrigidaHistorico === 1}
-                        className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        aria-label="Página anterior"
+                        className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                       >
-                        <ChevronLeft className="w-4 h-4" />
+                        <ChevronLeft className="w-4 h-4" aria-hidden />
                         Anterior
                       </button>
 
@@ -390,7 +545,8 @@ export function ExportarRelatorios() {
                           <button
                             type="button"
                             onClick={() => setPaginaHistorico(1)}
-                            className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground transition-colors"
+                            aria-label="Ir para página 1"
+                            className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors"
                           >
                             1
                           </button>
@@ -403,7 +559,9 @@ export function ExportarRelatorios() {
                           key={n}
                           type="button"
                           onClick={() => setPaginaHistorico(n)}
-                          className={`w-8 h-8 rounded text-sm font-medium transition-colors ${
+                          aria-label={`Ir para página ${n}`}
+                          aria-current={n === paginaCorrigidaHistorico ? 'page' : undefined}
+                          className={`w-8 h-8 rounded text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
                             n === paginaCorrigidaHistorico
                               ? 'bg-primary text-primary-foreground'
                               : 'hover:bg-muted text-muted-foreground'
@@ -421,7 +579,8 @@ export function ExportarRelatorios() {
                           <button
                             type="button"
                             onClick={() => setPaginaHistorico(totalPaginasHistorico)}
-                            className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground transition-colors"
+                            aria-label={`Ir para página ${totalPaginasHistorico}`}
+                            className="w-8 h-8 rounded text-sm font-medium hover:bg-muted text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors"
                           >
                             {totalPaginasHistorico}
                           </button>
@@ -432,10 +591,11 @@ export function ExportarRelatorios() {
                         type="button"
                         onClick={() => setPaginaHistorico((p) => Math.min(totalPaginasHistorico, p + 1))}
                         disabled={paginaCorrigidaHistorico === totalPaginasHistorico}
-                        className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        aria-label="Próxima página"
+                        className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                       >
                         Próxima
-                        <ChevronRight className="w-4 h-4" />
+                        <ChevronRight className="w-4 h-4" aria-hidden />
                       </button>
                     </div>
                   </div>

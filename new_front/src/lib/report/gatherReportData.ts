@@ -1,5 +1,4 @@
 import { listAllClimateRecordsInRange, type ClimateListResponse } from '../api/climateApi';
-import { listAllIbgeSidra1612Rows } from '../api/ibgeSidra1612Api';
 import {
   getClimateVsProductivity,
   listAllProductivityForYear,
@@ -8,6 +7,17 @@ import {
 import { labelForProductivityCropType } from '../filters/appFilters';
 import { formatUfLabel, UF_NOME } from '../geo/brazilStatesMalha';
 import { REPORT_EXPORT_UF, TOCANTINS_CITY_VALUE_TO_NAME } from '../geo/tocantinsCities';
+
+/** Ano civil a partir de `YYYY-MM-DD` sem usar `Date` em UTC (evita 2025-01-01 → getFullYear() === 2024 em BRT). */
+function isoDateParts(isoYmd: string): { year: number; month: number; day: number } | null {
+  const s = String(isoYmd).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const year = parseInt(s.slice(0, 4), 10);
+  const month = parseInt(s.slice(5, 7), 10);
+  const day = parseInt(s.slice(8, 10), 10);
+  if (![year, month, day].every((x) => Number.isFinite(x))) return null;
+  return { year, month, day };
+}
 
 function normalizeReportUf(localidadeKey: string): string {
   const u = String(localidadeKey || '').trim().toUpperCase();
@@ -168,22 +178,24 @@ function mean(values: number[]): number {
   return values.reduce((acc, value) => acc + value, 0) / values.length;
 }
 
-/** Igual à série temporal: média ou (máx+mín)/2 quando CPTEC não envia média. */
-function temperatureFromClimateRow(r: ClimateListResponse['data'][number]): number | null {
-  const avg = n(r.avgTemperature);
-  if (avg != null) return avg;
-  const maxT = n((r as { maxTemperature?: unknown }).maxTemperature);
-  const minT = n((r as { minTemperature?: unknown }).minTemperature);
-  if (maxT != null && minT != null) return (maxT + minT) / 2;
-  if (maxT != null) return maxT;
-  if (minT != null) return minT;
-  return null;
-}
+type ClimateMonthAcc = { days: number; temps: number[]; precs: number[]; hums: number[]; winds: number[] };
 
-function formatClimateBlock(rows: ClimateListResponse['data'], place: string): string {
-  if (!rows.length) {
-    return `Sem registos diários de clima para «${place}» no intervalo pedido. Execute a sincronização de clima no servidor se a base estiver vazia.`;
-  }
+export type ClimateMonthlySeries = {
+  sorted: ClimateListResponse['data'];
+  monthKeys: string[];
+  byMonth: Map<string, ClimateMonthAcc>;
+  /** Linhas de resumo do período (UF, totais globais) — sem tabela mensal. */
+  summaryLines: string[];
+};
+
+/** Agrega clima diário por mês civil e totais do intervalo (reutilizado no comparativo). */
+function climateMonthlySeriesFromRows(
+  rows: ClimateListResponse['data'],
+  place: string,
+  rangeStartYmd: string,
+  rangeEndYmd: string
+): ClimateMonthlySeries | null {
+  if (!rows.length) return null;
   const sorted = [...rows].sort((a, b) => String(a.date).localeCompare(String(b.date)));
   let sumP = 0;
   let nP = 0;
@@ -215,70 +227,269 @@ function formatClimateBlock(rows: ClimateListResponse['data'], place: string): s
       nW += 1;
     }
   }
-  const lines: string[] = [
+
+  const byMonth = new Map<string, ClimateMonthAcc>();
+  for (const r of sorted) {
+    const d = String(r.date).slice(0, 10);
+    const key = d.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(key)) continue;
+    let acc = byMonth.get(key);
+    if (!acc) {
+      acc = { days: 0, temps: [], precs: [], hums: [], winds: [] };
+      byMonth.set(key, acc);
+    }
+    acc.days += 1;
+    const t = temperatureFromClimateRow(r);
+    if (t != null) acc.temps.push(t);
+    const p = n(r.precipitation);
+    if (p != null) acc.precs.push(p);
+    const h = n(r.humidity);
+    if (h != null) acc.hums.push(h);
+    const w = n(r.windSpeed);
+    if (w != null) acc.winds.push(w);
+  }
+
+  let monthKeys = monthKeysBetweenInclusive(rangeStartYmd, rangeEndYmd);
+  if (monthKeys.length === 0) {
+    monthKeys = Array.from(byMonth.keys()).sort();
+  }
+
+  const summaryLines = [
     `UF (filtro): ${formatUfLabel(place)}`,
     `Registos diários: ${sorted.length}`,
     nT ? `Temperatura média (média das médias diárias): ${(sumT / nT).toFixed(1)} °C` : 'Temperatura média: —',
     nP ? `Precipitação acumulada (soma dos dias): ${sumP.toFixed(1)} mm` : 'Precipitação: —',
     nH ? `Umidade média: ${(sumH / nH).toFixed(0)} %` : 'Umidade: —',
     nW ? `Velocidade média do vento: ${(sumW / nW).toFixed(1)} km/h` : 'Vento: —',
-    '',
-    'Amostra (primeiros 10 dias):',
   ];
-  const sample = sorted.slice(0, 10);
-  for (const r of sample) {
-    const t = temperatureFromClimateRow(r);
-    const p = n(r.precipitation);
-    lines.push(
-      `  ${r.date} | T média ${t != null ? `${t.toFixed(1)} °C` : '—'} | chuva ${p != null ? `${p.toFixed(1)} mm` : '—'}`
-    );
+
+  return { sorted, monthKeys, byMonth, summaryLines };
+}
+
+/** Igual à série temporal: média ou (máx+mín)/2 quando CPTEC não envia média. */
+function temperatureFromClimateRow(r: ClimateListResponse['data'][number]): number | null {
+  const avg = n(r.avgTemperature);
+  if (avg != null) return avg;
+  const maxT = n((r as { maxTemperature?: unknown }).maxTemperature);
+  const minT = n((r as { minTemperature?: unknown }).minTemperature);
+  if (maxT != null && minT != null) return (maxT + minT) / 2;
+  if (maxT != null) return maxT;
+  if (minT != null) return minT;
+  return null;
+}
+
+/** Chaves YYYY-MM de cada mês civil entre as datas (YYYY-MM-DD), inclusive. */
+function monthKeysBetweenInclusive(startYmd: string, endYmd: string): string[] {
+  const s = String(startYmd).slice(0, 10);
+  const e = String(endYmd).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || !/^\d{4}-\d{2}-\d{2}$/.test(e) || s > e) return [];
+  const y0 = parseInt(s.slice(0, 4), 10);
+  const m0 = parseInt(s.slice(5, 7), 10);
+  const y1 = parseInt(e.slice(0, 4), 10);
+  const m1 = parseInt(e.slice(5, 7), 10);
+  if (![y0, m0, y1, m1].every((x) => Number.isFinite(x))) return [];
+  const keys: string[] = [];
+  let y = y0;
+  let m = m0;
+  for (;;) {
+    keys.push(`${y}-${String(m).padStart(2, '0')}`);
+    if (y === y1 && m === m1) break;
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
   }
-  if (sorted.length > 10) {
-    lines.push('', 'Últimos 5 dias do período:');
-    sorted.slice(-5).forEach((r) => {
-      const t = temperatureFromClimateRow(r);
-      const p = n(r.precipitation);
-      lines.push(
-        `  ${r.date} | T média ${t != null ? `${t.toFixed(1)} °C` : '—'} | chuva ${p != null ? `${p.toFixed(1)} mm` : '—'}`
-      );
-    });
+  return keys;
+}
+
+function monthLabelPtBr(ym: string): string {
+  const [ys, ms] = ym.split('-');
+  const y = parseInt(ys, 10);
+  const mo = parseInt(ms, 10);
+  if (!Number.isFinite(y) || !Number.isFinite(mo)) return ym;
+  try {
+    const raw = new Date(y, mo - 1, 15).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    return raw.length ? raw.charAt(0).toUpperCase() + raw.slice(1) : raw;
+  } catch {
+    return ym;
+  }
+}
+
+function formatClimateBlock(
+  rows: ClimateListResponse['data'],
+  place: string,
+  rangeStartYmd: string,
+  rangeEndYmd: string
+): string {
+  if (!rows.length) {
+    return `Sem registos diários de clima para «${place}» no intervalo pedido. Execute a sincronização de clima no servidor se a base estiver vazia.`;
+  }
+  const series = climateMonthlySeriesFromRows(rows, place, rangeStartYmd, rangeEndYmd);
+  if (!series) {
+    return `Sem registos diários de clima para «${place}» no intervalo pedido. Execute a sincronização de clima no servidor se a base estiver vazia.`;
+  }
+  const lines: string[] = [
+    ...series.summaryLines,
+    '',
+    'Resumo mensal (cada linha agrega os dias com dados naquele mês civil; meses sem linha na API aparecem com traços):',
+    '',
+    'Mês (referência) | Mês civil | Dias c/ dados | T média °C | Chuva total mm | Umidade média % | Vento médio km/h',
+  ];
+
+  for (const ym of series.monthKeys) {
+    const acc = series.byMonth.get(ym);
+    const label = monthLabelPtBr(ym);
+    if (!acc || acc.days === 0) {
+      lines.push(`${ym} | ${label} | 0 | — | — | — | —`);
+      continue;
+    }
+    const tM = acc.temps.length ? mean(acc.temps).toFixed(1) : '—';
+    const pM = acc.precs.length ? acc.precs.reduce((a, b) => a + b, 0).toFixed(1) : '—';
+    const hM = acc.hums.length ? mean(acc.hums).toFixed(0) : '—';
+    const wM = acc.winds.length ? mean(acc.winds).toFixed(1) : '—';
+    lines.push(`${ym} | ${label} | ${acc.days} | ${tM} | ${pM} | ${hM} | ${wM}`);
+  }
+
+  return lines.join('\n');
+}
+
+/** Comparativo com safra: uma linha por mês com clima e produtividade (valor da API). */
+function formatComparativoSeasonMerged(
+  rows: Array<{
+    mes?: string;
+    month?: string;
+    climate: number | null;
+    productivity: number | null;
+    avgTemperature?: number | null;
+    avgHumidity?: number | null;
+  }>
+): string {
+  if (!rows.length) {
+    return 'Sem dados retornados pela rota de comparativo para esta safra.';
+  }
+  const sorted = [...rows].sort((a, b) => String(a.month || a.mes || '').localeCompare(String(b.month || b.mes || '')));
+  const totalPrecip = sorted.reduce(
+    (acc, row) => acc + (Number.isFinite(Number(row.climate)) ? Number(row.climate) : 0),
+    0
+  );
+  const tempVals = sorted.map((row) => Number(row.avgTemperature)).filter((x) => Number.isFinite(x));
+  const humVals = sorted.map((row) => Number(row.avgHumidity)).filter((x) => Number.isFinite(x));
+  const prodVals = sorted.map((row) => Number(row.productivity)).filter((x) => Number.isFinite(x));
+  const lines: string[] = [
+    `Meses retornados: ${sorted.length}`,
+    `Precipitação acumulada (chuva mensal somada): ${totalPrecip.toFixed(1)} mm`,
+    tempVals.length ? `Temperatura média mensal (média das médias): ${mean(tempVals).toFixed(1)} °C` : 'Temperatura média mensal: —',
+    humVals.length ? `Umidade média mensal (média das médias): ${mean(humVals).toFixed(0)} %` : 'Umidade média mensal: —',
+    prodVals.length
+      ? `Produtividade (valor por mês na API; pode repetir a média da safra): média ${mean(prodVals).toFixed(2)} t/ha`
+      : 'Produtividade: —',
+    '',
+    'Mês ref. | Mês | Chuva (mm) | T média (°C) | Umidade (%) | Produtividade (t/ha)',
+  ];
+  sorted.forEach((row) => {
+    const ref =
+      row.month ||
+      (typeof row.mes === 'string' && /^\d{4}-\d{2}/.test(row.mes) ? row.mes.slice(0, 7) : '—');
+    const mesLabel = row.mes || row.month || '—';
+    const prod =
+      row.productivity != null && Number.isFinite(Number(row.productivity))
+        ? Number(row.productivity).toFixed(2)
+        : '—';
+    lines.push(
+      `${ref} | ${mesLabel} | ${row.climate != null ? `${Number(row.climate).toFixed(1)}` : '—'} | ${
+        row.avgTemperature != null ? `${Number(row.avgTemperature).toFixed(1)}` : '—'
+      } | ${row.avgHumidity != null ? `${Number(row.avgHumidity).toFixed(0)}` : '—'} | ${prod}`
+    );
+  });
+  return lines.join('\n');
+}
+
+/** Comparativo por anos civis: intercala colunas de clima e produtividade por mês. */
+function formatMergedComparativoMonthTable(
+  series: ClimateMonthlySeries | null,
+  monthlyBuckets: { ym: string; rows: ProductivityListResponse['data'] }[],
+  rangeStartYmd: string,
+  rangeEndYmd: string
+): string {
+  let monthKeys = series?.monthKeys?.length
+    ? series.monthKeys
+    : monthKeysBetweenInclusive(String(rangeStartYmd).slice(0, 10), String(rangeEndYmd).slice(0, 10));
+  if (monthKeys.length === 0) {
+    monthKeys = [...new Set(monthlyBuckets.map((b) => b.ym))].sort();
+  }
+  const lines: string[] = [
+    'Cada linha é um mês civil: clima agregado dos registos diários da UF; produtividade conforme API (period_ref / mesAno).',
+    '',
+    'Mês ref. | Mês | Dias clima | T média °C | Chuva mm | Umid. % | Vent. km/h | Reg. prod. | Prod. méd. t/ha | Culturas dist.',
+  ];
+  const prodByYm = new Map(monthlyBuckets.map((b) => [b.ym, b.rows] as const));
+  for (const ym of monthKeys) {
+    const label = monthLabelPtBr(ym);
+    const acc = series?.byMonth.get(ym);
+    let dC = '0';
+    let tC = '—';
+    let pC = '—';
+    let hC = '—';
+    let wC = '—';
+    if (acc && acc.days > 0) {
+      dC = String(acc.days);
+      tC = acc.temps.length ? mean(acc.temps).toFixed(1) : '—';
+      pC = acc.precs.length ? acc.precs.reduce((a, b) => a + b, 0).toFixed(1) : '—';
+      hC = acc.hums.length ? mean(acc.hums).toFixed(0) : '—';
+      wC = acc.winds.length ? mean(acc.winds).toFixed(1) : '—';
+    }
+    const pr = prodByYm.get(ym) ?? [];
+    const vals = pr.map((r) => n(r.productivity)).filter((x): x is number => x != null);
+    const meanP = vals.length ? mean(vals).toFixed(2) : '—';
+    const crops = new Set(
+      pr.map((r) => {
+        const raw = r.productLabel || r.cropType;
+        return raw ? labelForProductivityCropType(String(raw)) : '—';
+      })
+    );
+    lines.push(
+      `${ym} | ${label} | ${dC} | ${tC} | ${pC} | ${hC} | ${wC} | ${pr.length} | ${meanP} | ${pr.length ? String(crops.size) : '—'}`
+    );
   }
   return lines.join('\n');
 }
 
-function formatComparativoClimateBlock(rows: Array<{
-  mes?: string;
-  month?: string;
-  climate: number | null;
-  avgTemperature?: number | null;
-  avgHumidity?: number | null;
-}>): string {
-  if (!rows.length) {
-    return 'Sem dados climáticos históricos retornados pela rota de comparativo para a safra selecionada.';
+/** Tabela mensal: um mês civil por linha (dados com `period_ref` ou consulta `mesAno`). */
+function formatProductivityMonthlyTable(
+  buckets: { ym: string; rows: ProductivityListResponse['data'] }[],
+  ufLabel: string
+): string {
+  if (buckets.length === 0) {
+    return 'Intervalo de datas inválido para resumo mensal de produtividade.';
   }
-  const sorted = [...rows].sort((a, b) => String(a.month || a.mes || '').localeCompare(String(b.month || b.mes || '')));
-  const totalPrecip = sorted.reduce((acc, row) => acc + (Number.isFinite(Number(row.climate)) ? Number(row.climate) : 0), 0);
-  const tempVals = sorted
-    .map((row) => Number(row.avgTemperature))
-    .filter((x) => Number.isFinite(x));
-  const humVals = sorted
-    .map((row) => Number(row.avgHumidity))
-    .filter((x) => Number.isFinite(x));
   const lines: string[] = [
-    `Meses retornados: ${sorted.length}`,
-    `Precipitação acumulada no ano-base: ${totalPrecip.toFixed(1)} mm`,
-    tempVals.length ? `Temperatura média mensal (média das médias): ${mean(tempVals).toFixed(1)} °C` : 'Temperatura média mensal: —',
-    humVals.length ? `Umidade média mensal (média das médias): ${mean(humVals).toFixed(0)} %` : 'Umidade média mensal: —',
+    `UF: ${formatUfLabel(ufLabel)}`,
     '',
-    'Detalhe mensal:',
+    'Resumo mensal: cada linha corresponde ao mês civil (YYYY-MM). «Registos» é a contagem de linhas na base com esse period_ref; «Produtividade média» é a média aritmética dos valores t/ha nesse mês.',
+    '',
+    'Mês ref. | Mês | Registos | Produtividade média (t/ha) | Culturas distintas',
   ];
-  sorted.forEach((row) => {
-    lines.push(
-      `  ${row.mes || row.month || '—'} | chuva ${row.climate != null ? `${Number(row.climate).toFixed(1)} mm` : '—'} | T média ${
-        row.avgTemperature != null ? `${Number(row.avgTemperature).toFixed(1)} °C` : '—'
-      } | umidade ${row.avgHumidity != null ? `${Number(row.avgHumidity).toFixed(0)} %` : '—'}`
+  for (const { ym, rows } of buckets) {
+    const label = monthLabelPtBr(ym);
+    if (!rows.length) {
+      lines.push(`${ym} | ${label} | 0 | — | —`);
+      continue;
+    }
+    const vals = rows.map((r) => n(r.productivity)).filter((x): x is number => x != null);
+    const meanP = vals.length ? mean(vals).toFixed(2) : '—';
+    const crops = new Set(
+      rows.map((r) => {
+        const raw = r.productLabel || r.cropType;
+        return raw ? labelForProductivityCropType(String(raw)) : '—';
+      })
     );
-  });
+    lines.push(`${ym} | ${label} | ${rows.length} | ${meanP} | ${crops.size}`);
+  }
+  lines.push(
+    '',
+    'Nota: registos só anuais (sem period_ref mensal) aparecem no bloco «Detalhe por registo»; aqui só entram linhas mensais ou o resultado da busca por mesAno na API.'
+  );
   return lines.join('\n');
 }
 
@@ -327,6 +538,7 @@ export async function gatherReportDados(params: {
     (params.tipo === 'produtividade' || params.tipo === 'comparativo') && params.productivitySeason?.trim()
       ? params.productivitySeason.trim()
       : '';
+  const isComparativoCivil = params.tipo === 'comparativo' && !seasonProd;
 
   if (params.tipo === 'clima' || params.tipo === 'comparativo') {
     try {
@@ -336,18 +548,18 @@ export async function gatherReportDados(params: {
           state: ufLabel,
         });
         const compRows = comp.success && Array.isArray(comp.data) ? comp.data : [];
-        chunks.push('=== Dados climáticos (API /api/productivity/climate-vs-productivity) ===\n');
+        chunks.push('=== Comparativo (safra) — clima e produtividade por mês (API climate-vs-productivity) ===\n');
         chunks.push(`Safra: ${seasonProd}\n`);
         if (comp.meta?.baseYear) chunks.push(`Ano-base do clima: ${comp.meta.baseYear}\n`);
-        chunks.push(formatComparativoClimateBlock(compRows));
-      } else {
+        chunks.push(formatComparativoSeasonMerged(compRows));
+      } else if (!isComparativoCivil) {
         const rows = await listAllClimateRecordsInRange({
           state: ufLabel,
           startDate: params.startDate,
           endDate: params.endDate,
         });
         chunks.push('=== Dados climáticos (API /api/climate) ===\n');
-        chunks.push(formatClimateBlock(rows, ufLabel));
+        chunks.push(formatClimateBlock(rows, ufLabel, params.startDate, params.endDate));
       }
     } catch {
       chunks.push('=== Dados climáticos ===\nNão foi possível obter os dados (rede, sessão ou servidor).');
@@ -364,69 +576,89 @@ export async function gatherReportDados(params: {
         });
         perYear.push(rows);
       } else {
-        const y0 = new Date(params.startDate).getFullYear();
-        const y1 = new Date(params.endDate).getFullYear();
+        const p0 = isoDateParts(params.startDate);
+        const p1 = isoDateParts(params.endDate);
+        const y0 = p0?.year ?? NaN;
+        const y1 = p1?.year ?? NaN;
         const lo = Math.min(y0, y1);
         const hi = Math.max(y0, y1);
-        for (let y = lo; y <= hi; y += 1) {
-          perYear.push(await listAllProductivityForYear({ state: ufLabel, year: y }));
+        if (Number.isFinite(lo) && Number.isFinite(hi)) {
+          for (let y = lo; y <= hi; y += 1) {
+            perYear.push(await listAllProductivityForYear({ state: ufLabel, year: y }));
+          }
         }
       }
-      chunks.push('\n\n=== Produtividade (API /api/productivity) ===\n');
-      if (seasonProd) chunks.push(`Safra: ${seasonProd}\n`);
-      chunks.push(formatProductivityBlock(perYear, ufLabel));
+      const flatProd = perYear.flat();
+      const monthKeysProd = monthKeysBetweenInclusive(
+        String(params.startDate).slice(0, 10),
+        String(params.endDate).slice(0, 10)
+      );
+      const byMonthFromFlat = new Map<string, ProductivityListResponse['data']>();
+      for (const r of flatProd) {
+        const raw = r.periodRef;
+        if (raw == null || String(raw).trim() === '') continue;
+        const key = String(raw).trim().slice(0, 7);
+        if (!/^\d{4}-\d{2}$/.test(key)) continue;
+        if (!byMonthFromFlat.has(key)) byMonthFromFlat.set(key, []);
+        byMonthFromFlat.get(key)!.push(r);
+      }
+      const monthlyBuckets: { ym: string; rows: ProductivityListResponse['data'] }[] = [];
+      for (const ym of monthKeysProd) {
+        let rows = byMonthFromFlat.get(ym) ?? [];
+        if (rows.length === 0) {
+          rows = await listAllProductivityForYear({ state: ufLabel, mesAno: ym });
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 45);
+          });
+        }
+        monthlyBuckets.push({ ym, rows });
+      }
+
+      if (isComparativoCivil) {
+        const climRows = await listAllClimateRecordsInRange({
+          state: ufLabel,
+          startDate: params.startDate,
+          endDate: params.endDate,
+        });
+        const climateSeries = climateMonthlySeriesFromRows(
+          climRows,
+          ufLabel,
+          params.startDate,
+          params.endDate
+        );
+        chunks.push('\n\n=== Comparativo mensal (clima × produtividade) ===\n');
+        chunks.push(
+          formatMergedComparativoMonthTable(
+            climateSeries,
+            monthlyBuckets,
+            params.startDate,
+            params.endDate
+          )
+        );
+        chunks.push('\n\n=== Clima — resumo do período completo ===\n');
+        chunks.push(
+          climateSeries
+            ? climateSeries.summaryLines.join('\n')
+            : climRows.length === 0
+              ? 'Sem registos diários de clima no intervalo (ou falha de rede).'
+              : 'Sem agregação mensal de clima.'
+        );
+        chunks.push('\n\n=== Produtividade — detalhe por registo (ano, cultura, município) ===\n');
+        chunks.push(formatProductivityBlock(perYear, ufLabel));
+      } else {
+        chunks.push('\n\n=== Produtividade (API /api/productivity) ===\n');
+        if (seasonProd) chunks.push(`Safra: ${seasonProd}\n`);
+
+        const showProdMonthly = params.tipo === 'produtividade' && monthKeysProd.length > 0;
+        if (showProdMonthly) {
+          chunks.push('=== Resumo mensal de produtividade ===\n');
+          chunks.push(formatProductivityMonthlyTable(monthlyBuckets, ufLabel));
+          chunks.push('\n\n=== Detalhe por registo (ano, cultura, município) ===\n');
+        }
+        chunks.push(formatProductivityBlock(perYear, ufLabel));
+      }
     } catch {
       chunks.push('\n\n=== Produtividade ===\nNão foi possível obter os dados.');
-    }
-
-    try {
-      let loSidra: number;
-      let hiSidra: number;
-      if (seasonProd) {
-        const b = parseSeasonToCalendarBounds(seasonProd);
-        if (b) {
-          loSidra = b.start;
-          hiSidra = b.end;
-        } else {
-          const y0 = new Date(params.startDate).getFullYear();
-          const y1 = new Date(params.endDate).getFullYear();
-          loSidra = Math.min(y0, y1);
-          hiSidra = Math.max(y0, y1);
-        }
-      } else {
-        const y0 = new Date(params.startDate).getFullYear();
-        const y1 = new Date(params.endDate).getFullYear();
-        loSidra = Math.min(y0, y1);
-        hiSidra = Math.max(y0, y1);
-      }
-      const sidraParts: string[] = [];
-      let anySidra = false;
-      for (let reportYear = loSidra; reportYear <= hiSidra; reportYear += 1) {
-        const rows = await listAllIbgeSidra1612Rows({
-          state: ufLabel,
-          year: reportYear,
-        });
-        if (!rows.length) continue;
-        anySidra = true;
-        sidraParts.push(
-          `--- Ano ${reportYear} (${rows.length} linhas) ---`,
-          ...rows.map(
-            (r) =>
-              `${r.year} | ${r.municipalityName} | ${labelForProductivityCropType(String(r.productLabel || '')) || r.productLabel || '—'} | ${r.variableKey} | ${r.valueNumeric ?? '—'}`,
-          ),
-        );
-      }
-      if (anySidra) {
-        chunks.push('\n\n=== SIDRA 1612 (API /api/ibge-sidra-1612 — PostgreSQL) ===\n');
-        chunks.push(`Filtro: UF «${formatUfLabel(ufLabel)}», anos ${loSidra}–${hiSidra}.\n\n`);
-        chunks.push(sidraParts.join('\n'));
-      } else {
-        chunks.push(
-          '\n\n=== SIDRA 1612 (API /api/ibge-sidra-1612) ===\nSem registos para esta UF nos anos do período na tabela ibge_sidra_1612.',
-        );
-      }
-    } catch {
-      chunks.push('\n\n=== SIDRA 1612 ===\nNão foi possível obter dados da tabela ibge_sidra_1612.');
     }
   }
 
