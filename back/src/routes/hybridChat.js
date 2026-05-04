@@ -4,6 +4,7 @@ const multer = require('multer');
 const { Op } = require('sequelize');
 const twilioService = require('../services/twilioService');
 const ChatHistory = require('../models/ChatHistory');
+const ConsultaAgronomica = require('../models/ConsultaAgronomica');
 const HybridConversation = require('../models/HybridConversation');
 const HybridMessage = require('../models/HybridMessage');
 const DualUserProfile = require('../models/DualUserProfile');
@@ -119,6 +120,13 @@ function headerProdutorId(req) {
   return String(req.headers['x-clerk-user-id'] || req.query.produtorClerkId || '').trim();
 }
 
+/** Título do caso: fonte única = ticket (`assunto`); fallback legado `caso_resumo_snapshot` no híbrido. */
+function resumoCasoPublico(conv) {
+  if (!conv) return null;
+  if (conv.consulta && conv.consulta.assunto) return conv.consulta.assunto;
+  return conv.casoResumoSnapshot || null;
+}
+
 /** Bloqueia acesso se o thread já estiver associado a outro Clerk ID. */
 async function produtorCanAccessIaThread(threadId, produtorClerkId) {
   if (!produtorClerkId) return false;
@@ -231,6 +239,90 @@ function buildRichWhatsappBody({ produtorNome, casoDestaque, iaLines }) {
   ].join('\n');
 }
 
+/**
+ * Ticket em `consultas_agronomicas` (núcleo administrativo); `hybrid_conversations` permanece o canal (WhatsApp + painel).
+ */
+async function upsertConsultaForHybrid({
+  produtorClerkId,
+  threadId,
+  produtorNome,
+  casoFinal,
+  specialtyFilter,
+  picked,
+  summary,
+  iaLines,
+  existingConsultaId,
+}) {
+  const espec =
+    String(specialtyFilter || '').trim() ||
+    (picked?.especialidade ? String(picked.especialidade).trim() : '') ||
+    'Apoio técnico';
+  const especialidade = espec.slice(0, 160);
+  const casoTrim = String(casoFinal || '').trim();
+  const assunto = (casoTrim || 'Consulta via ClimaAgro / IAgro').slice(0, 220);
+  const preview = String(summary || '').slice(0, 4000);
+  let conversa = '';
+  try {
+    conversa = JSON.stringify(iaLines || []).slice(0, 12000);
+  } catch {
+    conversa = '';
+  }
+  const nomeProdutor = (String(produtorNome || '').trim() || 'Produtor').slice(0, 120);
+
+  let consulta = null;
+  if (existingConsultaId) {
+    consulta = await ConsultaAgronomica.findByPk(existingConsultaId);
+  }
+  if (!consulta) {
+    consulta = await ConsultaAgronomica.findOne({
+      where: { produtorClerkId, threadId },
+    });
+  }
+
+  const basePatch = {
+    threadId,
+    status: 'em_andamento',
+    especialidade,
+    assunto,
+    preview,
+    produtorNome: nomeProdutor,
+    dataAtualizacao: new Date(),
+  };
+
+  if (consulta) {
+    const patch = {
+      ...basePatch,
+      conversa: conversa || consulta.conversa,
+    };
+    if (picked) {
+      patch.agronomoClerkId = picked.clerkUserId;
+      patch.agronomoNome = String(picked.nome || '').slice(0, 120);
+      patch.agronomoEspecialidade = (
+        String(picked.especialidade || '').trim() || especialidade
+      ).slice(0, 160);
+      patch.agronomoMunicipio = picked.municipio || null;
+      patch.agronomoUf = picked.uf || null;
+    }
+    await consulta.update(patch);
+    return consulta;
+  }
+
+  return ConsultaAgronomica.create({
+    ...basePatch,
+    conversa,
+    urgencia: 'media',
+    produtorClerkId,
+    dataSolicitacao: new Date(),
+    agronomoClerkId: picked ? picked.clerkUserId : null,
+    agronomoNome: picked ? String(picked.nome || '').slice(0, 120) : null,
+    agronomoEspecialidade: picked
+      ? (String(picked.especialidade || '').trim() || especialidade).slice(0, 160)
+      : null,
+    agronomoMunicipio: picked?.municipio || null,
+    agronomoUf: picked?.uf || null,
+  });
+}
+
 
 /**
  * POST /api/hybrid-chat/escalate
@@ -301,8 +393,19 @@ router.post('/escalate', async (req, res) => {
         atendimentoAtivo: true,
         intervencaoHumana: true,
         produtorNomeSnapshot: produtorNome || null,
-        casoResumoSnapshot: casoFinal || null,
       },
+    });
+
+    const consulta = await upsertConsultaForHybrid({
+      produtorClerkId,
+      threadId,
+      produtorNome,
+      casoFinal,
+      specialtyFilter,
+      picked,
+      summary,
+      iaLines,
+      existingConsultaId: conversation.consultaAgronomicaId,
     });
 
     await conversation.update({
@@ -311,7 +414,7 @@ router.post('/escalate', async (req, res) => {
       atendimentoAtivo: true,
       intervencaoHumana: true,
       produtorNomeSnapshot: produtorNome || conversation.produtorNomeSnapshot,
-      casoResumoSnapshot: casoFinal || conversation.casoResumoSnapshot,
+      consultaAgronomicaId: consulta.id,
     });
 
     const waUrl = `https://wa.me/${whatsappAgronomo}?text=${encodeURIComponent(summary)}`;
@@ -321,6 +424,8 @@ router.post('/escalate', async (req, res) => {
     return res.json({
       success: true,
       conversationId: conversation.id,
+      consultaId: consulta.id,
+      consultaAssunto: consulta.assunto,
       waUrl,
       summary,
       intervencaoHumana: true,
@@ -346,6 +451,7 @@ router.get('/status', async (req, res) => {
   try {
     const conv = await HybridConversation.findOne({
       where: { produtorClerkId, iaThreadId: threadId },
+      include: [{ model: ConsultaAgronomica, as: 'consulta', attributes: ['id', 'assunto', 'status'] }],
     });
     if (!conv) {
       return res.json({
@@ -361,7 +467,10 @@ router.get('/status', async (req, res) => {
         intervencaoHumana: conv.intervencaoHumana,
         atendimentoAtivo: conv.atendimentoAtivo,
         produtorNomeSnapshot: conv.produtorNomeSnapshot,
-        casoResumoSnapshot: conv.casoResumoSnapshot,
+        casoResumoSnapshot: resumoCasoPublico(conv),
+        consultaId: conv.consulta?.id || conv.consultaAgronomicaId || null,
+        consultaAssunto: conv.consulta?.assunto || null,
+        consultaStatus: conv.consulta?.status || null,
       },
       intervencaoHumana: conv.intervencaoHumana,
       atendimentoAtivo: conv.atendimentoAtivo,
@@ -382,6 +491,7 @@ router.get('/timeline', async (req, res) => {
   try {
     const conv = await HybridConversation.findOne({
       where: { produtorClerkId, iaThreadId: threadId },
+      include: [{ model: ConsultaAgronomica, as: 'consulta', attributes: ['id', 'assunto', 'status'] }],
     });
 
     const rows =
@@ -452,7 +562,10 @@ router.get('/timeline', async (req, res) => {
             atendimentoAtivo: conv.atendimentoAtivo,
             whatsappAgronomo: conv.whatsappAgronomo,
             produtorNomeSnapshot: conv.produtorNomeSnapshot,
-            casoResumoSnapshot: conv.casoResumoSnapshot,
+            casoResumoSnapshot: resumoCasoPublico(conv),
+            consultaId: conv.consulta?.id || conv.consultaAgronomicaId || null,
+            consultaAssunto: conv.consulta?.assunto || null,
+            consultaStatus: conv.consulta?.status || null,
           }
         : null,
       messages: merged,
@@ -652,6 +765,20 @@ router.patch('/conversations/:id', async (req, res) => {
 
     await conv.update(patch);
 
+    if (conv.consultaAgronomicaId) {
+      const statusConsulta = ativo ? 'em_andamento' : 'concluido';
+      const consultaPatch = {
+        status: statusConsulta,
+        dataAtualizacao: new Date(),
+      };
+      if (ativo === false && patch.avaliacaoEstrelas != null) {
+        consultaPatch.atendimentoAvaliacaoEstrelas = patch.avaliacaoEstrelas;
+        consultaPatch.atendimentoAvaliacaoComentario = patch.avaliacaoComentario ?? null;
+        consultaPatch.atendimentoAvaliacaoEm = patch.avaliacaoEm ?? new Date();
+      }
+      await ConsultaAgronomica.update(consultaPatch, { where: { id: conv.consultaAgronomicaId } });
+    }
+
     if (novaNotaParaParceiro != null && conv.agronomoParceiroId) {
       const agr = await DualUserProfile.findByPk(conv.agronomoParceiroId);
       if (agr && agr.tipo === 'agronomo' && agr.parceiro) {
@@ -720,6 +847,12 @@ router.delete('/conversations/:id', async (req, res) => {
     if (!conv || conv.produtorClerkId !== produtorClerkId) {
       return res.status(404).json({ message: 'Conversa não encontrada.' });
     }
+    if (conv.consultaAgronomicaId) {
+      await ConsultaAgronomica.update(
+        { status: 'concluido', dataAtualizacao: new Date() },
+        { where: { id: conv.consultaAgronomicaId } }
+      );
+    }
     await HybridMessage.destroy({ where: { conversationId: conv.id } });
     await conv.destroy();
     return res.json({ success: true });
@@ -738,6 +871,7 @@ router.get('/conversations', async (req, res) => {
   try {
     const rows = await HybridConversation.findAll({
       where: { produtorClerkId },
+      include: [{ model: ConsultaAgronomica, as: 'consulta', attributes: ['id', 'assunto', 'status'] }],
       order: [['updatedAt', 'DESC']],
       limit: 50,
     });
@@ -750,7 +884,10 @@ router.get('/conversations', async (req, res) => {
         atendimentoAtivo: c.atendimentoAtivo,
         updatedAt: c.updatedAt,
         produtorNomeSnapshot: c.produtorNomeSnapshot,
-        casoResumoSnapshot: c.casoResumoSnapshot,
+        casoResumoSnapshot: resumoCasoPublico(c),
+        consultaId: c.consulta?.id || c.consultaAgronomicaId || null,
+        consultaAssunto: c.consulta?.assunto || null,
+        consultaStatus: c.consulta?.status || null,
       })),
     });
   } catch (e) {
