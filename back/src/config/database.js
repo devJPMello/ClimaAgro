@@ -209,6 +209,15 @@ const setupAssociations = () => {
 
   HybridConversation.hasMany(HybridMessage, { foreignKey: 'conversationId', as: 'messages' });
   HybridMessage.belongsTo(HybridConversation, { foreignKey: 'conversationId', as: 'conversation' });
+
+  ConsultaAgronomica.hasMany(HybridConversation, {
+    foreignKey: 'consultaAgronomicaId',
+    as: 'hybridConversations',
+  });
+  HybridConversation.belongsTo(ConsultaAgronomica, {
+    foreignKey: 'consultaAgronomicaId',
+    as: 'consulta',
+  });
 };
 
 // Configurar associações

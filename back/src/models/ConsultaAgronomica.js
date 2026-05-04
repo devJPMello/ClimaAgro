@@ -74,17 +74,17 @@ const ConsultaAgronomica = sequelize.define(
     },
     agronomoClerkId: {
       type: DataTypes.STRING(128),
-      allowNull: false,
+      allowNull: true,
       field: 'agronomo_clerk_id',
     },
     agronomoNome: {
       type: DataTypes.STRING(120),
-      allowNull: false,
+      allowNull: true,
       field: 'agronomo_nome',
     },
     agronomoEspecialidade: {
       type: DataTypes.STRING(160),
-      allowNull: false,
+      allowNull: true,
       field: 'agronomo_especialidade',
     },
     agronomoCrea: {
@@ -112,6 +112,22 @@ const ConsultaAgronomica = sequelize.define(
       allowNull: true,
       field: 'agronomo_tempo_resposta',
     },
+    /** Avaliação do produtor ao encerrar o atendimento (espelha o canal híbrido). */
+    atendimentoAvaliacaoEstrelas: {
+      type: DataTypes.SMALLINT,
+      allowNull: true,
+      field: 'atendimento_avaliacao_estrelas',
+    },
+    atendimentoAvaliacaoComentario: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: 'atendimento_avaliacao_comentario',
+    },
+    atendimentoAvaliacaoEm: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'atendimento_avaliacao_em',
+    },
     dataSolicitacao: {
       type: DataTypes.DATE,
       allowNull: false,
@@ -131,6 +147,7 @@ const ConsultaAgronomica = sequelize.define(
     indexes: [
       { fields: ['agronomo_clerk_id'] },
       { fields: ['produtor_clerk_id'] },
+      { fields: ['produtor_clerk_id', 'thread_id'] },
       { fields: ['status'] },
       { fields: ['thread_id'] },
     ],

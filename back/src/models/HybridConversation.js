@@ -19,6 +19,12 @@ const HybridConversation = sequelize.define(
       allowNull: false,
       field: 'ia_thread_id',
     },
+    consultaAgronomicaId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      field: 'consulta_agronomica_id',
+      references: { model: 'consultas_agronomicas', key: 'id' },
+    },
     whatsappAgronomo: {
       type: DataTypes.STRING(32),
       allowNull: false,
