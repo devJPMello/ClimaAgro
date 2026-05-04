@@ -1,4 +1,5 @@
-import { httpClient } from './httpClient';
+import { ApiError } from './errors';
+import { httpClient, resolveApiUrl } from './httpClient';
 
 export type UnifiedChatMessage = {
   id: string;
@@ -135,15 +136,74 @@ export async function patchHybridConversationStatus(
 export async function sendProducerToWhatsapp(
   conversationId: string,
   conteudo: string,
-  clerkUserId: string
+  clerkUserId: string,
+  file?: File | null
 ) {
-  return httpClient.post<{
-    success: boolean;
-    message: { id: string; conteudo: string; createdAt: string };
-    whatsapp?: WhatsAppDeliveryResult;
-  }>(`hybrid-chat/conversations/${encodeURIComponent(conversationId)}/messages`, { conteudo }, {
-    headers: clerkHeaders(clerkUserId),
-  });
+  const path = `hybrid-chat/conversations/${encodeURIComponent(conversationId)}/messages`;
+  if (!file) {
+    return httpClient.post<{
+      success: boolean;
+      message: {
+        id: string;
+        conteudo: string;
+        createdAt: string;
+        hasMidia?: boolean;
+        midiaMimeType?: string | null;
+      };
+      whatsapp?: WhatsAppDeliveryResult;
+    }>(path, { conteudo }, { headers: clerkHeaders(clerkUserId) });
+  }
+
+  const fd = new FormData();
+  fd.append('conteudo', conteudo || '');
+  fd.append('file', file);
+
+  const url = resolveApiUrl(path);
+  const timeoutMs = 60_000;
+  const controller = new AbortController();
+  const t = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-Clerk-User-Id': clerkUserId },
+      body: fd,
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let parsed: unknown = undefined;
+    if (text) {
+      try {
+        parsed = JSON.parse(text) as unknown;
+      } catch {
+        parsed = text;
+      }
+    }
+    if (!response.ok) {
+      const msg =
+        typeof parsed === 'object' && parsed !== null && 'message' in parsed
+          ? String((parsed as { message: unknown }).message)
+          : response.statusText || 'Erro na requisição';
+      throw new ApiError(msg || `HTTP ${response.status}`, response.status, parsed);
+    }
+    return parsed as {
+      success: boolean;
+      message: {
+        id: string;
+        conteudo: string;
+        createdAt: string;
+        hasMidia?: boolean;
+        midiaMimeType?: string | null;
+      };
+      whatsapp?: WhatsAppDeliveryResult;
+    };
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new ApiError('Tempo esgotado ao enviar o ficheiro. Tente novamente.', 0);
+    }
+    throw e;
+  } finally {
+    window.clearTimeout(t);
+  }
 }
 
 function normalizeApiBaseUrl(raw: string): string {

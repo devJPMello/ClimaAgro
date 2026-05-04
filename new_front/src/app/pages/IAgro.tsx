@@ -48,6 +48,7 @@ import { notifyWhatsappDelivery } from '../../lib/whatsappNotify';
 import { HybridMediaAttachment } from '../components/chat/HybridMediaAttachment';
 import { LocalAttachmentThumbnail, type LocalAttachmentKind } from '../components/chat/LocalAttachmentThumbnail';
 import { EncerrarAtendimentoModal } from '../components/chat/EncerrarAtendimentoModal';
+import { FileAttachmentPickerModal } from '../components/chat/FileAttachmentPickerModal';
 import { useNavigate } from 'react-router';
 
 type LocalMediaItem = { url: string; kind: LocalAttachmentKind };
@@ -80,10 +81,10 @@ export function IAgro() {
   const [loadingIndicatedAgronomo, setLoadingIndicatedAgronomo] = useState(false);
   const [encerrarModalOpen, setEncerrarModalOpen] = useState(false);
   const [encerrando, setEncerrando] = useState(false);
+  const [iagroAttachmentModalOpen, setIagroAttachmentModalOpen] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const threadIdRef = useRef<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -503,7 +504,7 @@ export function IAgro() {
 
   function applyPlantAnalysis() {
     setInput('Analise a imagem desta planta: identifique o estado de saúde, possíveis deficiências nutricionais, sinais de pragas ou doenças, necessidade de calagem, e me dê recomendações práticas de manejo.');
-    fileInputRef.current?.click();
+    setIagroAttachmentModalOpen(true);
   }
 
   async function handleToggleFavorite(targetThread: IAgroThread) {
@@ -1022,21 +1023,25 @@ export function IAgro() {
                     isRecording ? 'border-destructive' : 'border-border',
                   ].join(' ')}
                 />
-                <label className={`absolute left-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full transition-colors ${humanHandoff ? 'cursor-not-allowed opacity-40' : 'cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    disabled={humanHandoff}
-                    className="hidden"
-                    accept="image/*,.txt,.csv,.json,.md,.pdf,.doc,.docx"
-                    onChange={(event) => {
-                      handleFilesSelected(event.target.files);
-                      event.currentTarget.value = '';
-                    }}
-                  />
-                  <Paperclip className="w-4 h-4" />
-                </label>
+                {humanHandoff ? (
+                  <span
+                    className="absolute left-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full cursor-not-allowed opacity-40 text-muted-foreground"
+                    title="Com especialista ativo, envie apenas texto aqui; use anexos em Minhas conversas ou sem intervenção humana."
+                    aria-label="Anexos indisponíveis com especialista ativo"
+                  >
+                    <Paperclip className="w-4 h-4" aria-hidden />
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIagroAttachmentModalOpen(true)}
+                    title="Anexar ficheiros ao IAgro"
+                    className="absolute left-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label="Abrir anexos para o IAgro"
+                  >
+                    <Paperclip className="w-4 h-4" aria-hidden />
+                  </button>
+                )}
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
                   <button
                     type="button"
@@ -1211,6 +1216,24 @@ export function IAgro() {
           Essa ação remove a conversa do histórico.
         </p>
       </Modal>
+
+      <FileAttachmentPickerModal
+        isOpen={iagroAttachmentModalOpen}
+        onClose={() => setIagroAttachmentModalOpen(false)}
+        title="Anexar ficheiros"
+        description={
+          <p>
+            Imagens, PDF e ficheiros de texto (TXT, CSV, JSON, MD, DOC/DOCX). Pode escolher vários de uma vez (até 6
+            por mensagem, somando aos já anexados).
+          </p>
+        }
+        accept="image/*,.txt,.csv,.json,.md,.pdf,.doc,.docx"
+        multiple
+        onFilesSelected={(files) => {
+          handleFilesSelected(files);
+          setIagroAttachmentModalOpen(false);
+        }}
+      />
 
       <EncerrarAtendimentoModal
         isOpen={encerrarModalOpen}
