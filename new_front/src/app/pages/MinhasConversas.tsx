@@ -33,9 +33,15 @@ function maskWhatsapp(digits: string) {
 }
 
 function displayUserMessageText(raw: string): string {
-  return String(raw || '')
+  let t = String(raw || '')
     .replace(/\n*\[Anexos:[^\]]+\]\s*$/i, '')
     .trimEnd();
+  const line = t.trim();
+  /** Legenda automática antiga só com nome do ficheiro — não mostrar como comentário. */
+  if (/^\[ClimaAgro\]\s+\S+/i.test(line) && !line.includes('\n')) {
+    return '';
+  }
+  return t;
 }
 
 type LocalMediaItem = { url: string; kind: LocalAttachmentKind };
@@ -352,9 +358,7 @@ export function MinhasConversas() {
     const file = pendingHybridFile;
     if (!caption && !file) return;
 
-    const textoPersistido =
-      caption ||
-      (file ? `[ClimaAgro] ${file.name}` : '');
+    const textoPersistido = caption || (file ? '' : '');
     const optimisticId = `tmp-${Date.now()}`;
     const optimistic: UnifiedChatMessage = {
       id: optimisticId,

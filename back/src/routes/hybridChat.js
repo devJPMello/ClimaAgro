@@ -477,12 +477,9 @@ router.post('/conversations/:id/messages', maybeParseMultipart, async (req, res)
   let conteudo = '';
   let buffer = null;
   let mimeType = null;
-  let originalName = '';
-
   if (req.file) {
     buffer = req.file.buffer;
     mimeType = req.file.mimetype;
-    originalName = String(req.file.originalname || '').trim() || 'anexo';
     conteudo =
       req.body?.conteudo != null && req.body.conteudo !== ''
         ? String(req.body.conteudo).trim()
@@ -497,9 +494,7 @@ router.post('/conversations/:id/messages', maybeParseMultipart, async (req, res)
   if (!buffer && !conteudo) {
     return res.status(400).json({ message: 'conteudo ou ficheiro obrigatório.' });
   }
-  if (buffer && !conteudo) {
-    conteudo = `[ClimaAgro] ${originalName}`;
-  }
+  /* Sem legenda: não gravar o nome do ficheiro como "mensagem" — o anexo já está em midia; WhatsApp usa só o prefixo. */
 
   try {
     const conv = await HybridConversation.findByPk(conversationId);
