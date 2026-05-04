@@ -394,15 +394,15 @@ export function ExportarRelatorios() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Histórico de exportações</CardTitle>
-          <CardDescription>
-            Registros no servidor associados ao identificador deste navegador — use filtros para localizar itens
-          </CardDescription>
-        </CardHeader>
-        <CardBody className="space-y-4">
+        <CardHeader className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between md:gap-6">
+          <div className="min-w-0 flex-1">
+            <CardTitle>Histórico de exportações</CardTitle>
+            <CardDescription>
+              Registros no servidor associados ao identificador deste navegador — use filtros para localizar itens
+            </CardDescription>
+          </div>
           {!loadingHistorico && exportacoes.length > 0 && (
-            <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+            <div className="flex w-full shrink-0 flex-col gap-3 self-stretch sm:flex-row sm:items-end sm:gap-3 md:w-auto md:justify-end">
               <Select
                 label="Filtrar por tipo"
                 value={filtroTipoHistorico}
@@ -428,7 +428,8 @@ export function ExportarRelatorios() {
               />
             </div>
           )}
-
+        </CardHeader>
+        <CardBody className="space-y-4">
           {loadingHistorico ? (
             <p className="text-sm text-muted-foreground py-8 text-center">Carregando histórico…</p>
           ) : exportacoes.length === 0 ? (
