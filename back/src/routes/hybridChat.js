@@ -1,13 +1,115 @@
 const express = require('express');
+const crypto = require('crypto');
+const multer = require('multer');
 const { Op } = require('sequelize');
 const twilioService = require('../services/twilioService');
 const ChatHistory = require('../models/ChatHistory');
 const HybridConversation = require('../models/HybridConversation');
 const HybridMessage = require('../models/HybridMessage');
 const DualUserProfile = require('../models/DualUserProfile');
-const { readStoredFile } = require('../services/hybridMediaStorage');
+const { readStoredFile, saveBuffer, deleteStoredFile } = require('../services/hybridMediaStorage');
 
 const router = express.Router();
+
+const uploadProducerMedia = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const mime = file.mimetype || '';
+    const ok =
+      /^image\/(jpeg|png|webp|gif)$/i.test(mime) || mime === 'application/pdf';
+    cb(null, ok);
+  },
+});
+
+const TWILIO_MEDIA_TOKEN_TTL_MS = 12 * 60 * 1000;
+const twilioMediaTokens = new Map();
+
+function purgeExpiredTwilioTokens() {
+  const now = Date.now();
+  for (const [k, v] of twilioMediaTokens.entries()) {
+    if (v.expiresAt <= now) twilioMediaTokens.delete(k);
+  }
+}
+
+const twilioTokenSweep = setInterval(purgeExpiredTwilioTokens, 60 * 1000);
+if (twilioTokenSweep.unref) twilioTokenSweep.unref();
+
+function createTwilioMediaFetchToken(storageKey, mimeType) {
+  purgeExpiredTwilioTokens();
+  const token = crypto.randomBytes(32).toString('hex');
+  twilioMediaTokens.set(token, {
+    storageKey,
+    mimeType: mimeType || 'application/octet-stream',
+    expiresAt: Date.now() + TWILIO_MEDIA_TOKEN_TTL_MS,
+  });
+  return token;
+}
+
+/** Origem HTTPS pública da API (sem path), ex.: https://api.seudominio.com — Twilio usa para ir buscar mídia. */
+function getPublicApiBase() {
+  const raw =
+    process.env.PUBLIC_API_BASE_URL ||
+    process.env.TWILIO_MEDIA_PUBLIC_BASE_URL ||
+    '';
+  const s = String(raw).trim().replace(/\/+$/, '');
+  if (!s) return '';
+  if (!/^https?:\/\//i.test(s)) return `https://${s.replace(/^\/+/, '')}`;
+  return s;
+}
+
+function publicBaseOkForTwilioMedia(base) {
+  const b = String(base || '').trim();
+  if (!b) return false;
+  if (!/^https:\/\//i.test(b)) return false;
+  const lower = b.toLowerCase();
+  if (lower.includes('localhost') || lower.includes('127.0.0.1')) return false;
+  return true;
+}
+
+function buildTwilioMediaUrl(token) {
+  const base = getPublicApiBase().replace(/\/api\/?$/i, '').replace(/\/+$/, '');
+  if (!base) return '';
+  return `${base}/api/hybrid-chat/twilio-temp-media/${encodeURIComponent(token)}`;
+}
+
+function maybeParseMultipart(req, res, next) {
+  const ct = String(req.headers['content-type'] || '');
+  if (!ct.includes('multipart/form-data')) {
+    return next();
+  }
+  return uploadProducerMedia.single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ message: 'Ficheiro demasiado grande (máx. 5 MB).' });
+      }
+      return res.status(400).json({ message: err.message || 'Erro no upload.' });
+    }
+    if (err) {
+      return res.status(400).json({ message: String(err.message || 'Upload inválido.') });
+    }
+    return next();
+  });
+}
+
+/** GET público — Twilio faz fetch HTTPS sem header Clerk. */
+router.get('/twilio-temp-media/:token', async (req, res) => {
+  try {
+    const token = String(req.params.token || '').trim();
+    purgeExpiredTwilioTokens();
+    const entry = twilioMediaTokens.get(token);
+    if (!entry || entry.expiresAt < Date.now()) {
+      return res.status(404).type('text/plain').send('not found');
+    }
+    const buf = await readStoredFile(entry.storageKey);
+    res.setHeader('Content-Type', entry.mimeType || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(buf);
+  } catch (e) {
+    console.error('hybridChat twilio-temp-media:', e);
+    return res.status(404).type('text/plain').send('not found');
+  }
+});
 
 function normalizeDigits(value) {
   return String(value || '').replace(/\D/g, '');
@@ -363,17 +465,40 @@ router.get('/timeline', async (req, res) => {
 
 /**
  * POST /api/hybrid-chat/conversations/:id/messages
- * Produtor envia texto pelo sistema → Twilio WhatsApp (se configurado) + persistência + Socket.IO
+ * Produtor envia texto (JSON) ou texto + ficheiro (multipart: conteudo + file) → Twilio + persistência + Socket.IO
  */
-router.post('/conversations/:id/messages', async (req, res) => {
+router.post('/conversations/:id/messages', maybeParseMultipart, async (req, res) => {
   const produtorClerkId = headerProdutorId(req);
   const conversationId = String(req.params.id || '').trim();
-  const conteudo = String(req.body?.conteudo || '').trim();
   if (!produtorClerkId) {
     return res.status(400).json({ message: 'Header X-Clerk-User-Id obrigatório.' });
   }
-  if (!conteudo) {
-    return res.status(400).json({ message: 'conteudo é obrigatório.' });
+
+  let conteudo = '';
+  let buffer = null;
+  let mimeType = null;
+  let originalName = '';
+
+  if (req.file) {
+    buffer = req.file.buffer;
+    mimeType = req.file.mimetype;
+    originalName = String(req.file.originalname || '').trim() || 'anexo';
+    conteudo =
+      req.body?.conteudo != null && req.body.conteudo !== ''
+        ? String(req.body.conteudo).trim()
+        : '';
+  } else {
+    conteudo =
+      req.body?.conteudo != null && req.body.conteudo !== ''
+        ? String(req.body.conteudo).trim()
+        : '';
+  }
+
+  if (!buffer && !conteudo) {
+    return res.status(400).json({ message: 'conteudo ou ficheiro obrigatório.' });
+  }
+  if (buffer && !conteudo) {
+    conteudo = `[ClimaAgro] ${originalName}`;
   }
 
   try {
@@ -385,15 +510,60 @@ router.post('/conversations/:id/messages', async (req, res) => {
       return res.status(400).json({ message: 'Atendimento humano não está ativo nesta conversa.' });
     }
 
+    if (buffer && !publicBaseOkForTwilioMedia(getPublicApiBase())) {
+      return res.status(503).json({
+        message:
+          'Envio de ficheiros para o WhatsApp exige HTTPS público da API acessível pelo Twilio. Defina PUBLIC_API_BASE_URL (ex.: https://api.seudominio.com, sem /api no fim). Localhost não funciona.',
+      });
+    }
+
+    let tipo = 'texto';
+    if (mimeType && mimeType.startsWith('image/')) tipo = 'imagem';
+    else if (mimeType && mimeType.startsWith('audio/')) tipo = 'audio';
+
+    let storageKey = null;
+    if (buffer) {
+      storageKey = await saveBuffer(buffer, mimeType);
+    }
+
+    let twilioToken = null;
+    let mediaUrl = '';
+    if (storageKey) {
+      twilioToken = createTwilioMediaFetchToken(storageKey, mimeType);
+      mediaUrl = buildTwilioMediaUrl(twilioToken);
+      if (!mediaUrl) {
+        if (twilioToken) twilioMediaTokens.delete(twilioToken);
+        await deleteStoredFile(storageKey);
+        return res.status(503).json({
+          message:
+            'Não foi possível montar o URL público da mídia. Verifique PUBLIC_API_BASE_URL / TWILIO_MEDIA_PUBLIC_BASE_URL.',
+        });
+      }
+    }
+
     const msg = await HybridMessage.create({
       conversationId: conv.id,
       remetenteId: produtorClerkId,
       conteudo,
-      tipo: 'texto',
+      tipo,
       origem: 'sistema',
+      midiaStorageKey: storageKey,
+      midiaMimeType: mimeType,
     });
 
-    const whatsapp = await twilioService.sendMessage(conv.whatsappAgronomo, `[ClimaAgro | Produtor]\n${conteudo}`);
+    let whatsapp;
+    if (storageKey && mediaUrl) {
+      whatsapp = await twilioService.sendMessageWithMedia(
+        conv.whatsappAgronomo,
+        `[ClimaAgro | Produtor]\n${conteudo}`,
+        [mediaUrl]
+      );
+    } else {
+      whatsapp = await twilioService.sendMessage(
+        conv.whatsappAgronomo,
+        `[ClimaAgro | Produtor]\n${conteudo}`
+      );
+    }
 
     const io = req.app.get('io');
     if (io) {
@@ -421,6 +591,8 @@ router.post('/conversations/:id/messages', async (req, res) => {
         id: msg.id,
         conteudo: msg.conteudo,
         createdAt: msg.createdAt,
+        hasMidia: Boolean(msg.midiaStorageKey),
+        midiaMimeType: msg.midiaMimeType || null,
       },
       whatsapp,
     });
