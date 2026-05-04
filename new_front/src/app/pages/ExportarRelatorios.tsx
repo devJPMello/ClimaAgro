@@ -284,6 +284,15 @@ export function ExportarRelatorios() {
                 automaticamente.
               </p>
 
+              {tipoRelatorio === 'comparativo' ? (
+                <p className="text-xs text-muted-foreground rounded-md border border-border bg-muted/20 px-3 py-2">
+                  <span className="font-medium text-foreground">Comparativo por anos civis:</span> o PDF traz resumo
+                  executivo, duas tabelas mensais (clima e produtividade alinhadas por mês), resumo por cultura e, por
+                  fim, o detalhe por registo. Relatórios antigos gravados com safra SIDRA usam outro formato (mês a mês
+                  da API climate-vs-productivity).
+                </p>
+              ) : null}
+
               <Select
                 label="Formato"
                 value={formato}
@@ -369,9 +378,9 @@ export function ExportarRelatorios() {
                     ano e município (API de produtividade).
                   </li>
                   <li>
-                    <strong className="text-foreground">Comparativo:</strong> tabela mensal com clima e produtividade
-                    na mesma linha (por intervalo de anos); com safra, série mensal da API climate-vs-productivity; mais
-                    detalhe de produtividade por registo.
+                    <strong className="text-foreground">Comparativo:</strong> por anos civis, resumo executivo, duas
+                    tabelas mensais (clima e produtividade), resumo por cultura e detalhe por registo; com safra SIDRA
+                    no histórico, usa a série climate-vs-productivity.
                   </li>
                 </ul>
                 <p className="text-xs text-muted-foreground mt-2">
