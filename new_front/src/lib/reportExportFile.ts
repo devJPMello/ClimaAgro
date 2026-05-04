@@ -162,14 +162,15 @@ function splitDadosSections(text: string): { heading: string; body: string }[] {
   return out;
 }
 
-const TABLE_LINE = /^\s*(.+?)\s*\|\s*(.+?)(?:\s*\|\s*(.+))?$/;
-
 function isLikelyTableLine(line: string): boolean {
   const t = line.trim();
   if (t.length < 5) return false;
   if (!t.includes('|')) return false;
   if (/^[─\-_=]+$/.test(t.replace(/\|/g, ''))) return false;
-  return TABLE_LINE.test(line);
+  const cells = splitTableCells(line);
+  if (cells.length < 2) return false;
+  if (cells.some((c) => c.length > 200)) return false;
+  return true;
 }
 
 function splitTableCells(line: string): string[] {
