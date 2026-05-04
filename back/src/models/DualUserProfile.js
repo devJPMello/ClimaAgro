@@ -48,6 +48,12 @@ const DualUserProfile = sequelize.define(
       type: DataTypes.STRING(80),
       allowNull: true,
     },
+    /** CPF somente dígitos (11), para validação cadastral / LGPD. */
+    cpf: {
+      type: DataTypes.STRING(11),
+      allowNull: true,
+      field: 'cpf',
+    },
     parceiro: {
       type: DataTypes.BOOLEAN,
       allowNull: false,

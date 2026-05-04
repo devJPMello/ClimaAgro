@@ -8,6 +8,21 @@ function onlyDigits(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
+function isValidCpf11(digits) {
+  const s = String(digits || '').replace(/\D/g, '');
+  if (s.length !== 11 || /^(\d)\1{10}$/.test(s)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i += 1) sum += parseInt(s[i], 10) * (10 - i);
+  let d1 = (sum * 10) % 11;
+  if (d1 === 10) d1 = 0;
+  if (d1 !== parseInt(s[9], 10)) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i += 1) sum += parseInt(s[i], 10) * (11 - i);
+  let d2 = (sum * 10) % 11;
+  if (d2 === 10) d2 = 0;
+  return d2 === parseInt(s[10], 10);
+}
+
 router.get('/', async (req, res) => {
   try {
     const { uf, especialidade, ativo } = req.query;
@@ -72,11 +87,17 @@ router.post('/cadastro', async (req, res) => {
     const municipio = String(req.body?.municipio || '').trim();
     const uf = String(req.body?.uf || '').trim().toUpperCase();
     const crea = String(req.body?.crea || '').trim();
+    const cpfDigits = onlyDigits(req.body?.cpf);
     const clerkUserId = String(req.body?.clerkUserId || `email:${email}`).trim();
 
     if (!nome || !email || !especialidade || !whatsapp) {
       return res.status(400).json({
         message: 'Campos obrigatórios: nome, email, especialidade e whatsapp.',
+      });
+    }
+    if (!cpfDigits || cpfDigits.length !== 11 || !isValidCpf11(cpfDigits)) {
+      return res.status(400).json({
+        message: 'CPF inválido. Informe os 11 dígitos com dígitos verificadores corretos.',
       });
     }
 
@@ -92,6 +113,7 @@ router.post('/cadastro', async (req, res) => {
         uf,
         especialidade,
         crea,
+        cpf: cpfDigits,
         parceiro: true,
         parceiroAtivo: true,
         whatsapp,
@@ -106,6 +128,7 @@ router.post('/cadastro', async (req, res) => {
         uf,
         especialidade,
         crea,
+        cpf: cpfDigits,
         parceiro: true,
         parceiroAtivo: true,
         whatsapp,
