@@ -98,4 +98,45 @@ async function sendMessage(toDigits, text) {
   }
 }
 
-module.exports = { sendMessage, isConfigured };
+/**
+ * WhatsApp com anexo (URL pública HTTPS que o Twilio consegue ir buscar).
+ * @param {string[]} mediaUrls — normalmente um elemento (imagem ou PDF).
+ */
+async function sendMessageWithMedia(toDigits, body, mediaUrls) {
+  if (!isConfigured()) {
+    return { sent: false, reason: 'whatsapp_not_configured' };
+  }
+  const digits = normalizeDigits(toDigits);
+  if (!digits || digits.length < 10) {
+    return { sent: false, reason: 'invalid_number' };
+  }
+  if (!Array.isArray(mediaUrls) || mediaUrls.length === 0) {
+    return sendMessage(toDigits, body);
+  }
+  const number = digits.startsWith('55') ? digits : `55${digits}`;
+  const { accountSid, authToken, from } = getConfig();
+  const to = `whatsapp:+${number}`;
+  const textBody = String(body || '').trim();
+  const safeBody = textBody.length > 0 ? textBody.slice(0, MAX_CHARS) : ' ';
+
+  try {
+    const client = twilio(accountSid, authToken);
+    const message = await client.messages.create({
+      from,
+      to,
+      body: safeBody,
+      mediaUrl: mediaUrls,
+    });
+    return { sent: true, sid: message.sid };
+  } catch (e) {
+    let detail = e.message || 'Erro Twilio';
+    if (e.code === 63015) {
+      detail =
+        'Número não inscrito no Sandbox Twilio. O agrônomo precisa enviar "join <código>" para o número do sandbox antes de receber mensagens.';
+    }
+    console.error('[Twilio] sendMessageWithMedia failed:', detail);
+    return { sent: false, reason: 'whatsapp_api_error', detail: detail.slice(0, 600) };
+  }
+}
+
+module.exports = { sendMessage, sendMessageWithMedia, isConfigured };

@@ -42,6 +42,18 @@ async function readStoredFile(storageKey) {
   return fs.readFile(full);
 }
 
+/** Remove ficheiro guardado (ex.: rollback após falha Twilio). */
+async function deleteStoredFile(storageKey) {
+  const safe = String(storageKey || '').replace(/\.\./g, '').replace(/^\/+/, '');
+  if (!safe.startsWith(`${UPLOAD_SUBDIR}/`)) return;
+  const full = path.join(uploadAbsRoot, safe);
+  try {
+    await fs.unlink(full);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function fetchRemoteToBuffer(url, options = {}) {
   const { auth } = options;
   const response = await axios.get(url, {
@@ -56,6 +68,7 @@ async function fetchRemoteToBuffer(url, options = {}) {
 module.exports = {
   saveBuffer,
   readStoredFile,
+  deleteStoredFile,
   fetchRemoteToBuffer,
   uploadAbsRoot,
   UPLOAD_SUBDIR,
