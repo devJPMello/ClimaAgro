@@ -22,7 +22,6 @@ import {
 import { toast } from 'sonner';
 import { Card, CardBody } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
-import { SkeletonCard } from '../components/ui/Skeleton';
 import { Tooltip } from '../components/ui/Tooltip';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
@@ -51,6 +50,33 @@ const UF_IBGE_ID_BY_SIGLA: Record<string, string> = {
 };
 
 const PRIVACY_POLICY_URL = (import.meta.env.VITE_PRIVACY_POLICY_URL as string | undefined)?.trim() ?? '';
+
+function onlyCpfDigits(value: string): string {
+  return value.replace(/\D/g, '').slice(0, 11);
+}
+
+function formatCpfMask(digits: string): string {
+  const d = onlyCpfDigits(digits);
+  if (d.length <= 3) return d;
+  if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`;
+  if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
+  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9, 11)}`;
+}
+
+function isValidCpf11(digits: string): boolean {
+  const s = onlyCpfDigits(digits);
+  if (s.length !== 11 || /^(\d)\1{10}$/.test(s)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i += 1) sum += parseInt(s.charAt(i), 10) * (10 - i);
+  let d1 = (sum * 10) % 11;
+  if (d1 === 10) d1 = 0;
+  if (d1 !== parseInt(s.charAt(9), 10)) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i += 1) sum += parseInt(s.charAt(i), 10) * (11 - i);
+  let d2 = (sum * 10) % 11;
+  if (d2 === 10) d2 = 0;
+  return d2 === parseInt(s.charAt(10), 10);
+}
 
 function maskEmail(email: string): string {
   const s = email.trim();
@@ -106,6 +132,7 @@ export function AgronomosParceiros() {
   const [cadastro, setCadastro] = useState({
     nome: '',
     email: '',
+    cpf: '',
     whatsapp: '',
     municipio: '',
     uf: '',
@@ -314,7 +341,17 @@ export function AgronomosParceiros() {
 
   function abrirCadastro() {
     setCadastroStep('upload');
-    setCadastro({ nome: '', email: '', whatsapp: '', municipio: '', uf: '', crea: '', especialidade: '', sobre: '' });
+    setCadastro({
+      nome: '',
+      email: '',
+      cpf: '',
+      whatsapp: '',
+      municipio: '',
+      uf: '',
+      crea: '',
+      especialidade: '',
+      sobre: '',
+    });
     setModalCadastroAberto(true);
   }
 
@@ -328,6 +365,7 @@ export function AgronomosParceiros() {
         nome: extracted.fullName ?? prev.nome,
         crea: extracted.creaRegistrationNumber ?? prev.crea,
         uf: extracted.creaUf ?? prev.uf,
+        cpf: extracted.cpf ? onlyCpfDigits(extracted.cpf) : prev.cpf,
       }));
       if (res.data.warnings?.length) toast.info(res.data.warnings[0]);
       setCadastroStep('form');
@@ -344,11 +382,16 @@ export function AgronomosParceiros() {
     if (
       !cadastro.nome.trim() ||
       !cadastro.email.trim() ||
+      !cadastro.cpf.trim() ||
       !cadastro.whatsapp.trim() ||
       !cadastro.crea.trim() ||
       !cadastro.especialidade.trim()
     ) {
       toast.error('Preencha os campos obrigatórios para cadastro.');
+      return;
+    }
+    if (!isValidCpf11(cadastro.cpf)) {
+      toast.error('CPF inválido. Verifique os 11 dígitos.');
       return;
     }
     if (!/^\d{10,13}$/.test(cadastro.whatsapp.trim())) {
@@ -361,6 +404,7 @@ export function AgronomosParceiros() {
         await cadastrarAgronomoParceiro({
           nome: cadastro.nome.trim(),
           email: cadastro.email.trim(),
+          cpf: onlyCpfDigits(cadastro.cpf),
           whatsapp: cadastro.whatsapp.trim(),
           municipio: cadastro.municipio.trim(),
           uf: cadastro.uf.trim().toUpperCase(),
@@ -375,6 +419,7 @@ export function AgronomosParceiros() {
         setCadastro({
           nome: '',
           email: '',
+          cpf: '',
           whatsapp: '',
           municipio: '',
           uf: '',
@@ -525,12 +570,33 @@ export function AgronomosParceiros() {
 
           {loadingLista && (
             <div
-              className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3"
+              className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
               aria-busy="true"
               aria-label="A carregar lista de agrônomos"
             >
-              {Array.from({ length: 6 }).map((_, i) => (
-                <SkeletonCard key={i} />
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="animate-pulse space-y-3 rounded-xl border border-border bg-card px-5 py-4"
+                >
+                  <div className="flex gap-3">
+                    <div className="h-14 w-14 shrink-0 rounded-full bg-muted" />
+                    <div className="min-w-0 flex-1 space-y-2 pt-0.5">
+                      <div className="h-4 w-4/5 max-w-[14rem] rounded bg-muted" />
+                      <div className="h-3 w-full rounded bg-muted" />
+                      <div className="h-3 w-2/3 rounded bg-muted" />
+                    </div>
+                  </div>
+                  <div className="space-y-2 pl-0.5">
+                    <div className="h-3 w-full rounded bg-muted" />
+                    <div className="h-3 w-3/5 rounded bg-muted" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="h-14 rounded-lg bg-muted/80" />
+                    <div className="h-14 rounded-lg bg-muted/80" />
+                  </div>
+                  <div className="h-10 w-full rounded-lg bg-muted" />
+                </div>
               ))}
             </div>
           )}
@@ -557,67 +623,71 @@ export function AgronomosParceiros() {
           )}
 
           {!loadingLista && agronomosFiltrados.length > 0 && (
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {agronomosPaginados.map((agronomo) => (
                 <Card
                   key={agronomo.id}
                   className="transition-all duration-200 hover:shadow-md"
                 >
-                  <CardBody className="space-y-4">
-                    <div className="flex items-start gap-4">
-                      <div className="relative">
-                        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-dark text-white">
-                          <User className="h-8 w-8" />
+                  <CardBody className="!px-5 !py-4 space-y-3">
+                    <div className="flex items-start gap-3">
+                      <div className="relative shrink-0">
+                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-dark text-white">
+                          <User className="h-7 w-7" />
                         </div>
-                        <span className="absolute -bottom-1 -right-1 inline-flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-green-500">
-                          <CheckCircle className="h-3.5 w-3.5 text-white" />
+                        <span className="absolute -bottom-0.5 -right-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-white bg-green-500">
+                          <CheckCircle className="h-3 w-3 text-white" />
                         </span>
                       </div>
                       <div className="min-w-0">
-                        <p className="truncate text-lg">{agronomo.nome}</p>
-                        <p className="text-sm text-muted-foreground">{agronomo.especialidade}</p>
+                        <p className="truncate text-base font-semibold leading-tight">{agronomo.nome}</p>
+                        <p className="line-clamp-2 text-sm text-muted-foreground">{agronomo.especialidade}</p>
                         <p className="mt-1 inline-flex items-center gap-1 text-sm text-severity-medium">
-                          <Star className="h-4 w-4 fill-current" />
+                          <Star className="h-3.5 w-3.5 shrink-0 fill-current" aria-hidden />
                           {agronomo.totalAvaliacoes > 0 ? (
                             <>
                               {agronomo.avaliacao.toFixed(1)} ({agronomo.totalAvaliacoes} aval.)
                             </>
                           ) : (
-                            <span className="text-muted-foreground font-normal">Sem avaliações ainda</span>
+                            <span className="font-normal text-muted-foreground">Sem avaliações ainda</span>
                           )}
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex flex-col gap-2 text-sm text-muted-foreground">
-                      <div className="flex items-start gap-2 min-w-0">
-                        <MapPin className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                    <div className="flex flex-col gap-1.5 text-sm text-muted-foreground">
+                      <div className="flex min-w-0 items-start gap-2">
+                        <MapPin className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
                         <span className="min-w-0 break-words leading-snug">
                           {formatMunicipioComUf(agronomo.municipio, agronomo.uf)}
                         </span>
                       </div>
-                      <div className="flex items-start gap-2 min-w-0">
-                        <Briefcase className="h-4 w-4 shrink-0 mt-0.5" aria-hidden />
+                      <div className="flex min-w-0 items-start gap-2">
+                        <Briefcase className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
                         <span className="min-w-0 break-words leading-snug">{agronomo.crea}</span>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-lg bg-muted/50 p-3 text-center">
-                        <p className="text-2xl" style={{ fontFamily: 'var(--font-serif)' }}>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div className="rounded-lg bg-muted/50 px-2.5 py-2 text-center">
+                        <p className="text-lg font-medium leading-none" style={{ fontFamily: 'var(--font-serif)' }}>
                           {agronomo.totalAtendimentos}
                         </p>
-                        <p className="text-xs text-muted-foreground">Atendimentos</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Atendimentos</p>
                       </div>
-                      <div className="rounded-lg bg-muted/50 p-3 text-center">
-                        <p className="text-2xl" style={{ fontFamily: 'var(--font-serif)' }}>
+                      <div className="rounded-lg bg-muted/50 px-2.5 py-2 text-center">
+                        <p className="text-base font-medium leading-tight" style={{ fontFamily: 'var(--font-serif)' }}>
                           {agronomo.tempoResposta}
                         </p>
-                        <p className="text-xs text-muted-foreground">Resposta média</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Resposta média</p>
                       </div>
                     </div>
 
-                    <Button type="button" className="w-full" onClick={() => abrirDetalhes(agronomo)}>
+                    <Button
+                      type="button"
+                      className="h-10 w-full"
+                      onClick={() => abrirDetalhes(agronomo)}
+                    >
                       Ver Perfil
                     </Button>
                   </CardBody>
@@ -985,6 +1055,18 @@ export function AgronomosParceiros() {
                 type="email"
                 value={cadastro.email}
                 onChange={(e) => setCadastro((prev) => ({ ...prev, email: e.target.value }))}
+                required
+              />
+              <Input
+                label="CPF"
+                placeholder="000.000.000-00"
+                inputMode="numeric"
+                autoComplete="off"
+                value={formatCpfMask(cadastro.cpf)}
+                onChange={(e) =>
+                  setCadastro((prev) => ({ ...prev, cpf: onlyCpfDigits(e.target.value) }))
+                }
+                helperText="11 dígitos. Pode ser preenchido automaticamente ao enviar a foto da carteira CREA."
                 required
               />
               <Input

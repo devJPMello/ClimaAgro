@@ -37,6 +37,8 @@ export async function listarAgronomosParceiros(params?: {
 export async function cadastrarAgronomoParceiro(payload: {
   nome: string;
   email: string;
+  /** 11 dígitos (com ou sem máscara; o back normaliza). */
+  cpf: string;
   whatsapp: string;
   telefone?: string;
   municipio?: string;
