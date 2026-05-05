@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
@@ -8,10 +8,12 @@ import { User, Mail, Moon, Phone, MapPin, Bell, FileText, Calendar, Sun } from '
 import { toast } from 'sonner';
 import { useUser } from '@clerk/clerk-react';
 import { TO_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
+import { UF_NOME } from '../../lib/geo/brazilStatesMalha';
+import { UF_IBGE_ID_BY_SIGLA } from '../../lib/geo/ufIbgeIds';
 import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
+import { getMyDualProfile, putMyDualProfile } from '../../lib/api/dualProfileApi';
 import { listReportExports } from '../../lib/api/reportExportsApi';
 import { listClimateAlerts } from '../../lib/api/alertsApi';
-import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
@@ -69,8 +71,68 @@ export function Perfil() {
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
   const [telefone, setTelefone] = useState('');
-  const [municipioFavorito, setMunicipioFavorito] = usePersistedState('climaagro.pref.perfil.municipioFavorito', 'Palmas');
-  const { options: municipioOptions, loading: municipiosLoading, error: municipiosError } = useIbgeMunicipioSelectOptions();
+  const [ufSigla, setUfSigla] = useState('TO');
+  const [municipioFavorito, setMunicipioFavorito] = useState('Palmas');
+  const ufIbgeId = UF_IBGE_ID_BY_SIGLA[ufSigla] ?? '17';
+  const { options: municipioOptions, loading: municipiosLoading, error: municipiosError } =
+    useIbgeMunicipioSelectOptions(ufIbgeId);
+
+  const ufOptions = useMemo(
+    () =>
+      Object.keys(UF_IBGE_ID_BY_SIGLA)
+        .sort((a, b) => (UF_NOME[a] ?? a).localeCompare(UF_NOME[b] ?? b, 'pt-BR'))
+        .map((sigla) => ({
+          value: sigla,
+          label: `${sigla} — ${UF_NOME[sigla] ?? sigla}`,
+        })),
+    []
+  );
+
+  const LEGACY_MUN_STORAGE_KEY = 'climaagro.pref.perfil.municipioFavorito';
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const p = await getMyDualProfile(user.id);
+        if (cancelled) return;
+        if (p?.uf && UF_IBGE_ID_BY_SIGLA[p.uf]) {
+          setUfSigla(p.uf);
+        }
+        if (p?.municipio) {
+          setMunicipioFavorito(p.municipio);
+        } else {
+          try {
+            const raw = window.localStorage.getItem(LEGACY_MUN_STORAGE_KEY);
+            if (raw != null) {
+              const parsed = JSON.parse(raw) as string;
+              if (typeof parsed === 'string' && parsed.trim()) {
+                setMunicipioFavorito(parsed);
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        try {
+          const raw = window.localStorage.getItem(LEGACY_MUN_STORAGE_KEY);
+          if (raw != null) {
+            const parsed = JSON.parse(raw) as string;
+            if (typeof parsed === 'string' && parsed.trim()) {
+              setMunicipioFavorito(parsed);
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     if (!municipioOptions.length) return;
@@ -81,8 +143,9 @@ export function Perfil() {
       setMunicipioFavorito(legacy);
       return;
     }
-    if (valid.has('Palmas')) setMunicipioFavorito('Palmas');
-  }, [municipioOptions, municipioFavorito, setMunicipioFavorito]);
+    const first = municipioOptions[0]?.value;
+    if (first) setMunicipioFavorito(first);
+  }, [municipioOptions, municipioFavorito]);
 
   const [notifAlertasCriticos, setNotifAlertasCriticos] = useState(true);
   const [notifRelatorios, setNotifRelatorios] = useState(true);
@@ -108,10 +171,26 @@ export function Perfil() {
     };
   }, []);
 
-  const handleSalvar = () => {
-    toast.info('Nome e email são gerenciados pela conta Clerk.');
-    toast.success('Perfil atualizado com sucesso!');
-    setEditando(false);
+  const handleSalvar = async () => {
+    if (!user?.id) {
+      toast.error('Sessão inválida. Faça login novamente.');
+      return;
+    }
+    toast.info('Nome e email vêm da conta Clerk; localização é salva no ClimaAgro.');
+    try {
+      await putMyDualProfile(user.id, {
+        uf: ufSigla,
+        municipio: municipioFavorito,
+        telefone: telefone.trim() || null,
+        nome: user.fullName || user.firstName || nome || 'Produtor',
+        email: user.primaryEmailAddress?.emailAddress || email || 'sem-email@climaagro.local',
+      });
+      toast.success('Perfil atualizado com sucesso!');
+      setEditando(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Não foi possível salvar.';
+      toast.error(msg);
+    }
   };
 
   const estatisticas: StatItem[] = [
@@ -214,10 +293,25 @@ export function Perfil() {
                 />
               </div>
 
-              <div className="relative">
+              <div className="relative space-y-1">
                 <MapPin className="absolute left-3 top-[42px] w-5 h-5 text-muted-foreground" />
                 <Select
-                  label="Município Favorito"
+                  label="UF (estado)"
+                  value={ufSigla}
+                  onChange={(e) => setUfSigla(e.target.value)}
+                  options={ufOptions}
+                  className="pl-11"
+                  disabled={!editando}
+                />
+                <p className="text-xs text-muted-foreground pl-1">
+                  Usado em dados regionais, alertas e no IAgro (gravado no servidor).
+                </p>
+              </div>
+
+              <div className="relative space-y-1">
+                <MapPin className="absolute left-3 top-[42px] w-5 h-5 text-muted-foreground" />
+                <Select
+                  label="Município"
                   value={municipioFavorito}
                   onChange={(e) => setMunicipioFavorito(e.target.value)}
                   options={municipioOptions}
@@ -225,6 +319,9 @@ export function Perfil() {
                   disabled={!editando || municipiosLoading}
                   error={municipiosError ?? undefined}
                 />
+                <p className="text-xs text-muted-foreground pl-1">
+                  Nome oficial IBGE, alinhado aos mapas e séries do app.
+                </p>
               </div>
 
               {editando && (
