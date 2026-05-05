@@ -7,6 +7,7 @@ const { Op } = require('sequelize');
 const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const ChatHistory = require('../models/ChatHistory');
+const { buildIagroDataContext } = require('../services/iagroDataContextService');
 
 const MAX_ATTACHMENT_TEXT_CHARS = 12000;
 
@@ -72,8 +73,12 @@ const CONCIERGE_FOOTER = [
   '---',
   'Ao final da sua resposta ao produtor, acrescente OBRIGATORIAMENTE uma linha adicional, sozinha, exatamente neste formato (JSON minificado, sem crases ou markdown):',
   '[META]{"escalate":false,"reason":"","specialtyHint":""}',
-  'Regras: use "escalate": true quando: (1) houver incerteza relevante no diagnóstico; (2) risco de perda da lavoura; (3) for necessário laudo CREA, receituário de defensivo ou orientação presencial; (4) o caso exigir confirmação de laboratório ou visita; (5) o produtor pedir explicitamente falar com agrônomo, especialista ou atendimento humano. Em "reason" resuma em uma frase o motivo. Em "specialtyHint" indique a área (ex.: "Pragas", "Fitossanidade", "Solos", "Irrigação").',
-  'Exemplo: [META]{"escalate":true,"reason":"Sintomas ambíguos; risco de lagarta em soja.","specialtyHint":"Pragas"}',
+  'Regras para "escalate": true (somente se aplicável):',
+  '(A) Nesta mensagem o produtor enviou imagem ou PDF E há incerteza relevante, risco à lavoura, necessidade de laudo CREA/receituário/ofício, ou confirmação em laboratório ou visita; OU',
+  '(B) Nesta mensagem o produtor pediu explicitamente falar com agrônomo, especialista, visita técnica ou atendimento humano.',
+  'Para conversa apenas em texto, sem anexo nesta mensagem e sem pedido explícito de humano, use em geral "escalate": false (orientações gerais e monitoramento não disparam triagem).',
+  'Em "reason" resuma em uma frase o motivo. Em "specialtyHint" indique a área (ex.: "Pragas", "Fitossanidade", "Solos", "Irrigação").',
+  'Exemplo: [META]{"escalate":true,"reason":"Imagem ambígua; possível ferrugem asiática.","specialtyHint":"Fitossanidade"}',
 ].join('\n');
 
 function normalizeConcierge(parsed) {
@@ -117,6 +122,45 @@ function splitConciergeMeta(raw) {
     }
   }
   return { displayText: trimmed, concierge: empty };
+}
+
+/** Produtor pediu encaminhamento humano explícito no texto desta mensagem (sem depender do modelo). */
+function userRequestsHumanHelp(message) {
+  const m = String(message || '').toLowerCase();
+  if (!m.trim()) return false;
+  const patterns = [
+    /\bagr[oô]nomo\b/,
+    /\bespecialista\b/,
+    /\batendimento\s+humano\b/,
+    /\batendimento\s+presencial\b/,
+    /\bvisita\s+t[eé]cnica\b/,
+    /\bpreciso\s+de\s+(um\s+)?(agr[oô]nomo|especialista|t[eé]cnico)\b/,
+    /\bquero\s+(falar|conversar)\s+com\s+(um\s+)?(agr[oô]nomo|especialista|t[eé]cnico)\b/,
+    /\bfalar\s+com\s+(um\s+)?(agr[oô]nomo|especialista|t[eé]cnico)\b/,
+    /\bencaminhar\s+(para\s+)?(um\s+)?(agr[oô]nomo|especialista)\b/,
+    /\bcontato\s+(do|com)\s+(o\s+)?(agr[oô]nomo|especialista)\b/,
+    /\bpreciso\s+falar\s+com\b/,
+    /\bwhatsapp\s+(do\s+)?(agr[oô]nomo|especialista)\b/,
+    /\blaudo\s+crea\b/,
+    /\breceitu[aá]rio\b.*\b(agr[oô]nomo|defensivo)\b/,
+  ];
+  return patterns.some((re) => re.test(m));
+}
+
+/**
+ * Triagem humana na UI só quando há anexo nesta mensagem OU pedido explícito de especialista.
+ * Evita cartão de parceiro e nomes em todo turno de chat só texto.
+ */
+function gateConciergeEscalation(concierge, { hasAttachments, explicitHuman }) {
+  const empty = { escalate: false, reason: '', specialtyHint: '' };
+  if (hasAttachments || explicitHuman) {
+    return {
+      escalate: Boolean(concierge && concierge.escalate),
+      reason: String((concierge && concierge.reason) || '').slice(0, 800),
+      specialtyHint: String((concierge && concierge.specialtyHint) || '').slice(0, 160),
+    };
+  }
+  return empty;
 }
 
 function extractGeminiText(responseData) {
@@ -286,6 +330,7 @@ router.post(
       const orderedContext = [...recentRecords].reverse();
       const threadIsFavorite = Boolean(recentRecords[0]?.isFavorite);
       const context = buildThreadContext(orderedContext);
+      const dataContext = await buildIagroDataContext(clerkUserId);
       const hasImages = files.some((f) => String(f.mimetype || '').startsWith('image/'));
       const hasPdf = files.some((f) => isPdfFile(f));
 
@@ -295,12 +340,14 @@ router.post(
         'Responda sempre em português do Brasil, de forma objetiva e prática, como um agrônomo experiente falando com um produtor rural.',
         'Use formatação Markdown para organizar suas respostas (títulos, listas, negrito).',
         'Quando pertinente, embase suas recomendações em referências técnicas brasileiras (Embrapa, IAC, CREA, MAPA).',
-        'Quando perceber que o caso foge do que pode ser resolvido com segurança apenas por chat (incerteza, laudo formal, receituário agronômico, urgência fitossanitária), reconheça o limite e indique apoio humano — isso será sinalizado ao sistema na linha [META] final.',
+        'No texto principal da resposta, NÃO invente nem cite nomes de pessoas, agrônomos ou empresas parceiras. O aplicativo encaminha a parceiros cadastrados quando for o caso — use apenas a linha [META] para sinalizar necessidade de humano, sem nomes próprios.',
+        'Quando perceber que o caso foge do que pode ser resolvido com segurança apenas por chat (incerteza, laudo formal, receituário agronômico, urgência fitossanitária), reconheça o limite — isso será sinalizado ao sistema na linha [META] final, conforme as regras do rodapé.',
         CONCIERGE_FOOTER,
       ].join('\n');
 
       const prompt = [
         systemRole,
+        ...(dataContext ? ['', dataContext] : []),
         '',
         'Histórico da conversa:',
         context,
@@ -436,6 +483,13 @@ router.post(
         return res.status(502).json({ message: 'Resposta inválida do modelo após triagem.' });
       }
 
+      const hasAttachments = files.length > 0;
+      const explicitHuman = userRequestsHumanHelp(message);
+      const conciergeOut = gateConciergeEscalation(concierge, {
+        hasAttachments,
+        explicitHuman,
+      });
+
       const fileNames = files.map((file) => file.originalname).filter(Boolean);
       const persistedMessage =
         fileNames.length > 0
@@ -455,7 +509,7 @@ router.post(
       return res.json({
         threadId,
         response: displayText,
-        concierge,
+        concierge: conciergeOut,
       });
     } catch (error) {
       if (error.statusCode === 403) {
