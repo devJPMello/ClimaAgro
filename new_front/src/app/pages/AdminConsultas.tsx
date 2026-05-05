@@ -9,6 +9,7 @@ import {
   Copy,
   Loader2,
   MessageCircle,
+  Eye,
 } from 'lucide-react';
 import { Card, CardBody } from '../components/ui/Card';
 import { Modal } from '../components/ui/Modal';
@@ -156,13 +157,13 @@ export function AdminConsultas() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-500">
       <div>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <ClipboardList className="h-7 w-7 text-primary" />
+        <h1 className="flex items-center gap-2 text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
+          <ClipboardList className="h-8 w-8 text-primary shrink-0" />
           Consulta
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="text-muted-foreground">
           Tickets em <span className="font-mono text-xs">consultas_agronomicas</span> — ordenação por atualização (mais
           recente primeiro). Canal principal do híbrido na linha:{' '}
           <span className="font-medium text-foreground">ativo</span> primeiro; em empate,{' '}
@@ -179,7 +180,7 @@ export function AdminConsultas() {
           )}
           {!loading && (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] text-left text-sm">
+              <table className="w-full min-w-[920px] text-left text-sm">
                 <thead className="border-b border-border bg-muted/40 text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3 font-medium">Estado</th>
@@ -190,12 +191,13 @@ export function AdminConsultas() {
                     <th className="px-4 py-3 font-medium">Canal</th>
                     <th className="px-4 py-3 font-medium">Aval.</th>
                     <th className="px-4 py-3 font-medium">Atualizado</th>
+                    <th className="w-14 px-3 py-3 font-medium text-center" aria-label="Detalhe" />
                   </tr>
                 </thead>
                 <tbody>
                   {items.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
+                      <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
                         Nenhum registo{total === 0 ? '' : ` (total ${total})`}.
                       </td>
                     </tr>
@@ -266,6 +268,20 @@ export function AdminConsultas() {
                           hour: '2-digit',
                           minute: '2-digit',
                         })}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedRow(row);
+                          }}
+                          className="inline-flex p-1.5 rounded-lg hover:bg-muted border border-transparent hover:border-border transition-all text-muted-foreground hover:text-foreground"
+                          title="Ver detalhes"
+                          aria-label="Ver detalhes da consulta"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
                       </td>
                     </tr>
                   ))}
