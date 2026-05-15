@@ -202,7 +202,7 @@ export function Alertas() {
               {/* Tabela + Filtros */}
               <Card>
                 <CardHeader>
-                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <CardTitle>Lista de Alertas</CardTitle>
                       {payload.updatedAt && (
@@ -211,8 +211,8 @@ export function Alertas() {
                         </p>
                       )}
                     </div>
-                    <div className="flex items-end gap-3 flex-wrap">
-                      <div className="w-52">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:flex-wrap sm:gap-3">
+                      <div className="sm:w-52">
                         <Select
                           label="Severidade"
                           value={severidadeFiltro}
@@ -226,7 +226,7 @@ export function Alertas() {
                           ]}
                         />
                       </div>
-                      <div className="w-52">
+                      <div className="sm:w-52">
                         <Select
                           label="Tipo"
                           value={tipoFiltro}
@@ -244,7 +244,7 @@ export function Alertas() {
                           ]}
                         />
                       </div>
-                      <div className="w-64">
+                      <div className="sm:w-64">
                         <Select
                           label="UF"
                           value={ufFiltro}
@@ -256,7 +256,7 @@ export function Alertas() {
                         <button
                           type="button"
                           onClick={() => { setSeveridadeFiltro('todos'); setTipoFiltro('todos'); setUfFiltro('ALL'); }}
-                          className="text-xs text-primary hover:underline pb-2.5"
+                          className="text-xs text-primary hover:underline sm:pb-2.5 text-left"
                         >
                           Limpar
                         </button>
@@ -376,7 +376,7 @@ export function Alertas() {
                     const pageNums = Array.from({ length: end - start + 1 }, (_, i) => start + i);
 
                     return (
-                      <div className="px-6 py-3 border-t border-border flex items-center justify-between text-sm text-muted-foreground">
+                      <div className="px-4 py-3 sm:px-6 border-t border-border flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
                         <span>
                           {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, alertasFiltrados.length)} de{' '}
                           {alertasFiltrados.length} alertas
@@ -389,7 +389,7 @@ export function Alertas() {
                             className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                           >
                             <ChevronLeft className="w-4 h-4" />
-                            Anterior
+                            <span className="hidden sm:inline">Anterior</span>
                           </button>
 
                           {start > 1 && (
@@ -439,7 +439,7 @@ export function Alertas() {
                             disabled={currentPage === totalPages}
                             className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                           >
-                            Próxima
+                            <span className="hidden sm:inline">Próxima</span>
                             <ChevronRight className="w-4 h-4" />
                           </button>
                         </div>

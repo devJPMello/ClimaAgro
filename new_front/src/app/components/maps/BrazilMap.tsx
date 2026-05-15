@@ -13,14 +13,13 @@ import {
 
 interface BrazilMapProps {
   metric: BrazilMapMetric;
-  height?: number;
   /** Valores por UF vindos do dashboard (API). Estados sem valor aparecem em cinza. */
   valuesByUf?: Partial<Record<string, number>>;
   /** Incrementar após atualizar dados para forçar repaint das cores no Leaflet. */
   dataRevision?: number;
 }
 
-export function BrazilMap({ metric, height = 600, valuesByUf, dataRevision = 0 }: BrazilMapProps) {
+export function BrazilMap({ metric, valuesByUf, dataRevision = 0 }: BrazilMapProps) {
   const [geojsonData, setGeojsonData] = useState<GeoJSON.FeatureCollection | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -114,10 +113,7 @@ export function BrazilMap({ metric, height = 600, valuesByUf, dataRevision = 0 }
 
   if (loading) {
     return (
-      <div
-        className="w-full overflow-hidden rounded-xl bg-muted/40 flex items-center justify-center"
-        style={{ height }}
-      >
+      <div className="w-full overflow-hidden rounded-xl bg-muted/40 flex items-center justify-center h-[300px] sm:h-[450px] lg:h-[600px]">
         <p className="text-sm text-muted-foreground">Carregando mapa...</p>
       </div>
     );
@@ -125,10 +121,7 @@ export function BrazilMap({ metric, height = 600, valuesByUf, dataRevision = 0 }
 
   if (error) {
     return (
-      <div
-        className="w-full overflow-hidden rounded-xl border border-destructive/20 bg-destructive/5 flex flex-col items-center justify-center gap-3 p-6"
-        style={{ height }}
-      >
+      <div className="w-full overflow-hidden rounded-xl border border-destructive/20 bg-destructive/5 flex flex-col items-center justify-center gap-3 p-6 h-[300px] sm:h-[450px] lg:h-[600px]">
         <p className="text-sm text-destructive text-center">{error}</p>
         <Button variant="secondary" onClick={loadGeojson}>
           Tentar novamente
@@ -138,7 +131,7 @@ export function BrazilMap({ metric, height = 600, valuesByUf, dataRevision = 0 }
   }
 
   return (
-    <div className="w-full overflow-hidden rounded-xl" style={{ height }}>
+    <div className="w-full overflow-hidden rounded-xl h-[300px] sm:h-[450px] lg:h-[600px]">
       <MapContainer center={[-14.5, -52.5]} zoom={4} style={{ height: '100%', width: '100%' }}>
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

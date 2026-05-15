@@ -460,10 +460,10 @@ export function ExportarRelatorios() {
                   <tr className="text-left border-b border-border">
                     <th className="pb-3 text-sm text-muted-foreground">Tipo</th>
                     <th className="pb-3 text-sm text-muted-foreground">Local</th>
-                    <th className="pb-3 text-sm text-muted-foreground">Período</th>
-                    <th className="pb-3 text-sm text-muted-foreground">Formato</th>
+                    <th className="hidden sm:table-cell pb-3 text-sm text-muted-foreground">Período</th>
+                    <th className="hidden sm:table-cell pb-3 text-sm text-muted-foreground">Formato</th>
                     <th className="pb-3 text-sm text-muted-foreground">Status</th>
-                    <th className="pb-3 text-sm text-muted-foreground">Data</th>
+                    <th className="hidden md:table-cell pb-3 text-sm text-muted-foreground">Data</th>
                     <th className="pb-3 text-sm text-muted-foreground">Ações</th>
                   </tr>
                 </thead>
@@ -472,8 +472,8 @@ export function ExportarRelatorios() {
                     <tr key={exp.id} className="border-b border-border last:border-0">
                       <td className="py-4 text-sm">{exp.tipo}</td>
                       <td className="py-4 text-sm">{exp.local}</td>
-                      <td className="py-4 text-sm">{exp.periodo}</td>
-                      <td className="py-4">
+                      <td className="hidden sm:table-cell py-4 text-sm">{exp.periodo}</td>
+                      <td className="hidden sm:table-cell py-4">
                         <Badge variant="info">{exp.formato}</Badge>
                       </td>
                       <td className="py-4">
@@ -502,7 +502,7 @@ export function ExportarRelatorios() {
                           </Badge>
                         )}
                       </td>
-                      <td className="py-4 text-sm text-muted-foreground">{exp.data}</td>
+                      <td className="hidden md:table-cell py-4 text-sm text-muted-foreground">{exp.data}</td>
                       <td className="py-4">
                         {exp.status !== 'falha' && (
                           <Button
@@ -547,7 +547,7 @@ export function ExportarRelatorios() {
                         className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                       >
                         <ChevronLeft className="w-4 h-4" aria-hidden />
-                        Anterior
+                        <span className="hidden sm:inline">Anterior</span>
                       </button>
 
                       {start > 1 && (
@@ -604,7 +604,7 @@ export function ExportarRelatorios() {
                         aria-label="Próxima página"
                         className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                       >
-                        Próxima
+                        <span className="hidden sm:inline">Próxima</span>
                         <ChevronRight className="w-4 h-4" aria-hidden />
                       </button>
                     </div>

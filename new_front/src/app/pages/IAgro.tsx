@@ -684,7 +684,7 @@ export function IAgro() {
   return (
     <div className="space-y-6 relative">
       <div className="min-w-0 space-y-4">
-      <div className="pr-28">
+      <div className="pr-12 sm:pr-28">
         <h1 className="text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
           IAgro
         </h1>
@@ -725,7 +725,7 @@ export function IAgro() {
 
       <Card>
         <CardBody className="space-y-4">
-          <div className="h-[68vh] overflow-y-auto rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+          <div className="h-[50vh] sm:h-[60vh] md:h-[68vh] overflow-y-auto rounded-lg border border-border bg-muted/20 p-3 space-y-3">
             {loadingHistory && <p className="text-sm text-muted-foreground">Carregando histórico...</p>}
             {!loadingHistory && messages.length === 0 && (
               <div className="px-2 py-6">

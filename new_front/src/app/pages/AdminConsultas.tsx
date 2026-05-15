@@ -180,15 +180,15 @@ export function AdminConsultas() {
           )}
           {!loading && (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[920px] text-left text-sm">
+              <table className="w-full min-w-[640px] text-left text-sm">
                 <thead className="border-b border-border bg-muted/40 text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3 font-medium">Estado</th>
                     <th className="px-4 py-3 font-medium">Urgência</th>
                     <th className="px-4 py-3 font-medium">Assunto</th>
                     <th className="px-4 py-3 font-medium">Produtor</th>
-                    <th className="px-4 py-3 font-medium">Especialista</th>
-                    <th className="px-4 py-3 font-medium">Canal</th>
+                    <th className="hidden lg:table-cell px-4 py-3 font-medium">Especialista</th>
+                    <th className="hidden lg:table-cell px-4 py-3 font-medium">Canal</th>
                     <th className="px-4 py-3 font-medium">Aval.</th>
                     <th className="px-4 py-3 font-medium">Atualizado</th>
                     <th className="w-14 px-3 py-3 font-medium text-center" aria-label="Detalhe" />
@@ -238,8 +238,8 @@ export function AdminConsultas() {
                           {row.produtorClerkId}
                         </p>
                       </td>
-                      <td className="px-4 py-3">{row.agronomoNome || '—'}</td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                      <td className="hidden lg:table-cell px-4 py-3">{row.agronomoNome || '—'}</td>
+                      <td className="hidden lg:table-cell px-4 py-3 text-xs text-muted-foreground">
                         {row.hybridWhatsappMasked ? (
                           <>
                             <span>WA {row.hybridWhatsappMasked}</span>
@@ -312,7 +312,7 @@ export function AdminConsultas() {
                       className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
                       <ChevronLeft className="w-4 h-4" />
-                      Anterior
+                      <span className="hidden sm:inline">Anterior</span>
                     </button>
 
                     {start > 1 && (
@@ -362,7 +362,7 @@ export function AdminConsultas() {
                       disabled={currentPage === totalPages}
                       className="flex items-center gap-1 px-2 h-8 rounded text-sm font-medium hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
-                      Próxima
+                      <span className="hidden sm:inline">Próxima</span>
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>

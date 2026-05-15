@@ -169,7 +169,7 @@ export function RootLayout() {
         </button>
 
         {/* Page content */}
-        <main className="p-4 lg:p-6 min-h-full">
+        <main className="px-4 pb-4 pt-16 lg:p-6 min-h-full">
           <Outlet />
         </main>
       </div>

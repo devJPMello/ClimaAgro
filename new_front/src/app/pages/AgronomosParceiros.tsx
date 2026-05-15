@@ -709,7 +709,7 @@ export function AgronomosParceiros() {
 
             return (
               <div
-                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border px-6 py-3 text-sm text-muted-foreground"
+                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border px-4 py-3 sm:px-6 text-sm text-muted-foreground"
                 role="navigation"
                 aria-label="Paginação da lista de agrônomos"
               >
@@ -727,7 +727,7 @@ export function AgronomosParceiros() {
                     className="flex h-8 items-center gap-1 rounded px-2 text-sm font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <ChevronLeft className="h-4 w-4" aria-hidden />
-                    Anterior
+                    <span className="hidden sm:inline">Anterior</span>
                   </button>
 
                   {start > 1 && (
@@ -784,7 +784,7 @@ export function AgronomosParceiros() {
                     aria-label="Página seguinte"
                     className="flex h-8 items-center gap-1 rounded px-2 text-sm font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    Próxima
+                    <span className="hidden sm:inline">Próxima</span>
                     <ChevronRight className="h-4 w-4" aria-hidden />
                   </button>
                 </div>
