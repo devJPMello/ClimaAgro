@@ -18,11 +18,18 @@ function phonesMatch(stored, inbound) {
   return false;
 }
 
-const TWIML_OK = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
-
-function twimlOk(res) {
-  res.setHeader('Content-Type', 'text/xml');
-  return res.status(200).send(TWIML_OK);
+/** Extrai texto de qualquer tipo de mensagem Evolution API. */
+function extractText(message) {
+  if (!message) return '';
+  return (
+    message.conversation ||
+    message.extendedTextMessage?.text ||
+    message.imageMessage?.caption ||
+    message.videoMessage?.caption ||
+    message.documentMessage?.caption ||
+    message.audioMessage?.caption ||
+    ''
+  );
 }
 
 /** GET — verificação manual no navegador. */
@@ -30,51 +37,61 @@ router.get('/', (_req, res) => {
   res.status(200).json({
     ok: true,
     service: 'climaagro-whatsapp-webhook',
-    provider: 'twilio',
-    hint: 'Configure no Console Twilio: Messaging → Try it out → Sandbox Settings → campo "WHEN A MESSAGE COMES IN".',
+    provider: 'evolution-api',
+    hint: 'Configure no painel Evolution API: Instância → Webhooks → URL deste endpoint com evento "MESSAGES_UPSERT".',
   });
 });
 
-// Twilio envia application/x-www-form-urlencoded — NÃO é JSON
-router.post('/', express.urlencoded({ extended: false }), async (req, res) => {
-  // TODO (pós-TCC / produção): validar X-Twilio-Signature com twilio.validateRequest()
-  // para garantir que a requisição realmente vem do Twilio.
+router.post('/', express.json(), async (req, res) => {
+  const event = req.body?.event;
 
-  const from = String(req.body?.From || '');
-  const body = String(req.body?.Body || '').trim();
-  const messageSid = String(req.body?.MessageSid || '');
-  const numMedia = parseInt(req.body?.NumMedia || '0', 10);
-
-  // "From" vem como "whatsapp:+5563999999999" — extrair só os dígitos
-  const agronomoDigits = normalizeDigits(from.replace(/^whatsapp:/i, ''));
-  console.log(`[Twilio webhook] Mensagem recebida | de=${agronomoDigits} sid=${messageSid} numMedia=${numMedia} body="${body.slice(0, 60)}"`);
-
-  if (!agronomoDigits || agronomoDigits.length < 8) {
-    console.warn('[Twilio webhook] Número inválido, ignorando.');
-    return twimlOk(res);
+  // Ignorar eventos que não sejam de mensagens recebidas
+  if (event !== 'messages.upsert') {
+    return res.status(200).json({ received: true, skipped: true });
   }
 
-  // Idempotência: ignorar MessageSid já processado (Twilio pode reenviar em timeout)
-  if (messageSid) {
+  const data = req.body?.data;
+  const key = data?.key;
+
+  // Ignorar mensagens enviadas por nós mesmos
+  if (!key || key.fromMe === true) {
+    return res.status(200).json({ received: true, skipped: true });
+  }
+
+  // remoteJid vem como "5563999999999@s.whatsapp.net"
+  const remoteJid = String(key.remoteJid || '');
+  const agronomoDigits = normalizeDigits(remoteJid.split('@')[0]);
+  const messageId = String(key.id || '');
+
+  console.log(`[Evolution webhook] Mensagem recebida | de=${agronomoDigits} id=${messageId}`);
+
+  if (!agronomoDigits || agronomoDigits.length < 8) {
+    console.warn('[Evolution webhook] Número inválido, ignorando.');
+    return res.status(200).json({ received: true, skipped: true });
+  }
+
+  // Idempotência: ignorar messageId já processado
+  if (messageId) {
     try {
-      const existing = await HybridMessage.findOne({ where: { externalMessageId: messageSid } });
+      const existing = await HybridMessage.findOne({ where: { externalMessageId: messageId } });
       if (existing) {
-        console.log(`[Twilio webhook] SID ${messageSid} já processado — ignorando duplicata.`);
-        return twimlOk(res);
+        console.log(`[Evolution webhook] id ${messageId} já processado — ignorando duplicata.`);
+        return res.status(200).json({ received: true, skipped: true });
       }
     } catch (e) {
-      console.warn('[Twilio webhook] Não foi possível checar idempotência (coluna pode estar faltando):', e.message);
+      console.warn('[Evolution webhook] Não foi possível checar idempotência:', e.message);
     }
   }
 
-  // Montar texto: corpo da mensagem ou placeholder se só mídia
+  const rawText = extractText(data?.message);
+  const hasMedia = data?.messageType && data.messageType !== 'conversation' && data.messageType !== 'extendedTextMessage';
   const text =
-    body ||
-    (numMedia > 0 ? `📎 Mídia recebida (${numMedia} arquivo${numMedia > 1 ? 's' : ''})` : '');
+    rawText ||
+    (hasMedia ? `📎 Mídia recebida` : '');
 
   if (!text) {
-    console.warn('[Twilio webhook] Mensagem sem body e sem mídia, ignorando.');
-    return twimlOk(res);
+    console.warn('[Evolution webhook] Mensagem sem conteúdo reconhecível, ignorando.');
+    return res.status(200).json({ received: true, skipped: true });
   }
 
   try {
@@ -83,20 +100,18 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => {
       order: [['updatedAt', 'DESC']],
       limit: 40,
     });
-    console.log(`[Twilio webhook] ${candidates.length} conversa(s) ativa(s) encontrada(s). Buscando match para ${agronomoDigits}...`);
+    console.log(`[Evolution webhook] ${candidates.length} conversa(s) ativa(s). Buscando match para ${agronomoDigits}...`);
 
     const conv = candidates.find((c) => phonesMatch(c.whatsappAgronomo, agronomoDigits));
 
     if (!conv) {
       const stored = candidates.map((c) => c.whatsappAgronomo).join(', ') || '(nenhuma)';
-      console.warn(`[Twilio webhook] Nenhuma conversa ativa para o agrônomo ${agronomoDigits}. Números no banco: ${stored}`);
-      return twimlOk(res);
+      console.warn(`[Evolution webhook] Nenhuma conversa ativa para o agrônomo ${agronomoDigits}. Números no banco: ${stored}`);
+      return res.status(200).json({ received: true, skipped: true });
     }
 
-    console.log(`[Twilio webhook] Match encontrado: conversa ${conv.id} | produtor ${conv.produtorClerkId}`);
+    console.log(`[Evolution webhook] Match encontrado: conversa ${conv.id} | produtor ${conv.produtorClerkId}`);
 
-    // Tenta salvar com externalMessageId; se a coluna ainda não existir no banco,
-    // faz fallback sem ela para garantir que a mensagem seja salva e o Socket.IO seja emitido.
     let msg;
     try {
       msg = await HybridMessage.create({
@@ -105,10 +120,10 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => {
         conteudo: text.slice(0, 8000),
         tipo: 'texto',
         origem: 'whatsapp',
-        externalMessageId: messageSid || null,
+        externalMessageId: messageId || null,
       });
     } catch (createErr) {
-      console.warn('[Twilio webhook] create com externalMessageId falhou, tentando sem ela:', createErr.message);
+      console.warn('[Evolution webhook] create com externalMessageId falhou, tentando sem ela:', createErr.message);
       msg = await HybridMessage.create({
         conversationId: conv.id,
         remetenteId: agronomoDigits,
@@ -135,16 +150,15 @@ router.post('/', express.urlencoded({ extended: false }), async (req, res) => {
           midiaMimeType: null,
         },
       });
-      console.log(`[Twilio webhook] Socket.IO emitido para sala produtor:${conv.produtorClerkId}`);
+      console.log(`[Evolution webhook] Socket.IO emitido para sala produtor:${conv.produtorClerkId}`);
     } else {
-      console.warn('[Twilio webhook] io não disponível — Socket.IO não configurado no app.');
+      console.warn('[Evolution webhook] io não disponível — Socket.IO não configurado no app.');
     }
 
-    return twimlOk(res);
+    return res.status(200).json({ received: true });
   } catch (e) {
-    console.error('[Twilio webhook] Erro ao processar mensagem:', e.message, e.stack);
-    // Sempre responder 200 pro Twilio — evita reenvios em loop
-    return twimlOk(res);
+    console.error('[Evolution webhook] Erro ao processar mensagem:', e.message, e.stack);
+    return res.status(200).json({ received: true });
   }
 });
 

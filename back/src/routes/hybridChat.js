@@ -1,14 +1,13 @@
 const express = require('express');
-const crypto = require('crypto');
 const multer = require('multer');
 const { Op } = require('sequelize');
-const twilioService = require('../services/twilioService');
+const evolutionService = require('../services/evolutionService');
 const ChatHistory = require('../models/ChatHistory');
 const ConsultaAgronomica = require('../models/ConsultaAgronomica');
 const HybridConversation = require('../models/HybridConversation');
 const HybridMessage = require('../models/HybridMessage');
 const DualUserProfile = require('../models/DualUserProfile');
-const { readStoredFile, saveBuffer, deleteStoredFile } = require('../services/hybridMediaStorage');
+const { readStoredFile, saveBuffer } = require('../services/hybridMediaStorage');
 
 const router = express.Router();
 
@@ -23,56 +22,6 @@ const uploadProducerMedia = multer({
   },
 });
 
-const TWILIO_MEDIA_TOKEN_TTL_MS = 12 * 60 * 1000;
-const twilioMediaTokens = new Map();
-
-function purgeExpiredTwilioTokens() {
-  const now = Date.now();
-  for (const [k, v] of twilioMediaTokens.entries()) {
-    if (v.expiresAt <= now) twilioMediaTokens.delete(k);
-  }
-}
-
-const twilioTokenSweep = setInterval(purgeExpiredTwilioTokens, 60 * 1000);
-if (twilioTokenSweep.unref) twilioTokenSweep.unref();
-
-function createTwilioMediaFetchToken(storageKey, mimeType) {
-  purgeExpiredTwilioTokens();
-  const token = crypto.randomBytes(32).toString('hex');
-  twilioMediaTokens.set(token, {
-    storageKey,
-    mimeType: mimeType || 'application/octet-stream',
-    expiresAt: Date.now() + TWILIO_MEDIA_TOKEN_TTL_MS,
-  });
-  return token;
-}
-
-/** Origem HTTPS pública da API (sem path), ex.: https://api.seudominio.com — Twilio usa para ir buscar mídia. */
-function getPublicApiBase() {
-  const raw =
-    process.env.PUBLIC_API_BASE_URL ||
-    process.env.TWILIO_MEDIA_PUBLIC_BASE_URL ||
-    '';
-  const s = String(raw).trim().replace(/\/+$/, '');
-  if (!s) return '';
-  if (!/^https?:\/\//i.test(s)) return `https://${s.replace(/^\/+/, '')}`;
-  return s;
-}
-
-function publicBaseOkForTwilioMedia(base) {
-  const b = String(base || '').trim();
-  if (!b) return false;
-  if (!/^https:\/\//i.test(b)) return false;
-  const lower = b.toLowerCase();
-  if (lower.includes('localhost') || lower.includes('127.0.0.1')) return false;
-  return true;
-}
-
-function buildTwilioMediaUrl(token) {
-  const base = getPublicApiBase().replace(/\/api\/?$/i, '').replace(/\/+$/, '');
-  if (!base) return '';
-  return `${base}/api/hybrid-chat/twilio-temp-media/${encodeURIComponent(token)}`;
-}
 
 function maybeParseMultipart(req, res, next) {
   const ct = String(req.headers['content-type'] || '');
@@ -93,24 +42,6 @@ function maybeParseMultipart(req, res, next) {
   });
 }
 
-/** GET público — Twilio faz fetch HTTPS sem header Clerk. */
-router.get('/twilio-temp-media/:token', async (req, res) => {
-  try {
-    const token = String(req.params.token || '').trim();
-    purgeExpiredTwilioTokens();
-    const entry = twilioMediaTokens.get(token);
-    if (!entry || entry.expiresAt < Date.now()) {
-      return res.status(404).type('text/plain').send('not found');
-    }
-    const buf = await readStoredFile(entry.storageKey);
-    res.setHeader('Content-Type', entry.mimeType || 'application/octet-stream');
-    res.setHeader('Cache-Control', 'no-store');
-    return res.send(buf);
-  } catch (e) {
-    console.error('hybridChat twilio-temp-media:', e);
-    return res.status(404).type('text/plain').send('not found');
-  }
-});
 
 function normalizeDigits(value) {
   return String(value || '').replace(/\D/g, '');
@@ -419,7 +350,7 @@ router.post('/escalate', async (req, res) => {
 
     const waUrl = `https://wa.me/${whatsappAgronomo}?text=${encodeURIComponent(summary)}`;
 
-    const whatsapp = await twilioService.sendMessage(whatsappAgronomo, summary);
+    const whatsapp = await evolutionService.sendMessage(whatsappAgronomo, summary);
 
     return res.json({
       success: true,
@@ -618,13 +549,6 @@ router.post('/conversations/:id/messages', maybeParseMultipart, async (req, res)
       return res.status(400).json({ message: 'Atendimento humano não está ativo nesta conversa.' });
     }
 
-    if (buffer && !publicBaseOkForTwilioMedia(getPublicApiBase())) {
-      return res.status(503).json({
-        message:
-          'Envio de ficheiros para o WhatsApp exige HTTPS público da API acessível pelo Twilio. Defina PUBLIC_API_BASE_URL (ex.: https://api.seudominio.com, sem /api no fim). Localhost não funciona.',
-      });
-    }
-
     let tipo = 'texto';
     if (mimeType && mimeType.startsWith('image/')) tipo = 'imagem';
     else if (mimeType && mimeType.startsWith('audio/')) tipo = 'audio';
@@ -632,21 +556,6 @@ router.post('/conversations/:id/messages', maybeParseMultipart, async (req, res)
     let storageKey = null;
     if (buffer) {
       storageKey = await saveBuffer(buffer, mimeType);
-    }
-
-    let twilioToken = null;
-    let mediaUrl = '';
-    if (storageKey) {
-      twilioToken = createTwilioMediaFetchToken(storageKey, mimeType);
-      mediaUrl = buildTwilioMediaUrl(twilioToken);
-      if (!mediaUrl) {
-        if (twilioToken) twilioMediaTokens.delete(twilioToken);
-        await deleteStoredFile(storageKey);
-        return res.status(503).json({
-          message:
-            'Não foi possível montar o URL público da mídia. Verifique PUBLIC_API_BASE_URL / TWILIO_MEDIA_PUBLIC_BASE_URL.',
-        });
-      }
     }
 
     const msg = await HybridMessage.create({
@@ -660,14 +569,15 @@ router.post('/conversations/:id/messages', maybeParseMultipart, async (req, res)
     });
 
     let whatsapp;
-    if (storageKey && mediaUrl) {
-      whatsapp = await twilioService.sendMessageWithMedia(
+    if (buffer) {
+      whatsapp = await evolutionService.sendMedia(
         conv.whatsappAgronomo,
         `[ClimaAgro | Produtor]\n${conteudo}`,
-        [mediaUrl]
+        buffer,
+        mimeType
       );
     } else {
-      whatsapp = await twilioService.sendMessage(
+      whatsapp = await evolutionService.sendMessage(
         conv.whatsappAgronomo,
         `[ClimaAgro | Produtor]\n${conteudo}`
       );
