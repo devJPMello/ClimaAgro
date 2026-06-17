@@ -6,9 +6,39 @@ const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const { Server } = require('socket.io');
 const { connectDB, sequelize, models } = require('./config/database');
 const { startClimateAutoSyncScheduler } = require('./services/climateSyncScheduler');
+
+const RATE_LIMIT_MSG = { success: false, message: 'Muitas requisições. Tente novamente em 1 minuto.' };
+
+// 100 req/min — dados climáticos, produtividade, alertas, geo
+const climateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: Number(process.env.CLIMATE_RATE_LIMIT_PER_MIN || 100),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: RATE_LIMIT_MSG,
+});
+
+// 30 req/min — autenticação, perfil, agrônomos, chat híbrido
+const userLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: Number(process.env.USER_RATE_LIMIT_PER_MIN || 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: RATE_LIMIT_MSG,
+});
+
+// 20 req/min — relatórios e superset (I/O pesado, PDF, BI)
+const reportLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: Number(process.env.REPORT_RATE_LIMIT_PER_MIN || 20),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: RATE_LIMIT_MSG,
+});
 
 const app = express();
 
@@ -47,6 +77,19 @@ app.use(express.urlencoded({ extended: true }));
 
 // Database connection
 connectDB();
+
+// Rate limiting por grupo de rotas
+app.use(
+  ['/api/climate', '/api/clima', '/api/weather', '/api/productivity',
+   '/api/ibge-sidra-1612', '/api/inmet-adapter', '/api/geo', '/api/alerts'],
+  climateLimiter
+);
+app.use(
+  ['/api/auth', '/api/users', '/api/dual-profile',
+   '/api/hybrid-chat', '/api/agronomos-parceiros', '/api/agronomist-onboarding'],
+  userLimiter
+);
+app.use(['/api/reports', '/api/superset'], reportLimiter);
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
