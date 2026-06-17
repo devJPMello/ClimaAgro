@@ -17,9 +17,10 @@ import { KPICard } from '../components/ui/KPICard';
 import { Card, CardHeader, CardBody, CardTitle, CardDescription } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
+import { EstadoDrilldownModal } from '../components/dashboard/EstadoDrilldownModal';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { getDashboardSummary } from '../../lib/api/climateApi';
-import type { DashboardMetricKey, DashboardSummaryDto } from '../../lib/api/contracts/climate';
+import type { DashboardMetricKey, DashboardRegionRowDto, DashboardSummaryDto } from '../../lib/api/contracts/climate';
 
 const KPI_ICONS: Record<DashboardMetricKey, LucideIcon> = {
   temperature: Thermometer,
@@ -73,6 +74,7 @@ export function Dashboard() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(true);
+  const [selectedRegiao, setSelectedRegiao] = useState<DashboardRegionRowDto | null>(null);
 
   function updateScrollState() {
     const el = scrollRef.current;
@@ -163,7 +165,12 @@ export function Dashboard() {
                   className="flex gap-4 overflow-x-auto scroll-smooth pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 >
                   {summary.regioes.map((regiao) => (
-                    <div key={regiao.uf ?? regiao.estado} className="flex-shrink-0 w-64 rounded-xl border border-border bg-card overflow-hidden">
+                    <button
+                      key={regiao.uf ?? regiao.estado}
+                      type="button"
+                      onClick={() => setSelectedRegiao(regiao)}
+                      className="flex-shrink-0 w-64 rounded-xl border border-border bg-card overflow-hidden text-left transition-all duration-150 hover:border-primary/50 hover:shadow-md hover:ring-2 hover:ring-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    >
                       <div className="px-4 py-3 bg-primary/10 border-b border-border">
                         <p className="text-base text-primary">{regiao.uf ?? '—'}</p>
                         <p className="text-xs text-muted-foreground truncate">{regiao.estado}</p>
@@ -190,7 +197,7 @@ export function Dashboard() {
                           <span className="ml-auto text-xs">{regiao.alertas} {regiao.alertas === 1 ? 'alerta' : 'alertas'}</span>
                         </div>
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </CardBody>
@@ -198,6 +205,13 @@ export function Dashboard() {
           </>
         )}
       </AsyncStateView>
+
+      {selectedRegiao && (
+        <EstadoDrilldownModal
+          regiao={selectedRegiao}
+          onClose={() => setSelectedRegiao(null)}
+        />
+      )}
 
       <div>
         <h2 className="text-xl mb-4" style={{ fontFamily: 'var(--font-serif)' }}>
