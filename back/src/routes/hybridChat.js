@@ -292,6 +292,7 @@ router.get('/status', async (req, res) => {
         atendimentoAtivo: conv.atendimentoAtivo,
         produtorNomeSnapshot: conv.produtorNomeSnapshot,
         casoResumoSnapshot: conv.casoResumoSnapshot || null,
+        avaliacaoEstrelas: conv.avaliacaoEstrelas ?? null,
       },
       intervencaoHumana: conv.intervencaoHumana,
       atendimentoAtivo: conv.atendimentoAtivo,
@@ -383,6 +384,7 @@ router.get('/timeline', async (req, res) => {
             whatsappAgronomo: conv.whatsappAgronomo,
             produtorNomeSnapshot: conv.produtorNomeSnapshot,
             casoResumoSnapshot: conv.casoResumoSnapshot || null,
+            avaliacaoEstrelas: conv.avaliacaoEstrelas ?? null,
           }
         : null,
       messages: merged,
@@ -660,6 +662,7 @@ router.get('/conversations', async (req, res) => {
         updatedAt: c.updatedAt,
         produtorNomeSnapshot: c.produtorNomeSnapshot,
         casoResumoSnapshot: c.casoResumoSnapshot || null,
+        avaliacaoEstrelas: c.avaliacaoEstrelas ?? null,
       })),
     });
   } catch (e) {

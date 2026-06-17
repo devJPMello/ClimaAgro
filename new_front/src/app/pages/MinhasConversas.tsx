@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { io, type Socket } from 'socket.io-client';
 import { useUser } from '@clerk/clerk-react';
-import { Cloud, Loader2, MessageCircle, Mic, MicOff, Paperclip, SendHorizonal, Trash2, X } from 'lucide-react';
+import { Cloud, Loader2, MessageCircle, Mic, MicOff, Paperclip, SendHorizonal, Star, Trash2, X } from 'lucide-react';
 import { Card, CardBody } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -104,6 +104,7 @@ export function MinhasConversas() {
     Boolean(hybridConversation?.intervencaoHumana && hybridConversation?.atendimentoAtivo);
   /** Canal humano ativo: texto, voz e anexo (imagem/PDF) enviados ao WhatsApp do agrônomo. */
   const podeDigitar = humanHandoff && Boolean(hybridConversation?.id && user?.id);
+  const avaliacaoEstrelas = hybridConversation?.avaliacaoEstrelas ?? selected?.avaliacaoEstrelas ?? null;
   const canSendMessage =
     podeDigitar && !loadingSend && (input.trim().length > 0 || Boolean(pendingHybridFile));
 
@@ -433,7 +434,9 @@ export function MinhasConversas() {
         estrelas: a.estrelas,
         comentario: a.comentario || undefined,
       });
-      setHybridConversation((prev) => (prev ? { ...prev, atendimentoAtivo: false } : null));
+      setHybridConversation((prev) =>
+        prev ? { ...prev, atendimentoAtivo: false, avaliacaoEstrelas: a.estrelas } : null
+      );
       toast.success('Obrigado pela avaliação. A média do especialista na rede foi atualizada.');
       void carregarLista();
       if (selected) {
@@ -521,13 +524,20 @@ export function MinhasConversas() {
                       <p className="line-clamp-2 text-sm font-medium text-foreground">{titulo}</p>
                       <div className="mt-1.5 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                         <span>Especialista {maskWhatsapp(item.whatsappAgronomo)}</span>
-                        <span
-                          className={
-                            item.atendimentoAtivo ? 'text-green-600 dark:text-green-400' : ''
-                          }
-                        >
-                          {item.atendimentoAtivo ? 'Ativo' : 'Encerrado'}
-                        </span>
+                        {item.atendimentoAtivo ? (
+                          <span className="text-green-600 dark:text-green-400">Ativo</span>
+                        ) : item.avaliacaoEstrelas != null && item.avaliacaoEstrelas > 0 ? (
+                          <div className="flex items-center gap-0.5">
+                            {Array.from({ length: 5 }, (_, i) => (
+                              <Star
+                                key={i}
+                                className={`w-3 h-3 ${i < item.avaliacaoEstrelas! ? 'fill-yellow-400 text-yellow-400' : 'fill-muted-foreground/20 text-muted-foreground/20'}`}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <span>Encerrado</span>
+                        )}
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {new Date(item.updatedAt).toLocaleString('pt-BR', {
@@ -606,6 +616,19 @@ export function MinhasConversas() {
                   <div className="shrink-0 rounded-lg border border-border bg-muted/40 px-4 py-2.5 text-sm text-muted-foreground">
                     Este atendimento foi encerrado. O histórico permanece visível; novas mensagens do
                     agrônomo não serão roteadas aqui.
+                    {avaliacaoEstrelas != null && avaliacaoEstrelas > 0 && (
+                      <div className="mt-2 flex items-center gap-1.5">
+                        <span className="text-xs">Sua avaliação:</span>
+                        <div className="flex items-center gap-0.5">
+                          {Array.from({ length: 5 }, (_, i) => (
+                            <Star
+                              key={i}
+                              className={`w-3.5 h-3.5 ${i < avaliacaoEstrelas ? 'fill-yellow-400 text-yellow-400' : 'fill-muted-foreground/20 text-muted-foreground/20'}`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useUser } from '@clerk/clerk-react';
 import {
   Award,
@@ -112,6 +112,7 @@ interface Agronomo {
 
 export function AgronomosParceiros() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useUser();
   const [agronomos, setAgronomos] = useState<Agronomo[]>([]);
   const [loadingLista, setLoadingLista] = useState(false);
@@ -191,6 +192,22 @@ export function AgronomosParceiros() {
   useEffect(() => {
     void carregarLista();
   }, [carregarLista]);
+
+  useEffect(() => {
+    const esp = searchParams.get('especialidade');
+    if (!esp) return;
+    const found = ESPECIALIDADES_PRINCIPAIS.find((e) => e === esp);
+    if (found) {
+      setEspecialidadeSelecionada(found);
+      setPaginaAtual(1);
+    }
+    setSearchParams((prev) => {
+      const n = new URLSearchParams(prev);
+      n.delete('especialidade');
+      return n;
+    }, { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!modalPerfilAberto) {

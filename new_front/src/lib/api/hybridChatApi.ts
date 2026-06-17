@@ -20,6 +20,7 @@ export type HybridConversationDto = {
   whatsappAgronomo: string;
   produtorNomeSnapshot?: string | null;
   casoResumoSnapshot?: string | null;
+  avaliacaoEstrelas?: number | null;
 };
 
 function clerkHeaders(clerkUserId: string): Record<string, string> {
@@ -48,6 +49,7 @@ export type HybridConversationListItem = {
   updatedAt: string;
   produtorNomeSnapshot?: string | null;
   casoResumoSnapshot?: string | null;
+  avaliacaoEstrelas?: number | null;
 };
 
 export async function listHybridConversations(clerkUserId: string) {
