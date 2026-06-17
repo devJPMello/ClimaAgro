@@ -22,12 +22,14 @@ import {
 
 const PAGE_SIZE_HISTORICO = 4;
 
-type ExportStep = 'coletando' | 'gerando' | 'registrando';
+type ExportStep = 'coletando' | 'gerando' | 'registrando' | 'concluido';
 const EXPORT_STEPS: Array<{ key: ExportStep; label: string }> = [
   { key: 'coletando', label: 'Coletando dados' },
   { key: 'gerando', label: 'Gerando arquivo' },
   { key: 'registrando', label: 'Salvando registro' },
 ];
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 type FiltroTipoHistorico = 'todos' | ReportTipoKey;
 type OrdenacaoHistorico = 'recente' | 'tipo_asc' | 'local_asc';
@@ -157,15 +159,21 @@ export function ExportarRelatorios() {
       const periodo = `Anos ${y0} — ${y1}`;
       const fmt = formato as ReportExportFileFormat;
 
-      const dadosIntegrados = await gatherReportDados({
-        tipo: tipoRelatorio as ReportTipoKey,
-        localidadeKey: localidade,
-        displayLocal: local,
-        startDate,
-        endDate,
-      });
+      // Etapa 1: coleta de dados (mínimo 700ms para o step ser visível)
+      const [dadosIntegrados] = await Promise.all([
+        gatherReportDados({
+          tipo: tipoRelatorio as ReportTipoKey,
+          localidadeKey: localidade,
+          displayLocal: local,
+          startDate,
+          endDate,
+        }),
+        wait(700),
+      ]);
 
+      // Etapa 2: geração do arquivo (síncrona, exibe o step por 700ms antes)
       setExportStep('gerando');
+      await wait(700);
       downloadReportFile({
         titulo: tipo,
         local,
@@ -180,17 +188,25 @@ export function ExportarRelatorios() {
         );
       }
 
+      // Etapa 3: registro no histórico (mínimo 700ms)
       setExportStep('registrando');
-      await createReportExport({
-        tipo,
-        local,
-        periodo,
-        formato: formato.toUpperCase(),
-        status: 'concluido',
-      });
-      toast.success('Download iniciado e registro salvo no histórico.');
+      await Promise.all([
+        createReportExport({
+          tipo,
+          local,
+          periodo,
+          formato: formato.toUpperCase(),
+          status: 'concluido',
+        }),
+        wait(700),
+      ]);
+
+      // Etapa final: exibe todos os steps concluídos por 1.2s
+      setExportStep('concluido');
       await carregarHistorico();
       setPaginaHistorico(1);
+      await wait(1200);
+      toast.success('Download iniciado e registro salvo no histórico.');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao gerar ou registrar exportação.');
     } finally {
@@ -335,40 +351,49 @@ export function ExportarRelatorios() {
                 </ul>
               </div>
 
-              {exportStep && (
-                <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
-                  <div className="flex items-center justify-between mb-2">
-                    {EXPORT_STEPS.map((s, i) => {
-                      const stepIndex = EXPORT_STEPS.findIndex((x) => x.key === exportStep);
-                      const done = i < stepIndex;
-                      const active = i === stepIndex;
-                      return (
-                        <div key={s.key} className="flex flex-1 items-center gap-0">
-                          <div className="flex flex-col items-center gap-1">
-                            <div
-                              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium transition-colors ${
-                                done
-                                  ? 'bg-primary text-primary-foreground'
-                                  : active
-                                  ? 'bg-primary/20 border-2 border-primary text-primary'
-                                  : 'bg-muted border border-border text-muted-foreground'
-                              }`}
-                            >
-                              {done ? <CheckCircle className="w-4 h-4" /> : active ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : i + 1}
+              {exportStep && (() => {
+                const stepIndex = exportStep === 'concluido'
+                  ? EXPORT_STEPS.length
+                  : EXPORT_STEPS.findIndex((x) => x.key === exportStep);
+                return (
+                  <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+                    <div className="flex items-center justify-between mb-2">
+                      {EXPORT_STEPS.map((s, i) => {
+                        const done = i < stepIndex;
+                        const active = i === stepIndex;
+                        return (
+                          <div key={s.key} className="flex flex-1 items-center gap-0">
+                            <div className="flex flex-col items-center gap-1">
+                              <div
+                                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium transition-all duration-300 ${
+                                  done
+                                    ? 'bg-primary text-primary-foreground'
+                                    : active
+                                    ? 'bg-primary/20 border-2 border-primary text-primary'
+                                    : 'bg-muted border border-border text-muted-foreground'
+                                }`}
+                              >
+                                {done ? <CheckCircle className="w-4 h-4" /> : active ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : i + 1}
+                              </div>
+                              <span className={`text-[11px] whitespace-nowrap transition-colors duration-300 ${active ? 'text-primary font-medium' : done ? 'text-foreground' : 'text-muted-foreground'}`}>
+                                {s.label}
+                              </span>
                             </div>
-                            <span className={`text-[11px] whitespace-nowrap ${active ? 'text-primary font-medium' : done ? 'text-foreground' : 'text-muted-foreground'}`}>
-                              {s.label}
-                            </span>
+                            {i < EXPORT_STEPS.length - 1 && (
+                              <div className={`flex-1 h-0.5 mx-1 mb-4 rounded transition-colors duration-300 ${i < stepIndex ? 'bg-primary' : 'bg-border'}`} />
+                            )}
                           </div>
-                          {i < EXPORT_STEPS.length - 1 && (
-                            <div className={`flex-1 h-0.5 mx-1 mb-4 rounded ${i < stepIndex ? 'bg-primary' : 'bg-border'}`} />
-                          )}
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+                    {exportStep === 'concluido' && (
+                      <p className="text-xs text-center text-primary font-medium mt-1 animate-in fade-in duration-300">
+                        Arquivo gerado com sucesso!
+                      </p>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               <Button
                 variant="primary"
