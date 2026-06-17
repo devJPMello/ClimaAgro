@@ -18,6 +18,7 @@ import {
 import { buildProductivityCropSelectOptions, getProductivityYearOptions } from '../../lib/filters/appFilters';
 import type { ClimateSeriesVariable } from '../../lib/api/contracts/climate';
 import { formatUfLabel, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
+import { useProfileUf } from '../../lib/hooks/useProfileUf';
 
 type ProdRow = { mes: string; produtividade: number | null; produtividadeNum?: number | null };
 type ClimaRow = { mes: string; temperatura: number; precipitacao: number; umidade: number };
@@ -149,6 +150,13 @@ const CULTURA_FALLBACK_OPTIONS = [
 export function SeriesTemporais() {
   const [uf, setUf] = useState('');
   const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([UF_SELECT_PLACEHOLDER_OPTION]);
+  const profileUf = useProfileUf();
+
+  useEffect(() => {
+    if (profileUf && uf === '' && ufOptions.length > 1) {
+      if (ufOptions.some((o) => o.value === profileUf)) setUf(profileUf);
+    }
+  }, [profileUf, ufOptions, uf]);
   const yearOptions = useMemo(() => getProductivityYearOptions(), []);
   const [cultura, setCultura] = useState('');
   const [culturaOptions, setCulturaOptions] =

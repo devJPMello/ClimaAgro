@@ -14,6 +14,7 @@ import { listClimateAlerts } from '../../lib/api/alertsApi';
 import type { ClimateAlertDto, ClimateAlertListDto, ClimateAlertSeverity } from '../../lib/api/contracts/alerts';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { UF_NOME } from '../../lib/geo/brazilStatesMalha';
+import { useProfileUf } from '../../lib/hooks/useProfileUf';
 
 const ALERTAS_UF_OPTIONS = [
   { value: 'ALL', label: 'Todos os estados' },
@@ -91,6 +92,12 @@ export function Alertas() {
   const [tipoFiltro, setTipoFiltro] = usePersistedState('climaagro.pref.alertas.tipo', 'todos');
   const [ufFiltro, setUfFiltro] = usePersistedState('climaagro.pref.alertas.uf', 'ALL');
   const [page, setPage] = useState(1);
+  const profileUf = useProfileUf();
+
+  useEffect(() => {
+    if (profileUf && ufFiltro === 'ALL') setUfFiltro(profileUf);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileUf]);
   const [selectedAlerta, setSelectedAlerta] = useState<ClimateAlertDto | null>(null);
 
   useEffect(() => {

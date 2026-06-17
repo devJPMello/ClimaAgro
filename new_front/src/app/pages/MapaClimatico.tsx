@@ -9,6 +9,7 @@ import { getClimateSeriesByUf, listClimateUfs } from '../../lib/api/climateApi';
 import { CLIMATE_PERIOD_OPTIONS } from '../../lib/filters/appFilters';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
+import { useProfileUf } from '../../lib/hooks/useProfileUf';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatUfLabel } from '../../lib/geo/brazilStatesMalha';
@@ -69,6 +70,12 @@ export function MapaClimatico() {
   const [metric, setMetric] = usePersistedState<BrazilMapMetric>('climaagro.pref.mapaClimatico.metric', 'temperatura');
   const [periodo, setPeriodo] = usePersistedState<string>('climaagro.pref.mapaClimatico.periodo', 'hoje');
   const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([UF_ALL_OPTION]);
+  const profileUf = useProfileUf();
+
+  useEffect(() => {
+    if (profileUf && uf === 'ALL') setUf(profileUf);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileUf]);
 
   useEffect(() => {
     const fixed = normalizeBrazilMapMetric(metric);
