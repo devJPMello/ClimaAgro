@@ -66,14 +66,18 @@ const MAP_METRIC_OPTIONS: Array<{ value: BrazilMapMetric; label: string }> = [
 ];
 
 export function MapaClimatico() {
-  const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaClimatico.uf', 'ALL');
+  const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaClimatico.uf.v2', '');
   const [metric, setMetric] = usePersistedState<BrazilMapMetric>('climaagro.pref.mapaClimatico.metric', 'temperatura');
   const [periodo, setPeriodo] = usePersistedState<string>('climaagro.pref.mapaClimatico.periodo', 'hoje');
-  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([UF_ALL_OPTION]);
+  const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([
+    { value: '', label: 'Selecione ou "Todos os estados"' },
+    UF_ALL_OPTION,
+  ]);
   const profileUf = useProfileUf();
 
+  // Na primeira visita (uf vazio), pré-seleciona a UF do perfil ou "Todos os estados"
   useEffect(() => {
-    if (profileUf && uf === 'ALL') setUf(profileUf);
+    setUf((prev) => (prev ? prev : profileUf || 'ALL'));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileUf]);
 
@@ -106,10 +110,6 @@ export function MapaClimatico() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (uf === '') setUf('ALL');
-  }, [uf, setUf]);
 
   const { status, data, error, reload } = useAsyncResource(
     async () => {

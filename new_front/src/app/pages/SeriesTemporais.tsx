@@ -281,9 +281,15 @@ function CorrelacaoTooltip({ active, payload, label }: CorrelacaoTooltipProps) {
   );
 }
 
+const UF_ALL_OPTION = { value: 'ALL', label: 'Todos os estados' };
+
 const CULTURA_FALLBACK_OPTIONS = [
   { value: '', label: 'Selecione uma cultura' },
 ];
+
+function isUfValid(uf: string): boolean {
+  return uf === 'ALL' || /^[A-Z]{2}$/.test(uf);
+}
 
 export function SeriesTemporais() {
   const [uf, setUf] = useState('');
@@ -291,10 +297,13 @@ export function SeriesTemporais() {
   const profileUf = useProfileUf();
 
   useEffect(() => {
-    if (profileUf && uf === '' && ufOptions.length > 1) {
-      if (ufOptions.some((o) => o.value === profileUf)) setUf(profileUf);
+    if (uf !== '') return; // usuário já escolheu algo
+    if (profileUf && ufOptions.some((o) => o.value === profileUf)) {
+      setUf(profileUf);
+    } else if (ufOptions.length > 1) {
+      setUf('ALL'); // padrão quando sem perfil
     }
-  }, [profileUf, ufOptions, uf]);
+  }, [profileUf, ufOptions]);
 
   const yearOptions = useMemo(() => getProductivityYearOptions(), []);
   const [cultura, setCultura] = useState('');
@@ -322,7 +331,7 @@ export function SeriesTemporais() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      if (!/^[A-Z]{2}$/.test(uf)) {
+      if (uf === 'ALL' || !/^[A-Z]{2}$/.test(uf)) {
         setCulturaOptions(CULTURA_FALLBACK_OPTIONS);
         setCultura('');
         return;
@@ -355,8 +364,8 @@ export function SeriesTemporais() {
               return { value, label: formatUfLabel(value) };
             });
           if (onlyUfs.length) {
-            setUfOptions([UF_SELECT_PLACEHOLDER_OPTION, ...onlyUfs]);
-            if (uf && !onlyUfs.some((x) => x.value === uf)) setUf('');
+            setUfOptions([UF_SELECT_PLACEHOLDER_OPTION, UF_ALL_OPTION, ...onlyUfs]);
+            if (uf && uf !== 'ALL' && !onlyUfs.some((x) => x.value === uf)) setUf('');
           }
         }
       } catch { /* fallback em memória */ }
@@ -365,16 +374,16 @@ export function SeriesTemporais() {
   }, []);
 
   async function loadSeriesVariable(variavel: ClimateSeriesVariable) {
-    if (!/^[A-Z]{2}$/.test(uf)) {
-      throw new Error('Selecione uma UF válida para consultar a série temporal.');
+    if (!isUfValid(uf)) {
+      throw new Error('Selecione uma UF ou "Todos os estados" para consultar a série temporal.');
     }
     const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
     const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
-    return getClimateSeriesByUf({ uf, start: `${ys}-01-01`, end: `${ye}-12-31`, variavel, limit: 1000, offset: 0 });
+    return getClimateSeriesByUf({ uf, start: `${ys}-01-01`, end: `${ye}-12-31`, variavel, limit: uf === 'ALL' ? 20000 : 1000, offset: 0 });
   }
 
   const carregar = useCallback(async () => {
-    if (!/^[A-Z]{2}$/.test(uf)) {
+    if (!isUfValid(uf)) {
       setDadosClimaticos([]);
       setDadosProdutividade([]);
       setDadosComparativos([]);
@@ -465,7 +474,8 @@ export function SeriesTemporais() {
     void carregar();
   }, [carregar]);
 
-  const ufValid = /^[A-Z]{2}$/.test(uf);
+  const ufValid = isUfValid(uf);
+  const ufIsAll = uf === 'ALL';
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -488,7 +498,7 @@ export function SeriesTemporais() {
               value={cultura}
               onChange={(e) => setCultura(e.target.value)}
               options={culturaOptions}
-              disabled={!ufValid}
+              disabled={!ufValid || ufIsAll}
             />
           </div>
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -544,7 +554,9 @@ export function SeriesTemporais() {
             </CardHeader>
             <CardBody>
               {!ufValid && !loading ? (
-                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF acima para carregar a produtividade e os gráficos." />
+                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF ou 'Todos os estados' acima para carregar a produtividade e os gráficos." />
+              ) : ufIsAll && !loading ? (
+                <EmptyState icon={Calendar} title="Produtividade por estado específico" description="Selecione um estado específico para visualizar a produtividade ao longo do tempo." />
               ) : dadosProdutividade.length === 0 && !loading ? (
                 <EmptyState icon={Calendar} title="Sem dados de produtividade" description="Rode o seed ou sync no backend e verifique se existe produtividade para esta UF/cultura." />
               ) : (
@@ -569,7 +581,7 @@ export function SeriesTemporais() {
             </CardHeader>
             <CardBody>
               {!ufValid && !loading ? (
-                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF acima para carregar a série climática." />
+                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF ou 'Todos os estados' acima para carregar a série climática." />
               ) : dadosClimaticos.length === 0 && !loading ? (
                 <EmptyState icon={Calendar} title="Sem dados climáticos no período" description="Sincronize dados (POST /api/climate/sync) ou importe medições para esta UF." />
               ) : (
@@ -596,7 +608,9 @@ export function SeriesTemporais() {
             </CardHeader>
             <CardBody>
               {!ufValid && !loading ? (
-                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF acima para comparar clima e produtividade." />
+                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF ou 'Todos os estados' acima para comparar clima e produtividade." />
+              ) : ufIsAll && !loading ? (
+                <EmptyState icon={Calendar} title="Comparativo por estado específico" description="Selecione um estado específico para comparar clima e produtividade." />
               ) : dadosComparativos.length === 0 && !loading ? (
                 <EmptyState icon={Calendar} title="Sem dados comparativos" description="Verifique se existem dados de clima e produtividade para esta UF, cultura e intervalo de anos." />
               ) : (
@@ -624,7 +638,13 @@ export function SeriesTemporais() {
           {!ufValid && !loading ? (
             <Card>
               <CardBody>
-                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF e clique em Atualizar gráficos para ver a correlação anual." />
+                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF ou 'Todos os estados' e clique em Atualizar gráficos para ver a correlação anual." />
+              </CardBody>
+            </Card>
+          ) : ufIsAll && !loading ? (
+            <Card>
+              <CardBody>
+                <EmptyState icon={Calendar} title="Correlação por estado específico" description="Selecione um estado específico para ver a correlação clima × produtividade anual." />
               </CardBody>
             </Card>
           ) : dadosAnuais.length < 2 && !loading ? (
