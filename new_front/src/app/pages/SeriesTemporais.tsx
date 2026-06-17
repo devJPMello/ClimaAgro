@@ -24,6 +24,26 @@ type ProdRow = { mes: string; produtividade: number | null; produtividadeNum?: n
 type ClimaRow = { mes: string; temperatura: number; precipitacao: number; umidade: number };
 type CompRow = { mes: string; clima: number; produtividade: number };
 
+const MAX_CONCURRENT = 6;
+
+/** Executa `fn` sobre cada item com no máximo `concurrency` promises simultâneas. */
+async function concurrentMap<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
 /** Datas no eixo X e no cabeçalho do tooltip (tema escuro). */
 const TOOLTIP_DATE_LABEL_STYLE = { color: '#000000' };
 
@@ -262,15 +282,13 @@ export function SeriesTemporais() {
           const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
           const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
           const years = Array.from({ length: ye - ys + 1 }, (_, idx) => String(ys + idx));
-          const responses = await Promise.all(
-            years.map((year) =>
-              listProductivityRecords({
-                state: uf,
-                productLabel: cultura || undefined,
-                year,
-                limit: 500,
-              })
-            )
+          const responses = await concurrentMap(years, MAX_CONCURRENT, (year) =>
+            listProductivityRecords({
+              state: uf,
+              productLabel: cultura || undefined,
+              year,
+              limit: 500,
+            }),
           );
           return responses.flatMap((prodRes) => (prodRes.success && Array.isArray(prodRes.data) ? prodRes.data : []));
         })(),
@@ -286,16 +304,18 @@ export function SeriesTemporais() {
         const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
         const targetUfs = [uf];
 
-        const fallbackResponses = await Promise.all(
-          targetUfs.flatMap((stateUf) =>
-            Array.from({ length: ye - ys + 1 }, (_, idx) => String(ys + idx)).map((y) =>
-              getClimateVsProductivity({
-                state: stateUf,
-                cropType: undefined,
-                season: seasonFromYear(y),
-              })
-            )
-          )
+        const fallbackTasks = targetUfs.flatMap((stateUf) =>
+          Array.from({ length: ye - ys + 1 }, (_, idx) => ({ stateUf, y: String(ys + idx) }))
+        );
+        const fallbackResponses = await concurrentMap(
+          fallbackTasks,
+          MAX_CONCURRENT,
+          ({ stateUf, y }) =>
+            getClimateVsProductivity({
+              state: stateUf,
+              cropType: undefined,
+              season: seasonFromYear(y),
+            }),
         );
 
         for (const fallback of fallbackResponses) {
