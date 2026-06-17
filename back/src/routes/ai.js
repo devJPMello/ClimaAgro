@@ -9,6 +9,7 @@ const pdfParse = require('pdf-parse');
 const ChatHistory = require('../models/ChatHistory');
 const { buildIagroDataContext } = require('../services/iagroDataContextService');
 const { clerkAuth } = require('../middleware/clerkAuth');
+const { sequelize } = require('../config/database');
 
 const MAX_ATTACHMENT_TEXT_CHARS = 12000;
 
@@ -617,6 +618,51 @@ router.get('/chat/history', aiReportLimiter, async (req, res) => {
       return res.status(500).json({ message: 'Falha ao buscar histórico da conversa.' });
     }
   });
+
+router.get('/search', aiReportLimiter, async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (q.length < 2) {
+    return res.status(400).json({ message: 'Consulta muito curta (mínimo 2 caracteres).' });
+  }
+
+  const clerkUserId = clerkUserIdFromReq(req);
+  if (!clerkUserId) {
+    return res.status(401).json({ message: 'Faça login para pesquisar.' });
+  }
+
+  try {
+    const rows = await sequelize.query(
+      `SELECT DISTINCT ON (thread_id)
+         thread_id  AS "threadId",
+         message,
+         created_at AS "createdAt"
+       FROM chat_history
+       WHERE clerk_user_id = :userId
+         AND is_active = true
+         AND (
+           to_tsvector('portuguese', coalesce(message, ''))  @@ plainto_tsquery('portuguese', :q)
+           OR to_tsvector('portuguese', coalesce(response, '')) @@ plainto_tsquery('portuguese', :q)
+         )
+       ORDER BY thread_id, created_at ASC`,
+      {
+        replacements: { userId: clerkUserId, q },
+        type: sequelize.QueryTypes.SELECT,
+      }
+    );
+
+    const threads = rows.map((row) => ({
+      threadId: row.threadId,
+      title: String(row.message || '').slice(0, 80) || 'Conversa sem título',
+      snippet: String(row.message || '').slice(0, 140),
+      lastMessageAt: row.createdAt,
+    }));
+
+    return res.json({ threads });
+  } catch (error) {
+    console.error('Erro na busca do histórico IAgro:', error.message);
+    return res.status(500).json({ message: 'Falha ao buscar no histórico.' });
+  }
+});
 
 router.patch('/chat/threads/:threadId/favorite', async (req, res) => {
   const threadId = String(req.params.threadId || '').trim();

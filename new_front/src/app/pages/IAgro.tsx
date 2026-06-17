@@ -101,6 +101,7 @@ export function IAgro() {
         threadId={chat.threadId}
         loadingThreads={chat.loadingThreads}
         isOpen={chat.historyOpen}
+        clerkUserId={chat.user?.id ?? ''}
         onClose={() => chat.setHistoryOpen(false)}
         onOpenThread={(id) => void chat.openThread(id)}
         onToggleFavorite={(t) => void chat.handleToggleFavorite(t)}

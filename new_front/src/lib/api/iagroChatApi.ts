@@ -16,6 +16,13 @@ export type IAgroThread = {
   isFavorite?: boolean;
 };
 
+export type IAgroSearchResult = {
+  threadId: string;
+  title: string;
+  snippet: string;
+  lastMessageAt: string;
+};
+
 /** Triagem IA → humano (linha [META] parseada no backend). */
 export type ConciergeMeta = {
   escalate: boolean;
@@ -115,6 +122,13 @@ export async function toggleIAgroThreadFavorite(threadId: string, isFavorite: bo
     throw new Error(maybeJson?.message || 'Falha ao atualizar favorito.');
   }
   return (await response.json()) as { success: boolean; threadId: string; isFavorite: boolean };
+}
+
+export async function searchIAgroThreads(q: string, clerkUserId: string) {
+  return httpClient.get<{ threads: IAgroSearchResult[] }>(
+    `ai/search?q=${encodeURIComponent(q)}`,
+    { cacheTtlMs: 0, forceRefresh: true, headers: clerkHeaders(clerkUserId) }
+  );
 }
 
 export async function deleteIAgroThread(threadId: string, clerkUserId: string) {
