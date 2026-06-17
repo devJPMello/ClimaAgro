@@ -62,7 +62,6 @@ app.use('/api/clima', require('./routes/climate'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/dual-profile', require('./routes/dualProfile'));
 app.use('/api/hybrid-chat', require('./routes/hybridChat'));
-app.use('/api/admin', require('./routes/adminConsultas'));
 app.use('/api/agronomos-parceiros', require('./routes/agronomosParceiros'));
 app.use('/api/agronomist-onboarding', require('./routes/agronomistOnboarding'));
 app.use('/api/superset', require('./routes/superset'));

@@ -12,10 +12,9 @@ import { ExportarRelatorios } from "./pages/ExportarRelatorios";
 import { IAgro } from "./pages/IAgro";
 import { MinhasConversas } from "./pages/MinhasConversas";
 import { AgronomosParceiros } from "./pages/AgronomosParceiros";
-import { AdminConsultas } from "./pages/AdminConsultas";
 import { Perfil } from "./pages/Perfil";
 import { NotFound } from "./pages/NotFound";
-import { RequireAuth, RequireClerkAdmin, RequireGuest } from "./components/auth/RouteGuards";
+import { RequireAuth, RequireGuest } from "./components/auth/RouteGuards";
 
 function GuestLayout() {
   return (
@@ -30,14 +29,6 @@ function ProtectedLayout() {
     <RequireAuth>
       <RootLayout />
     </RequireAuth>
-  );
-}
-
-function AdminConsultasRoute() {
-  return (
-    <RequireClerkAdmin>
-      <AdminConsultas />
-    </RequireClerkAdmin>
   );
 }
 
@@ -62,7 +53,6 @@ export const router = createBrowserRouter([
       { path: "exportar", Component: ExportarRelatorios },
       { path: "iagro", Component: IAgro },
       { path: "minhas-conversas", Component: MinhasConversas },
-      { path: "admin/consultas", Component: AdminConsultasRoute },
       { path: "parceiros", Component: AgronomosParceiros },
       { path: "perfil", Component: Perfil },
       { path: "*", Component: NotFound },

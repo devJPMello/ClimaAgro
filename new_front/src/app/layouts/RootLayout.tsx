@@ -15,10 +15,8 @@ import {
   Bot,
   Handshake,
   MessagesSquare,
-  ClipboardList,
 } from 'lucide-react';
 import { useClerk, useUser } from '@clerk/clerk-react';
-import { useClerkAdmin } from '../../hooks/useClerkAdmin';
 
 const navigationMain = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -33,21 +31,15 @@ const navigationMain = [
 ];
 
 const perfilNavItem = { name: 'Perfil', path: '/perfil', icon: User };
-const consultaNavItem = { name: 'Consulta', path: '/admin/consultas', icon: ClipboardList };
 
 export function RootLayout() {
   const location = useLocation();
   const { signOut } = useClerk();
   const { user } = useUser();
-  const { isAdmin: clerkIsAdmin } = useClerkAdmin(user?.id);
 
   const navigation = useMemo(() => {
-    const tail = [perfilNavItem];
-    if (user?.id && clerkIsAdmin) {
-      tail.unshift(consultaNavItem);
-    }
-    return [...navigationMain, ...tail];
-  }, [user?.id, clerkIsAdmin]);
+    return [...navigationMain, perfilNavItem];
+  }, []);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);

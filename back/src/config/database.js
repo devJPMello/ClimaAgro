@@ -188,7 +188,6 @@ const ReportExport = require('../models/ReportExport');
 const IbgeSidra1612Row = require('../models/IbgeSidra1612Row');
 const ChatHistory = require('../models/ChatHistory');
 const DualUserProfile = require('../models/DualUserProfile');
-const ConsultaAgronomica = require('../models/ConsultaAgronomica');
 const HybridConversation = require('../models/HybridConversation');
 const HybridMessage = require('../models/HybridMessage');
 
@@ -210,14 +209,6 @@ const setupAssociations = () => {
   HybridConversation.hasMany(HybridMessage, { foreignKey: 'conversationId', as: 'messages' });
   HybridMessage.belongsTo(HybridConversation, { foreignKey: 'conversationId', as: 'conversation' });
 
-  ConsultaAgronomica.hasMany(HybridConversation, {
-    foreignKey: 'consultaAgronomicaId',
-    as: 'hybridConversations',
-  });
-  HybridConversation.belongsTo(ConsultaAgronomica, {
-    foreignKey: 'consultaAgronomicaId',
-    as: 'consulta',
-  });
 };
 
 // Configurar associações
@@ -238,7 +229,6 @@ module.exports = {
     IbgeSidra1612Row,
     ChatHistory,
     DualUserProfile,
-    ConsultaAgronomica,
     HybridConversation,
     HybridMessage
   }

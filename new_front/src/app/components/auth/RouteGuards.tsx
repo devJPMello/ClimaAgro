@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { Navigate } from 'react-router';
 import { useAuth } from '@clerk/clerk-react';
-import { useClerkAdmin } from '../../../hooks/useClerkAdmin';
 
 interface GuardProps {
   children: ReactNode;
@@ -39,30 +38,6 @@ export function RequireGuest({ children }: GuardProps) {
   }
 
   if (userId) {
-    return <Navigate to="/" replace />;
-  }
-
-  return <>{children}</>;
-}
-
-/** Só monta os filhos se o Clerk ID estiver em `CLERK_ADMIN_USER_IDS` na API (igual ao item da sidebar). */
-export function RequireClerkAdmin({ children }: GuardProps) {
-  const { isLoaded, userId } = useAuth();
-  const { isAdmin, loading } = useClerkAdmin(userId ?? undefined);
-
-  if (!isLoaded) {
-    return <FullScreenMessage message="Validando sua sessão..." />;
-  }
-
-  if (!userId) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (loading) {
-    return <FullScreenMessage message="A verificar permissões..." />;
-  }
-
-  if (!isAdmin) {
     return <Navigate to="/" replace />;
   }
 

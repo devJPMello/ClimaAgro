@@ -506,7 +506,6 @@ export function MinhasConversas() {
               lista.map((item) => {
                 const active = selected?.id === item.id;
                 const titulo =
-                  item.consultaAssunto?.slice(0, 52) ||
                   item.casoResumoSnapshot?.slice(0, 52) ||
                   `Atendimento ${maskWhatsapp(item.whatsappAgronomo)}`;
                 const isDeleting = deletingId === item.id;
@@ -574,9 +573,9 @@ export function MinhasConversas() {
                     <p className="text-base font-medium text-foreground">
                       Especialista (WhatsApp {maskWhatsapp(selected.whatsappAgronomo)})
                     </p>
-                    {(hybridConversation?.consultaAssunto || selected.consultaAssunto) && (
+                    {(hybridConversation?.casoResumoSnapshot || selected.casoResumoSnapshot) && (
                       <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
-                        {hybridConversation?.consultaAssunto || selected.consultaAssunto}
+                        {hybridConversation?.casoResumoSnapshot || selected.casoResumoSnapshot}
                       </p>
                     )}
                     {selected.produtorNomeSnapshot && (
@@ -864,8 +863,8 @@ export function MinhasConversas() {
       >
         <p className="text-sm text-muted-foreground">
           Tem certeza que deseja excluir a conversa
-          {(deleteTarget?.consultaAssunto || deleteTarget?.casoResumoSnapshot)
-            ? ` "${(deleteTarget.consultaAssunto || deleteTarget.casoResumoSnapshot || '').slice(0, 80)}"`
+          {deleteTarget?.casoResumoSnapshot
+            ? ` "${deleteTarget.casoResumoSnapshot.slice(0, 80)}"`
             : ''}
           ?
           <br />

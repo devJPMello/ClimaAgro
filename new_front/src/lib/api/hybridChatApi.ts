@@ -19,12 +19,7 @@ export type HybridConversationDto = {
   atendimentoAtivo: boolean;
   whatsappAgronomo: string;
   produtorNomeSnapshot?: string | null;
-  /** Igual a `consultaAssunto` quando existe ticket; senão legado no híbrido. */
   casoResumoSnapshot?: string | null;
-  /** Ticket em `consultas_agronomicas` (núcleo administrativo). */
-  consultaId?: string | null;
-  consultaAssunto?: string | null;
-  consultaStatus?: string | null;
 };
 
 function clerkHeaders(clerkUserId: string): Record<string, string> {
@@ -52,11 +47,7 @@ export type HybridConversationListItem = {
   atendimentoAtivo: boolean;
   updatedAt: string;
   produtorNomeSnapshot?: string | null;
-  /** Alinhado com `consultaAssunto` quando há ticket. */
   casoResumoSnapshot?: string | null;
-  consultaId?: string | null;
-  consultaAssunto?: string | null;
-  consultaStatus?: string | null;
 };
 
 export async function listHybridConversations(clerkUserId: string) {
