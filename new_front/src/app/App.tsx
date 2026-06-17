@@ -9,7 +9,13 @@ export default function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <RouterProvider router={router} />
-        <Toaster position="top-right" richColors />
+        <Toaster
+          position="top-right"
+          richColors
+          toastOptions={{
+            style: { width: '420px' },
+          }}
+        />
       </ThemeProvider>
     </ErrorBoundary>
   );
