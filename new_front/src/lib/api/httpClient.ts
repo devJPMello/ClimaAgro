@@ -183,25 +183,29 @@ export async function httpRequest<T>(
 
         return parsed as T;
       } catch (e) {
-        if (e instanceof ApiError && retry && method === 'GET' && (e.status === 429 || e.status >= 500)) {
-          if (attempt < MAX_RETRIES) {
-            attempt += 1;
-            await sleep(400 * attempt);
-            continue;
-          }
+        // User's own AbortSignal fired — don't retry, just propagate
+        if (e instanceof DOMException && e.name === 'AbortError' && signal?.aborted) {
+          throw new ApiError('Cancelado.', 0);
         }
-        if (e instanceof DOMException && e.name === 'AbortError') {
-          throw new ApiError('Tempo esgotado. Tente novamente.', 0);
-        }
-        if (
+
+        const isTimeout = e instanceof DOMException && e.name === 'AbortError';
+        const isNetworkError =
           e instanceof TypeError &&
-          /failed to fetch|network|load failed/i.test(String((e as Error).message))
-        ) {
+          /failed to fetch|network|load failed/i.test(String((e as Error).message));
+        const isServerError = e instanceof ApiError && (e.status === 429 || e.status >= 500);
+
+        if (retry && (isTimeout || isNetworkError || isServerError) && attempt < MAX_RETRIES) {
+          attempt += 1;
+          await sleep(300 * 2 ** (attempt - 1)); // exponential backoff: 300 ms, 600 ms
+          continue;
+        }
+
+        if (isTimeout) throw new ApiError('Tempo esgotado. Tente novamente.', 0);
+        if (isNetworkError)
           throw new ApiError(
             'Não foi possível conectar à API. Em dev, suba o backend (porta 5000) e use `npm run dev` no front para o proxy /api.',
             0
           );
-        }
         throw e;
       }
     }

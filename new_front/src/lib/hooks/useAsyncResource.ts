@@ -18,18 +18,26 @@ export function useAsyncResource<T>(factory: () => Promise<T>, deps: unknown[] =
   const factoryRef = useRef(factory);
   factoryRef.current = factory;
 
+  // Monotonically increasing counter. Each call to reload owns a generation;
+  // results from earlier generations are silently discarded, preventing stale
+  // responses from overwriting newer state when deps change or the component unmounts.
+  const generationRef = useRef(0);
+
   const [status, setStatus] = useState<AsyncStatus>('loading');
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
+    const gen = ++generationRef.current;
     setStatus('loading');
     setError(null);
     try {
       const result = await factoryRef.current();
+      if (gen !== generationRef.current) return;
       setData(result);
       setStatus('success');
     } catch (e) {
+      if (gen !== generationRef.current) return;
       const message =
         e instanceof ApiError
           ? e.message
@@ -44,6 +52,8 @@ export function useAsyncResource<T>(factory: () => Promise<T>, deps: unknown[] =
 
   useEffect(() => {
     void reload();
+    // Invalidate any in-flight request when deps change or component unmounts
+    return () => { generationRef.current++; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- deps são o gatilho externo explícito
   }, [reload, ...deps]);
 
