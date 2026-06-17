@@ -8,7 +8,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { Modal } from '../components/ui/Modal';
 import {
   AlertTriangle, MapPin,
-  ChevronLeft, ChevronRight, Eye, Handshake, Search,
+  ChevronLeft, ChevronRight, Eye, Handshake, Search, X,
 } from 'lucide-react';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
@@ -16,7 +16,6 @@ import { listClimateAlerts } from '../../lib/api/alertsApi';
 import type { ClimateAlertDto, ClimateAlertListDto, ClimateAlertSeverity } from '../../lib/api/contracts/alerts';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { UF_NOME } from '../../lib/geo/brazilStatesMalha';
-import { useProfileUf } from '../../lib/hooks/useProfileUf';
 import { STORAGE_KEYS } from '../../lib/storage/storageKeys';
 
 const ALERTAS_UF_OPTIONS = [
@@ -110,12 +109,6 @@ export function Alertas() {
   const [ufFiltro, setUfFiltro] = usePersistedState(STORAGE_KEYS.ALERTAS_UF, 'ALL');
   const [busca, setBusca] = usePersistedState(STORAGE_KEYS.ALERTAS_BUSCA, '');
   const [page, setPage] = useState(1);
-  const profileUf = useProfileUf();
-
-  useEffect(() => {
-    if (profileUf && ufFiltro === 'ALL') setUfFiltro(profileUf);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileUf]);
   const [selectedAlerta, setSelectedAlerta] = useState<ClimateAlertDto | null>(null);
 
   useEffect(() => {
@@ -147,8 +140,12 @@ export function Alertas() {
         const match =
           alerta.tipo.toLowerCase().includes(q) ||
           alerta.local.toLowerCase().includes(q) ||
+          alerta.valorAtual.toLowerCase().includes(q) ||
+          alerta.data.toLowerCase().includes(q) ||
+          fonteLabel(alerta.fonte).toLowerCase().includes(q) ||
           (alerta.recomendacao?.toLowerCase().includes(q) ?? false) ||
-          (alerta.impactoEstimado?.toLowerCase().includes(q) ?? false);
+          (alerta.impactoEstimado?.toLowerCase().includes(q) ?? false) ||
+          alerta.limiar.toLowerCase().includes(q);
         if (!match) return false;
       }
       return true;
@@ -246,18 +243,35 @@ export function Alertas() {
                       )}
                     </div>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:flex-wrap sm:gap-3">
-                      <div className="sm:w-52">
+                      <div className="sm:w-72">
                         <div className="space-y-1.5">
-                          <label className="block text-sm text-foreground">Buscar</label>
+                          <div className="flex items-center justify-between">
+                            <label className="block text-sm text-foreground">Buscar</label>
+                            {busca.trim() && (
+                              <span className="text-xs text-muted-foreground tabular-nums">
+                                {alertasFiltrados.length} resultado{alertasFiltrados.length !== 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
                           <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
                             <input
-                              type="search"
+                              type="text"
                               value={busca}
                               onChange={(e) => setBusca(e.target.value)}
-                              placeholder="Tipo, local, recomendação..."
-                              className="w-full pl-9 pr-3 py-2.5 bg-input-background border border-border rounded-lg text-sm text-foreground transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder:text-muted-foreground"
+                              placeholder="Tipo, local, data, fonte, recomendação..."
+                              className="w-full pl-9 pr-8 py-2.5 bg-input-background border border-border rounded-lg text-sm text-foreground transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder:text-muted-foreground"
                             />
+                            {busca && (
+                              <button
+                                type="button"
+                                onClick={() => setBusca('')}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                title="Limpar busca"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
