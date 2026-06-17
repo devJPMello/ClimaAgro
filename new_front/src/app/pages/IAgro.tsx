@@ -1,1217 +1,123 @@
-import { FormEvent, useEffect, useRef, useState, type ClipboardEvent } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { toast } from 'sonner';
-import { io, type Socket } from 'socket.io-client';
-import { useUser, useAuth } from '@clerk/clerk-react';
-import {
-  Camera,
-  Cloud,
-  History,
-  Loader2,
-  MessageCircle,
-  Mic,
-  MicOff,
-  FileText,
-  Paperclip,
-  SendHorizonal,
-  Sprout,
-  Star,
-  Trash2,
-  TriangleAlert,
-  TrendingUp,
-  Handshake,
-  X,
-} from 'lucide-react';
-import { Card, CardBody } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
+import { Card, CardBody } from '../components/ui/Card';
 import { Modal } from '../components/ui/Modal';
-import {
-  deleteIAgroThread,
-  listIAgroThreads,
-  sendIAgroMessage,
-  toggleIAgroThreadFavorite,
-  type ConciergeMeta,
-  type IAgroThread,
-} from '../../lib/api/iagroChatApi';
-import {
-  escalateToSpecialist,
-  getHybridTimeline,
-  patchHybridConversationStatus,
-  resolveSocketBaseUrl,
-  sendProducerToWhatsapp,
-  type HybridConversationDto,
-  type UnifiedChatMessage,
-} from '../../lib/api/hybridChatApi';
-import { listarAgronomosParceiros, type AgronomoParceiroApi } from '../../lib/api/agronomosParceirosApi';
-import { notifyWhatsappDelivery } from '../../lib/whatsappNotify';
-import { HybridMediaAttachment } from '../components/chat/HybridMediaAttachment';
-import { LocalAttachmentThumbnail, type LocalAttachmentKind } from '../components/chat/LocalAttachmentThumbnail';
 import { EncerrarAtendimentoModal } from '../components/chat/EncerrarAtendimentoModal';
 import { FileAttachmentPickerModal } from '../components/chat/FileAttachmentPickerModal';
-import { useNavigate } from 'react-router';
-import { STORAGE_KEYS, iagroThreadImagesKey } from '../../lib/storage/storageKeys';
-
-type LocalMediaItem = { url: string; kind: LocalAttachmentKind };
-
-const IAGRO_MAX_FILE_BYTES = 8 * 1024 * 1024; // multer limit no backend
-
-function validateIAgroFiles(files: File[]): { valid: File[]; rejected: string[] } {
-  const valid: File[] = [];
-  const rejected: string[] = [];
-  for (const file of files) {
-    if (file.size > IAGRO_MAX_FILE_BYTES) {
-      rejected.push(`"${file.name}" (${(file.size / 1024 / 1024).toFixed(1)} MB) — máx. 8 MB`);
-      continue;
-    }
-    const isImage = file.type.startsWith('image/');
-    const isPdf = file.type === 'application/pdf';
-    const isText = /^text\//.test(file.type) || file.type === 'application/json';
-    const isDoc =
-      file.type === 'application/msword' ||
-      file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    const ext = (file.name.split('.').pop() ?? '').toLowerCase();
-    const allowedByExt = ['md', 'csv', 'txt', 'json'].includes(ext);
-    if (!isImage && !isPdf && !isText && !isDoc && !allowedByExt) {
-      rejected.push(`"${file.name}" — tipo de ficheiro não suportado`);
-      continue;
-    }
-    valid.push(file);
-  }
-  return { valid, rejected };
-}
+import { History } from 'lucide-react';
+import { ThreadList } from '../components/iagro/ThreadList';
+import { MessageArea } from '../components/iagro/MessageArea';
+import { ChatInput } from '../components/iagro/ChatInput';
+import { useIagroChat, IAGRO_QUICK_ACTIONS } from '../../lib/hooks/useIagroChat';
 
 export function IAgro() {
-  const navigate = useNavigate();
-  const { user } = useUser();
-  const { getToken } = useAuth();
-  const [threads, setThreads] = useState<IAgroThread[]>([]);
-  const [messages, setMessages] = useState<UnifiedChatMessage[]>([]);
-  const [hybridConversation, setHybridConversation] = useState<HybridConversationDto | null>(null);
-  const [threadId, setThreadId] = useState<string | null>(null);
-  const [input, setInput] = useState('');
-  const [loadingSend, setLoadingSend] = useState(false);
-  const [loadingThreads, setLoadingThreads] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [pendingPreviews, setPendingPreviews] = useState<Map<File, string>>(new Map());
-  const [messageMediaPreviews, setMessageMediaPreviews] = useState<Map<string, LocalMediaItem[]>>(new Map());
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [threadToDelete, setThreadToDelete] = useState<IAgroThread | null>(null);
-  const [deletingThread, setDeletingThread] = useState(false);
-  const [escalateOpen, setEscalateOpen] = useState(false);
-  const [loadingEscalateList, setLoadingEscalateList] = useState(false);
-  const [agronomosPick, setAgronomosPick] = useState<AgronomoParceiroApi[]>([]);
-  const [escalateAgronomoId, setEscalateAgronomoId] = useState('');
-  const [escalating, setEscalating] = useState(false);
-  const [conciergeSuggestion, setConciergeSuggestion] = useState<ConciergeMeta | null>(null);
-  /** Parceiro que o encaminhamento automático usaria para esta triagem (mesma conversa / especialidade). */
-  const [indicatedAgronomo, setIndicatedAgronomo] = useState<AgronomoParceiroApi | null>(null);
-  const [loadingIndicatedAgronomo, setLoadingIndicatedAgronomo] = useState(false);
-  const [encerrarModalOpen, setEncerrarModalOpen] = useState(false);
-  const [encerrando, setEncerrando] = useState(false);
-  const [iagroAttachmentModalOpen, setIagroAttachmentModalOpen] = useState(false);
-  const socketRef = useRef<Socket | null>(null);
-  const threadIdRef = useRef<string | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const recognitionRef = useRef<{ stop: () => void } | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-
-  const quickActions = [
-    {
-      title: 'Previsões Climáticas',
-      description: 'Condições meteorológicas e tendências',
-      prompt: 'Quais são as previsões climáticas para minha região nos próximos dias?',
-      icon: Cloud,
-    },
-    {
-      title: 'Recomendações Agrícolas',
-      description: 'Melhores práticas para cada cultura',
-      prompt: 'Me dê recomendações agrícolas para melhorar o manejo da lavoura.',
-      icon: Sprout,
-    },
-    {
-      title: 'Análise de Alertas',
-      description: 'Interpretação de alertas climáticos',
-      prompt: 'Analise os alertas climáticos recentes e explique os riscos para a produção.',
-      icon: TriangleAlert,
-    },
-    {
-      title: 'Dados de Produtividade',
-      description: 'Análises históricas e tendências',
-      prompt: 'Mostre uma análise de produtividade e tendências com base nos dados históricos.',
-      icon: TrendingUp,
-    },
-  ];
-
-  const canSend = (input.trim().length > 0 || pendingFiles.length > 0) && !loadingSend;
-  const humanHandoff =
-    Boolean(hybridConversation?.intervencaoHumana && hybridConversation?.atendimentoAtivo);
-  const canUseHumanInput = humanHandoff && hybridConversation?.id && user?.id;
-
-  async function refreshThreads() {
-    const uid = user?.id;
-    if (!uid) {
-      setThreads([]);
-      return;
-    }
-    setLoadingThreads(true);
-    try {
-      const response = await listIAgroThreads(uid);
-      setThreads(response.threads || []);
-    } finally {
-      setLoadingThreads(false);
-    }
-  }
-
-  async function openThread(nextThreadId: string) {
-    setLoadingHistory(true);
-    try {
-      let list: UnifiedChatMessage[] = [];
-      if (user?.id) {
-        const hybrid = await getHybridTimeline(nextThreadId, user.id);
-        setHybridConversation(hybrid.conversation);
-        list = hybrid.messages || [];
-      } else {
-        toast.error('Faça login para abrir o histórico de conversas.');
-        setHybridConversation(null);
-        setMessages([]);
-        setThreadId(null);
-        return;
-      }
-      setThreadId(nextThreadId);
-      setMessages(list);
-      const cachedImages = loadCachedThreadImages(nextThreadId);
-      const hydrated = new Map<string, LocalMediaItem[]>();
-      for (const msg of list) {
-        if (msg.sender !== 'user') continue;
-        const key = buildMessageImageKey(msg.text);
-        const found = cachedImages[key];
-        if (Array.isArray(found) && found.length > 0) {
-          hydrated.set(
-            msg.id,
-            found.map((url) => ({ url, kind: dataUrlToLocalKind(url) }))
-          );
-        }
-      }
-      setMessageMediaPreviews(hydrated);
-      setHistoryOpen(false);
-    } finally {
-      setLoadingHistory(false);
-    }
-  }
-
-  useEffect(() => {
-    void refreshThreads();
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!conciergeSuggestion?.escalate) {
-      setIndicatedAgronomo(null);
-      return;
-    }
-    const hint = conciergeSuggestion.specialtyHint?.trim();
-    let cancelled = false;
-    setLoadingIndicatedAgronomo(true);
-    void (async () => {
-      try {
-        const r = await listarAgronomosParceiros(hint ? { especialidade: hint, ativo: true } : { ativo: true });
-        if (!cancelled) setIndicatedAgronomo(r.agronomos?.[0] ?? null);
-      } catch {
-        if (!cancelled) setIndicatedAgronomo(null);
-      } finally {
-        if (!cancelled) setLoadingIndicatedAgronomo(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [conciergeSuggestion]);
-
-  useEffect(() => {
-    threadIdRef.current = threadId;
-    if (threadId) {
-      try {
-        sessionStorage.setItem(STORAGE_KEYS.IAGRO_ACTIVE_THREAD_ID, threadId);
-      } catch {
-        /* ignore */
-      }
-    }
-  }, [threadId]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    let mounted = true;
-    let socket: Socket;
-    const base = resolveSocketBaseUrl();
-    getToken().then((token) => {
-      if (!mounted) return;
-      socket = io(base, {
-        path: '/socket.io',
-        transports: ['websocket', 'polling'],
-        auth: { token: token || '' },
-      });
-      socketRef.current = socket;
-      socket.on('connect', () => {
-        socket.emit('join:produtor', user.id);
-      });
-      socket.on('hybrid:message', (payload: { threadId?: string; message?: UnifiedChatMessage }) => {
-        if (!payload?.message) return;
-        const active = threadIdRef.current;
-        if (payload.threadId && active && payload.threadId !== active) return;
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === payload.message!.id)) return prev;
-          return [...prev, { ...payload.message!, kind: 'hybrid' }];
-        });
-      });
-    });
-    return () => {
-      mounted = false;
-      socket?.disconnect();
-      socketRef.current = null;
-    };
-  }, [user?.id, getToken]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loadingSend]);
-
-  useEffect(() => {
-    if (conciergeSuggestion?.escalate) {
-      requestAnimationFrame(() =>
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-      );
-    }
-  }, [conciergeSuggestion]);
-
-  function toggleRecording() {
-    if (isRecording) {
-      recognitionRef.current?.stop();
-      return;
-    }
-    const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-    if (!SR) {
-      toast.error('Reconhecimento de voz não suportado. Use Chrome ou Edge.');
-      return;
-    }
-    const recognition = new SR();
-    recognition.lang = 'pt-BR';
-    recognition.interimResults = true;
-    recognition.continuous = false;
-    recognition.maxAlternatives = 1;
-    recognition.onstart = () => setIsRecording(true);
-    recognition.onend = () => { setIsRecording(false); recognitionRef.current = null; };
-    recognition.onerror = (e: SpeechRecognitionErrorEvent) => {
-      setIsRecording(false);
-      if (e.error !== 'aborted') toast.error(`Erro no microfone: ${e.error}`);
-    };
-    recognition.onresult = (e: SpeechRecognitionEvent) => {
-      const transcript = Array.from(e.results).map((r) => r[0].transcript).join('');
-      setInput(transcript);
-    };
-    recognitionRef.current = recognition;
-    recognition.start();
-  }
-
-  function buildMessageImageKey(text: string): string {
-    return String(text || '').trim();
-  }
-
-  function dataUrlToLocalKind(dataUrl: string): LocalAttachmentKind {
-    return dataUrl.startsWith('data:application/pdf') ? 'pdf' : 'image';
-  }
-
-  /** Remove a linha `[Anexos: ...]` que o backend grava; não exibir ao reabrir o histórico. */
-  function displayUserMessageText(raw: string): string {
-    return String(raw || '')
-      .replace(/\n*\[Anexos:[^\]]+\]\s*$/i, '')
-      .trimEnd();
-  }
-
-  function buildPersistedUserText(messageText: string, files: File[]): string {
-    const fileNames = files.map((file) => file.name).filter(Boolean);
-    if (fileNames.length === 0) return messageText;
-    const persistedBase = messageText || 'Arquivos enviados';
-    return `${persistedBase}\n\n[Anexos: ${fileNames.join(', ')}]`;
-  }
-
-  function loadCachedThreadImages(targetThreadId: string): Record<string, string[]> {
-    try {
-      const raw = localStorage.getItem(iagroThreadImagesKey(targetThreadId));
-      if (!raw) return {};
-      const parsed = JSON.parse(raw) as unknown;
-      if (!parsed || typeof parsed !== 'object') return {};
-      return parsed as Record<string, string[]>;
-    } catch {
-      return {};
-    }
-  }
-
-  function saveCachedThreadImages(targetThreadId: string, key: string, images: string[]) {
-    if (!targetThreadId || !key || images.length === 0) return;
-    try {
-      const cache = loadCachedThreadImages(targetThreadId);
-      cache[key] = images;
-      localStorage.setItem(iagroThreadImagesKey(targetThreadId), JSON.stringify(cache));
-    } catch {
-      toast.warning('Não foi possível manter todas as imagens no cache local.');
-    }
-  }
-
-  async function fileToDataUrl(file: File): Promise<string> {
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(new Error('Falha ao ler o arquivo.'));
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    recognitionRef.current?.stop();
-    const messageText = input.trim();
-    if (!messageText && pendingFiles.length === 0) return;
-
-    if (canUseHumanInput && pendingFiles.length > 0) {
-      toast.error('No atendimento humano, envie apenas texto. Use o IAgro sem intervenção para anexos.');
-      return;
-    }
-
-    if (canUseHumanInput && messageText) {
-      const optimisticId = `tmp-${Date.now()}`;
-      const optimistic: UnifiedChatMessage = {
-        id: optimisticId,
-        sender: 'user',
-        kind: 'hybrid',
-        text: messageText,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, optimistic]);
-      setInput('');
-      setLoadingSend(true);
-      try {
-        const response = await sendProducerToWhatsapp(
-          hybridConversation!.id,
-          messageText,
-          user!.id
-        );
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === optimisticId ? { ...m, id: response.message.id } : m
-          )
-        );
-        notifyWhatsappDelivery(response.whatsapp);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Falha ao enviar mensagem.';
-        toast.error(msg);
-        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-      } finally {
-        setLoadingSend(false);
-      }
-      return;
-    }
-
-    if (!user?.id) {
-      toast.error('Faça login para conversar com o IAgro.');
-      return;
-    }
-
-    const localItems: LocalMediaItem[] = [];
-    for (const f of pendingFiles) {
-      const url = pendingPreviews.get(f);
-      if (!url) continue;
-      if (f.type.startsWith('image/')) localItems.push({ url, kind: 'image' });
-      else if (f.type === 'application/pdf') localItems.push({ url, kind: 'pdf' });
-    }
-
-    const hasImage = pendingFiles.some((f) => f.type.startsWith('image/'));
-    const hasPdf = pendingFiles.some((f) => f.type === 'application/pdf');
-    let attachHint = 'Arquivos anexados';
-    if (hasImage && hasPdf) attachHint = 'Imagem e PDF enviados para análise';
-    else if (hasImage) attachHint = 'Imagem enviada para análise';
-    else if (hasPdf) attachHint = 'PDF enviado para análise';
-
-    const optimisticId = `tmp-${Date.now()}`;
-    const optimistic: UnifiedChatMessage = {
-      id: optimisticId,
-      sender: 'user',
-      kind: 'ia',
-      text: messageText || attachHint,
-      createdAt: new Date().toISOString(),
-    };
-
-    if (localItems.length > 0) {
-      setMessageMediaPreviews((prev) => new Map(prev).set(optimisticId, localItems));
-    }
-
-    const filesToSend = [...pendingFiles];
-    const persistedUserText = buildPersistedUserText(messageText, filesToSend);
-    const cacheableFiles = pendingFiles.filter(
-      (f) => f.type.startsWith('image/') || f.type === 'application/pdf'
-    );
-    const filteredMediaDataUrls = (
-      await Promise.all(cacheableFiles.map(async (file) => await fileToDataUrl(file).catch(() => '')))
-    ).filter(Boolean);
-    const keepBlobUrls = new Set(localItems.map((x) => x.url));
-    setMessages((prev) => [...prev, optimistic]);
-    setInput('');
-    pendingPreviews.forEach((url) => {
-      if (!keepBlobUrls.has(url)) URL.revokeObjectURL(url);
-    });
-    setPendingFiles([]);
-    setPendingPreviews(new Map());
-    setLoadingSend(true);
-
-    try {
-      const response = await sendIAgroMessage(
-        { message: messageText, threadId, files: filesToSend },
-        user.id
-      );
-      if (response.concierge?.escalate) {
-        setConciergeSuggestion(response.concierge);
-      } else {
-        setConciergeSuggestion(null);
-      }
-      const assistant: UnifiedChatMessage = {
-        id: `tmp-assistant-${Date.now()}`,
-        sender: 'assistant',
-        kind: 'ia',
-        text: response.response,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, assistant]);
-      if (!threadId || threadId !== response.threadId) setThreadId(response.threadId);
-      if (filteredMediaDataUrls.length > 0) {
-        saveCachedThreadImages(response.threadId, buildMessageImageKey(persistedUserText), filteredMediaDataUrls);
-      }
-      await refreshThreads();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Falha ao enviar mensagem.';
-      toast.error(msg);
-      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-    } finally {
-      setLoadingSend(false);
-    }
-  }
-
-  function handleFilesSelected(fileList: FileList | null) {
-    if (!fileList) return;
-    const files = Array.from(fileList);
-    if (files.length === 0) return;
-
-    const { valid, rejected } = validateIAgroFiles(files);
-
-    if (rejected.length > 0) {
-      toast.error(
-        rejected.length === 1
-          ? `Ficheiro rejeitado: ${rejected[0]}`
-          : `${rejected.length} ficheiros rejeitados:\n${rejected.slice(0, 3).join('\n')}`,
-        { duration: 6000 }
-      );
-    }
-
-    if (valid.length === 0) return;
-
-    const newPreviews = new Map(pendingPreviews);
-    valid.forEach((f) => {
-      if (f.type.startsWith('image/') || f.type === 'application/pdf') {
-        newPreviews.set(f, URL.createObjectURL(f));
-      }
-    });
-    setPendingPreviews(newPreviews);
-    setPendingFiles((prev) => [...prev, ...valid].slice(0, 6));
-  }
-
-  function removePendingFile(index: number) {
-    const file = pendingFiles[index];
-    if (pendingPreviews.has(file)) {
-      URL.revokeObjectURL(pendingPreviews.get(file)!);
-      const next = new Map(pendingPreviews);
-      next.delete(file);
-      setPendingPreviews(next);
-    }
-    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const items = Array.from(event.clipboardData.items);
-    const imageItems = items.filter((item) => item.type.startsWith('image/'));
-    if (imageItems.length === 0) return;
-    event.preventDefault();
-    const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
-    if (files.length === 0) return;
-    const dt = new DataTransfer();
-    files.forEach((f) => dt.items.add(f));
-    handleFilesSelected(dt.files);
-  }
-
-  function applyQuickPrompt(prompt: string) {
-    setInput(prompt);
-    inputRef.current?.focus();
-  }
-
-  function applyPlantAnalysis() {
-    setInput('Analise a imagem desta planta: identifique o estado de saúde, possíveis deficiências nutricionais, sinais de pragas ou doenças, necessidade de calagem, e me dê recomendações práticas de manejo.');
-    setIagroAttachmentModalOpen(true);
-  }
-
-  async function handleToggleFavorite(targetThread: IAgroThread) {
-    if (!user?.id) return;
-    await toggleIAgroThreadFavorite(targetThread.threadId, !targetThread.isFavorite, user.id);
-    await refreshThreads();
-  }
-
-  function handleDeleteThread(targetThread: IAgroThread) {
-    setThreadToDelete(targetThread);
-  }
-
-  async function confirmDeleteThread() {
-    if (!threadToDelete || !user?.id) return;
-    setDeletingThread(true);
-    try {
-      await deleteIAgroThread(threadToDelete.threadId, user.id);
-      if (threadId === threadToDelete.threadId) {
-        setThreadId(null);
-        setMessages([]);
-        setHybridConversation(null);
-      }
-      setThreadToDelete(null);
-      await refreshThreads();
-    } finally {
-      setDeletingThread(false);
-    }
-  }
-
-  async function openEscalateModal(presetEspecialidade?: string) {
-    if (!user?.id) {
-      toast.error('Faça login para acionar um especialista.');
-      return;
-    }
-    if (!threadId) {
-      toast.error('Inicie ou abra uma conversa com o IAgro antes.');
-      return;
-    }
-    setEscalateOpen(true);
-    setAgronomosPick([]);
-    setEscalateAgronomoId('');
-    setLoadingEscalateList(true);
-    try {
-      const hint = presetEspecialidade?.trim() || conciergeSuggestion?.specialtyHint?.trim();
-      let r = await listarAgronomosParceiros(
-        hint ? { especialidade: hint, ativo: true } : { ativo: true }
-      );
-      let list = r.agronomos || [];
-      if (list.length === 0 && hint) {
-        r = await listarAgronomosParceiros({ ativo: true });
-        list = r.agronomos || [];
-        if (list.length > 0) {
-          toast.message('Nenhum parceiro nessa área; mostrando todos os agrônomos ativos.');
-        }
-      }
-      setAgronomosPick(list);
-      const first = list[0];
-      setEscalateAgronomoId(first?.id != null ? String(first.id) : '');
-    } catch {
-      toast.error('Não foi possível carregar agrônomos.');
-      setAgronomosPick([]);
-    } finally {
-      setLoadingEscalateList(false);
-    }
-  }
-
-  async function autoEscalateSpecialist() {
-    if (!user?.id || !threadId) return;
-    const nome = user.fullName || user.firstName || 'Produtor(a)';
-    const filter = conciergeSuggestion?.specialtyHint?.trim() || 'Pragas';
-    setEscalating(true);
-    try {
-      const out = await escalateToSpecialist(
-        {
-          threadId,
-          autoPickBySpecialty: true,
-          specialtyFilter: filter,
-          produtorNome: nome,
-          casoDestaque: conciergeSuggestion?.reason,
-          conciergeReason: conciergeSuggestion?.reason,
-        },
-        user.id
-      );
-      setConciergeSuggestion(null);
-      notifyWhatsappDelivery(out.whatsapp);
-      toast.success(
-        out.agronomoNome
-          ? `Conversa com ${out.agronomoNome} disponível em Minhas conversas.`
-          : 'Atendimento humano ativado. Abrindo Minhas conversas.'
-      );
-      navigate(`/minhas-conversas?thread=${encodeURIComponent(threadId)}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha no encaminhamento automático.');
-    } finally {
-      setEscalating(false);
-    }
-  }
-
-  async function encerrarSemAvaliacaoIAgro() {
-    if (!user?.id || !hybridConversation?.id) return;
-    setEncerrando(true);
-    try {
-      await patchHybridConversationStatus(hybridConversation.id, false, user.id);
-      setHybridConversation((prev) =>
-        prev ? { ...prev, atendimentoAtivo: false } : null
-      );
-      toast.success('Atendimento encerrado. O agrônomo não roteia mais mensagens para este painel.');
-      setEncerrarModalOpen(false);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao encerrar.');
-    } finally {
-      setEncerrando(false);
-    }
-  }
-
-  async function encerrarComAvaliacaoIAgro(a: { estrelas: number; comentario: string }) {
-    if (!user?.id || !hybridConversation?.id) return;
-    setEncerrando(true);
-    try {
-      await patchHybridConversationStatus(hybridConversation.id, false, user.id, {
-        estrelas: a.estrelas,
-        comentario: a.comentario || undefined,
-      });
-      setHybridConversation((prev) =>
-        prev ? { ...prev, atendimentoAtivo: false } : null
-      );
-      toast.success('Obrigado pela avaliação. A média do especialista na rede foi atualizada.');
-      setEncerrarModalOpen(false);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao encerrar.');
-    } finally {
-      setEncerrando(false);
-    }
-  }
-
-  async function confirmEscalate() {
-    if (!user?.id || !threadId) return;
-    const sel = agronomosPick.find((a) => String(a.id) === escalateAgronomoId);
-    if (!sel?.whatsapp?.trim()) {
-      toast.error('Selecione um agrônomo com WhatsApp cadastrado.');
-      return;
-    }
-    const nome = user.fullName || user.firstName || 'Produtor(a)';
-    setEscalating(true);
-    try {
-      const out = await escalateToSpecialist(
-        {
-          threadId,
-          whatsappAgronomo: sel.whatsapp.trim(),
-          agronomoParceiroId: String(sel.id),
-          produtorNome: nome,
-          casoDestaque: conciergeSuggestion?.reason,
-          conciergeReason: conciergeSuggestion?.reason,
-          specialtyFilter: conciergeSuggestion?.specialtyHint,
-        },
-        user.id
-      );
-      const digits = String(sel.whatsapp).replace(/\D/g, '');
-      setHybridConversation({
-        id: out.conversationId,
-        intervencaoHumana: out.intervencaoHumana,
-        atendimentoAtivo: out.atendimentoAtivo,
-        whatsappAgronomo: digits,
-      });
-      setEscalateOpen(false);
-      setConciergeSuggestion(null);
-      notifyWhatsappDelivery(out.whatsapp);
-      toast.success('Abrindo Minhas conversas para continuar com o especialista.');
-      navigate(`/minhas-conversas?thread=${encodeURIComponent(threadId)}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao preparar envio.');
-    } finally {
-      setEscalating(false);
-    }
-  }
+  const chat = useIagroChat();
 
   return (
     <div className="space-y-6 relative">
       <div className="min-w-0 space-y-4">
-      <div className="pr-12 sm:pr-28">
-        <h1 className="text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
-          IAgro
-        </h1>
-        <p className="text-muted-foreground">Chat com o assistente e encaminhamento ao agrônomo parceiro via WhatsApp.</p>
-      </div>
-
-      {humanHandoff && (
-        <div className="rounded-xl border border-green-600/40 bg-green-500/10 px-4 py-3 text-sm text-foreground">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="font-medium text-green-800 dark:text-green-300">Atendimento humano ativo</p>
-              <p className="text-muted-foreground text-xs mt-1">
-                Suas mensagens são encaminhadas ao WhatsApp do agrônomo (Twilio, se configurado). Respostas chegam aqui em tempo real. Encerre o ticket quando o caso for resolvido — mensagens posteriores do agrônomo não serão roteadas.
-              </p>
-            </div>
-            {hybridConversation?.id && user?.id && hybridConversation.atendimentoAtivo && (
-              <Button
-                type="button"
-                variant="secondary"
-                className="shrink-0 text-xs"
-                onClick={() => setEncerrarModalOpen(true)}
-              >
-                Encerrar atendimento
-              </Button>
-            )}
-          </div>
+        <div className="pr-12 sm:pr-28">
+          <h1 className="text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
+            IAgro
+          </h1>
+          <p className="text-muted-foreground">
+            Chat com o assistente e encaminhamento ao agrônomo parceiro via WhatsApp.
+          </p>
         </div>
-      )}
 
-      <button
-        type="button"
-        onClick={() => setHistoryOpen((prev) => !prev)}
-        className="absolute top-0 right-0 inline-flex h-11 w-11 items-center justify-center text-foreground transition-all hover:-translate-y-0.5 z-30 lg:right-0"
-        aria-label={historyOpen ? 'Fechar histórico' : 'Abrir histórico'}
-      >
-        <History className="w-5 h-5" />
-      </button>
-
-      <Card>
-        <CardBody className="space-y-4">
-          <div className="h-[50vh] sm:h-[60vh] md:h-[68vh] overflow-y-auto rounded-lg border border-border bg-muted/20 p-3 space-y-3">
-            {loadingHistory && <p className="text-sm text-muted-foreground">Carregando histórico...</p>}
-            {!loadingHistory && messages.length === 0 && (
-              <div className="px-2 py-6">
-                <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-xl bg-sidebar-primary">
-                  <Cloud className="h-8 w-8 text-white" />
-                </div>
-                <h2 className="text-center text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
-                  Olá! Como posso ajudar?
-                </h2>
-                <p className="mx-auto max-w-3xl text-center text-muted-foreground">
-                  Sou seu assistente especializado em monitoramento climático e produtividade agrícola.
-                  <br />
-                  Posso ajudar com:
+        {chat.humanHandoff && (
+          <div className="rounded-xl border border-green-600/40 bg-green-500/10 px-4 py-3 text-sm text-foreground">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="font-medium text-green-800 dark:text-green-300">Atendimento humano ativo</p>
+                <p className="text-muted-foreground text-xs mt-1">
+                  Suas mensagens são encaminhadas ao WhatsApp do agrônomo (Twilio, se configurado). Respostas chegam aqui em tempo real. Encerre o ticket quando o caso for resolvido — mensagens posteriores do agrônomo não serão roteadas.
                 </p>
-
-                <div className="mx-auto mt-6 max-w-4xl space-y-3">
-                  {/* Card de análise de planta — destaque */}
-                  <button
-                    type="button"
-                    onClick={applyPlantAnalysis}
-                    className="w-full rounded-2xl border-2 border-dashed border-green-500/40 bg-green-500/5 px-6 py-5 text-left transition-all hover:border-green-500/70 hover:bg-green-500/10 hover:shadow-md hover:-translate-y-0.5"
-                  >
-                    <div className="flex items-center gap-4">
-                      <span className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-green-500/15 text-green-600">
-                        <Camera className="h-7 w-7" />
-                      </span>
-                      <div className="flex-1">
-                        <p className="text-base font-medium text-foreground">Analisar Planta com Foto</p>
-                        <p className="text-sm text-muted-foreground">
-                          Envie uma foto da sua cultura e receba um laudo agronômico completo: deficiências nutricionais, necessidade de calagem, pragas, doenças e recomendações de manejo.
-                        </p>
-                      </div>
-                      <span className="shrink-0 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-medium text-green-700">
-                        Enviar foto →
-                      </span>
-                    </div>
-                  </button>
-
-                  {/* Quick actions secundários */}
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    {quickActions.map((action) => {
-                      const Icon = action.icon;
-                      return (
-                        <button
-                          key={action.title}
-                          type="button"
-                          onClick={() => applyQuickPrompt(action.prompt)}
-                          className="rounded-xl border border-border bg-card px-5 py-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
-                        >
-                          <div className="flex items-center gap-3">
-                            <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                              <Icon className="h-5 w-5" />
-                            </span>
-                            <div>
-                              <p className="text-base text-foreground">{action.title}</p>
-                              <p className="text-sm text-muted-foreground">{action.description}</p>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
-            )}
-            {messages.map((message) => {
-              const userDisplayText =
-                message.sender === 'user' ? displayUserMessageText(message.text) : message.text;
-              const alignEnd = message.sender === 'user';
-              return (
-              <div key={message.id} className={`${alignEnd ? 'flex justify-end' : 'flex justify-start'}`}>
-                {message.sender === 'assistant' ? (
-                  <div className="flex items-end gap-2 max-w-[78%]">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary">
-                      <Cloud className="h-4 w-4 text-white" />
-                    </div>
-                    <div className={'w-fit max-w-full break-words rounded-lg bg-card border border-border px-3 py-2 text-sm text-card-foreground prose prose-sm prose-neutral max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0'}>
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          h1: ({ children }) => <h1 className="text-base font-semibold mt-3 mb-1">{children}</h1>,
-                          h2: ({ children }) => <h2 className="text-sm font-semibold mt-3 mb-1">{children}</h2>,
-                          h3: ({ children }) => <h3 className="text-sm font-medium mt-2 mb-1">{children}</h3>,
-                          p: ({ children }) => <p className="mb-2 leading-relaxed">{children}</p>,
-                          ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-0.5">{children}</ul>,
-                          ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-0.5">{children}</ol>,
-                          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-                          strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-                          em: ({ children }) => <em className="italic">{children}</em>,
-                          code: ({ children, className }) => {
-                            const isBlock = className?.includes('language-');
-                            return isBlock
-                              ? <code className="block bg-muted rounded-md px-3 py-2 text-xs font-mono overflow-x-auto my-2">{children}</code>
-                              : <code className="bg-muted rounded px-1 py-0.5 text-xs font-mono">{children}</code>;
-                          },
-                          pre: ({ children }) => <pre className="bg-muted rounded-md p-3 text-xs overflow-x-auto my-2 font-mono">{children}</pre>,
-                          blockquote: ({ children }) => <blockquote className="border-l-2 border-primary/40 pl-3 text-muted-foreground italic my-2">{children}</blockquote>,
-                          hr: () => <hr className="border-border my-3" />,
-                          a: ({ href, children }) => <a href={href} className="text-primary underline underline-offset-2 hover:text-primary-dark" target="_blank" rel="noopener noreferrer">{children}</a>,
-                          table: ({ children }) => <div className="overflow-x-auto my-2"><table className="w-full text-xs border-collapse">{children}</table></div>,
-                          th: ({ children }) => <th className="border border-border bg-muted px-2 py-1 text-left font-semibold">{children}</th>,
-                          td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
-                        }}
-                      >
-                        {message.text}
-                      </ReactMarkdown>
-                    </div>
-                  </div>
-                ) : message.sender === 'agronomo' ? (
-                  <div className="flex items-end gap-2 max-w-[78%]">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-green-600">
-                      <MessageCircle className="h-4 w-4 text-white" />
-                    </div>
-                    <div className="flex min-w-0 max-w-full flex-col gap-2">
-                      {message.hasMidia && user?.id ? (
-                        <div className="rounded-lg border border-green-700/35 bg-green-600/5 p-2">
-                          <HybridMediaAttachment
-                            messageId={message.id}
-                            mimeType={message.midiaMimeType}
-                            clerkUserId={user.id}
-                          />
-                        </div>
-                      ) : null}
-                      <div className="w-fit max-w-full break-words rounded-lg border border-green-700/35 bg-green-600/10 px-3 py-2 text-sm text-foreground whitespace-pre-wrap">
-                        {message.text}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="w-fit max-w-[78%] ml-auto flex flex-col items-end gap-1">
-                    {(messageMediaPreviews.get(message.id) ?? []).map((item) => (
-                      <LocalAttachmentThumbnail
-                        key={item.url}
-                        url={item.url}
-                        kind={item.kind}
-                        name="Anexo enviado"
-                        size="relaxed"
-                      />
-                    ))}
-                    {userDisplayText && (
-                      <div className="whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm bg-primary text-primary-foreground">
-                        {userDisplayText}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-            })}
-
-            {conciergeSuggestion?.escalate && !loadingHistory && messages.length > 0 && (
-              <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm">
-                <div className="flex items-start gap-2">
-                  <Handshake className="h-5 w-5 shrink-0 text-amber-800 dark:text-amber-300 mt-0.5" />
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium text-amber-900 dark:text-amber-200">Especialista indicado nesta conversa</p>
-                    {loadingIndicatedAgronomo ? (
-                      <p className="text-muted-foreground text-xs mt-1 inline-flex items-center gap-2">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-                        Buscando agrônomo parceiro alinhado ao tema deste chat…
-                      </p>
-                    ) : indicatedAgronomo ? (
-                      <p className="text-foreground text-sm mt-1">
-                        Para este caso, indicamos <strong>{indicatedAgronomo.nome}</strong>
-                        {indicatedAgronomo.especialidade ? (
-                          <span className="text-muted-foreground"> — {indicatedAgronomo.especialidade}</span>
-                        ) : null}
-                        .
-                      </p>
-                    ) : (
-                      <p className="text-muted-foreground text-xs mt-1">
-                        Não há parceiro cadastrado para esta área ainda. Você ainda pode escolher outro agrônomo na lista.
-                      </p>
-                    )}
-                    <p className="text-muted-foreground text-xs mt-2">
-                      {conciergeSuggestion.reason ||
-                        'O IAgro entendeu que falar com um agrônomo ajuda neste ponto.'}
-                      {conciergeSuggestion.specialtyHint ? (
-                        <span className="block mt-1 text-foreground/90">
-                          Área: <strong>{conciergeSuggestion.specialtyHint}</strong>
-                        </span>
-                      ) : null}
-                    </p>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        className="text-xs"
-                        onClick={() => void autoEscalateSpecialist()}
-                        loading={escalating}
-                      >
-                        Encaminhar para {indicatedAgronomo?.nome ?? 'especialista'}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="text-xs"
-                        onClick={() => void openEscalateModal(conciergeSuggestion.specialtyHint)}
-                      >
-                        Escolher outro agrônomo
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="text-xs"
-                        onClick={() => setConciergeSuggestion(null)}
-                      >
-                        Dispensar
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {loadingSend && !humanHandoff && (
-              <div className="flex justify-start">
-                <div className="flex items-end gap-2 max-w-[78%]">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary animate-pulse">
-                    <Cloud className="h-4 w-4 text-white" />
-                  </div>
-                  <div className="w-fit max-w-full rounded-lg bg-card border border-border px-3 py-2 text-sm text-muted-foreground inline-flex items-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Gerando resposta...
-                  </div>
-                </div>
-              </div>
-            )}
-            {loadingSend && humanHandoff && (
-              <div className="flex justify-end">
-                <div className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground inline-flex items-center gap-2">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Enviando ao especialista...
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          <form className="space-y-2" onSubmit={handleSubmit}>
-            <div className="w-full space-y-2">
-              {pendingFiles.length > 0 && (
-                <div className="flex flex-wrap gap-2 px-1">
-                  {pendingFiles.map((file, index) => (
-                    <span
-                      key={`${file.name}-${index}`}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-2 py-1 text-xs"
-                    >
-                      {pendingPreviews.get(file) ? (
-                        <LocalAttachmentThumbnail
-                          url={pendingPreviews.get(file)!}
-                          kind={file.type === 'application/pdf' ? 'pdf' : 'image'}
-                          name={file.name}
-                          size="compact"
-                        />
-                      ) : file.type === 'application/pdf' ? (
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-muted">
-                          <FileText className="h-4 w-4 text-muted-foreground" aria-hidden />
-                        </span>
-                      ) : null}
-                      <span className="max-w-[120px] truncate">{file.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => removePendingFile(index)}
-                        className="text-muted-foreground hover:text-foreground shrink-0"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
+              {chat.hybridConversation?.id && chat.user?.id && chat.hybridConversation.atendimentoAtivo && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="shrink-0 text-xs"
+                  onClick={() => chat.setEncerrarModalOpen(true)}
+                >
+                  Encerrar atendimento
+                </Button>
               )}
-              <div className="relative">
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  onPaste={handlePaste}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                      event.preventDefault();
-                      if (canSend) {
-                        void handleSubmit(event as unknown as FormEvent<HTMLFormElement>);
-                      }
-                    }
-                  }}
-                  placeholder={
-                    humanHandoff
-                      ? 'Sua mensagem será enviada ao WhatsApp do agrônomo...'
-                      : 'Digite sua pergunta para o IAgro...'
-                  }
-                  rows={1}
-                  className={[
-                    'w-full h-14 resize-none overflow-hidden rounded-2xl border bg-input-background',
-                    'py-4 pr-36 pl-12 text-sm leading-5 focus:outline-none focus:ring-0 transition-colors',
-                    isRecording ? 'border-destructive' : 'border-border',
-                  ].join(' ')}
-                />
-                {humanHandoff ? (
-                  <span
-                    className="absolute left-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full cursor-not-allowed opacity-40 text-muted-foreground"
-                    title="Com especialista ativo, envie apenas texto aqui; use anexos em Minhas conversas ou sem intervenção humana."
-                    aria-label="Anexos indisponíveis com especialista ativo"
-                  >
-                    <Paperclip className="w-4 h-4" aria-hidden />
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIagroAttachmentModalOpen(true)}
-                    title="Anexar ficheiros ao IAgro"
-                    className="absolute left-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    aria-label="Abrir anexos para o IAgro"
-                  >
-                    <Paperclip className="w-4 h-4" aria-hidden />
-                  </button>
-                )}
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={toggleRecording}
-                    title={isRecording ? 'Parar gravação' : 'Transcrever áudio'}
-                    className={[
-                      'inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors',
-                      isRecording
-                        ? 'text-destructive hover:bg-destructive/10'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                    ].join(' ')}
-                  >
-                    {isRecording
-                      ? <MicOff className="w-4 h-4 animate-pulse" />
-                      : <Mic className="w-4 h-4" />}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={!canSend}
-                    className="inline-flex h-8 items-center gap-1 rounded-full bg-primary px-3 text-xs text-primary-foreground transition-all hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {loadingSend
-                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      : <SendHorizonal className="w-3.5 h-3.5" />}
-                    Enviar
-                  </button>
-                </div>
-              </div>
             </div>
-          </form>
-        </CardBody>
-      </Card>
+          </div>
+        )}
 
-      </div>
-
-      <div className={`fixed inset-0 z-40 ${historyOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}>
         <button
           type="button"
-          aria-label="Fechar histórico"
-          onClick={() => setHistoryOpen(false)}
-          className={`absolute inset-0 bg-black/40 transition-opacity ${historyOpen ? 'opacity-100' : 'opacity-0'}`}
-        />
-        <aside
-          className={`absolute top-0 right-0 h-full w-full max-w-md border-l border-border bg-card shadow-2xl transition-transform duration-300 ${
-            historyOpen ? 'translate-x-0' : 'translate-x-full'
-          }`}
+          onClick={() => chat.setHistoryOpen((prev) => !prev)}
+          className="absolute top-0 right-0 inline-flex h-11 w-11 items-center justify-center text-foreground transition-all hover:-translate-y-0.5 z-30 lg:right-0"
+          aria-label={chat.historyOpen ? 'Fechar histórico' : 'Abrir histórico'}
         >
-          <div className="flex items-center justify-between border-b border-border px-4 py-4">
-            <div>
-              <h2 className="text-lg">Histórico de Interações</h2>
-            </div>
-            <button type="button" onClick={() => setHistoryOpen(false)} className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="h-[calc(100%-76px)] overflow-y-auto p-4 space-y-2">
-            {loadingThreads && <p className="text-sm text-muted-foreground">Carregando conversas...</p>}
-            {!loadingThreads && threads.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nenhuma conversa registrada ainda.</p>
-            )}
-            {threads.map((item) => (
-              <div
-                key={item.threadId}
-                className={`w-full rounded-lg border px-3 py-2 transition-colors ${
-                  threadId === item.threadId ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted'
-                }`}
-              >
-                <button type="button" onClick={() => void openThread(item.threadId)} className="w-full text-left">
-                  <p className="text-sm text-foreground truncate">{item.title}</p>
-                  <div className="mt-1 flex items-center justify-between gap-2">
-                    <p className="text-xs text-muted-foreground">{item.totalMessages} mensagens</p>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleToggleFavorite(item);
-                        }}
-                        className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
-                          item.isFavorite ? 'text-yellow-500 hover:bg-yellow-500/10' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                        }`}
-                        title={item.isFavorite ? 'Desfavoritar' : 'Favoritar'}
-                      >
-                        <Star className={`w-4 h-4 ${item.isFavorite ? 'fill-current' : ''}`} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleDeleteThread(item);
-                        }}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                        title="Excluir interação"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </button>
-              </div>
-            ))}
-          </div>
-        </aside>
+          <History className="w-5 h-5" />
+        </button>
+
+        <Card>
+          <CardBody className="space-y-4">
+            <MessageArea
+              messages={chat.messages}
+              loadingHistory={chat.loadingHistory}
+              loadingSend={chat.loadingSend}
+              humanHandoff={chat.humanHandoff}
+              messageMediaPreviews={chat.messageMediaPreviews}
+              conciergeSuggestion={chat.conciergeSuggestion}
+              indicatedAgronomo={chat.indicatedAgronomo}
+              loadingIndicatedAgronomo={chat.loadingIndicatedAgronomo}
+              escalating={chat.escalating}
+              userId={chat.user?.id}
+              quickActions={IAGRO_QUICK_ACTIONS}
+              onApplyQuickPrompt={chat.applyQuickPrompt}
+              onApplyPlantAnalysis={chat.applyPlantAnalysis}
+              onAutoEscalateSpecialist={() => void chat.autoEscalateSpecialist()}
+              onOpenEscalateModal={chat.openEscalateModal}
+              onDismissConcierge={() => chat.setConciergeSuggestion(null)}
+            />
+            <ChatInput
+              input={chat.input}
+              setInput={chat.setInput}
+              loadingSend={chat.loadingSend}
+              canSend={chat.canSend}
+              humanHandoff={chat.humanHandoff}
+              isRecording={chat.isRecording}
+              pendingFiles={chat.pendingFiles}
+              pendingPreviews={chat.pendingPreviews}
+              inputRef={chat.inputRef}
+              onSubmit={(e) => void chat.handleSubmit(e)}
+              onPaste={chat.handlePaste}
+              onToggleRecording={chat.toggleRecording}
+              onRemovePendingFile={chat.removePendingFile}
+              onOpenAttachmentModal={() => chat.setIagroAttachmentModalOpen(true)}
+            />
+          </CardBody>
+        </Card>
       </div>
 
+      <ThreadList
+        threads={chat.threads}
+        threadId={chat.threadId}
+        loadingThreads={chat.loadingThreads}
+        isOpen={chat.historyOpen}
+        onClose={() => chat.setHistoryOpen(false)}
+        onOpenThread={(id) => void chat.openThread(id)}
+        onToggleFavorite={(t) => void chat.handleToggleFavorite(t)}
+        onDeleteThread={chat.handleDeleteThread}
+      />
+
+      {/* Modal: escalate to specialist */}
       <Modal
-        isOpen={escalateOpen}
-        onClose={() => {
-          if (!escalating) {
-            setEscalateOpen(false);
-            setLoadingEscalateList(false);
-          }
-        }}
+        isOpen={chat.escalateOpen}
+        onClose={() => { if (!chat.escalating) { chat.setEscalateOpen(false); } }}
         title="Enviar para especialista"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setEscalateOpen(false)} disabled={escalating}>
+            <Button variant="ghost" onClick={() => chat.setEscalateOpen(false)} disabled={chat.escalating}>
               Cancelar
             </Button>
-            <Button onClick={() => void confirmEscalate()} loading={escalating}>
+            <Button onClick={() => void chat.confirmEscalate()} loading={chat.escalating}>
               Continuar em Minhas conversas
             </Button>
           </>
@@ -1223,37 +129,35 @@ export function IAgro() {
         <label className="block text-xs text-muted-foreground mb-1">Agrônomo parceiro</label>
         <select
           className="w-full rounded-lg border border-border bg-input-background px-3 py-2 text-sm"
-          value={escalateAgronomoId}
-          onChange={(e) => setEscalateAgronomoId(e.target.value)}
-          disabled={loadingEscalateList}
+          value={chat.escalateAgronomoId}
+          onChange={(e) => chat.setEscalateAgronomoId(e.target.value)}
+          disabled={chat.loadingEscalateList}
         >
-          {loadingEscalateList ? (
+          {chat.loadingEscalateList ? (
             <option value="">Carregando lista de agrônomos…</option>
-          ) : agronomosPick.length === 0 ? (
+          ) : chat.agronomosPick.length === 0 ? (
             <option value="">Nenhum agrônomo disponível. Cadastre parceiros ou verifique a página Agrônomos Parceiros.</option>
           ) : (
-            agronomosPick.map((a) => (
+            chat.agronomosPick.map((a) => (
               <option key={String(a.id)} value={String(a.id)}>
-                {a.nome}
-                {a.whatsapp ? '' : ' (sem WhatsApp)'}
+                {a.nome}{a.whatsapp ? '' : ' (sem WhatsApp)'}
               </option>
             ))
           )}
         </select>
       </Modal>
 
+      {/* Modal: delete thread */}
       <Modal
-        isOpen={Boolean(threadToDelete)}
-        onClose={() => {
-          if (!deletingThread) setThreadToDelete(null);
-        }}
+        isOpen={Boolean(chat.threadToDelete)}
+        onClose={() => { if (!chat.deletingThread) chat.setThreadToDelete(null); }}
         title="Excluir interação"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setThreadToDelete(null)} disabled={deletingThread}>
+            <Button variant="ghost" onClick={() => chat.setThreadToDelete(null)} disabled={chat.deletingThread}>
               Cancelar
             </Button>
-            <Button variant="danger" onClick={() => void confirmDeleteThread()} loading={deletingThread}>
+            <Button variant="danger" onClick={() => void chat.confirmDeleteThread()} loading={chat.deletingThread}>
               Excluir
             </Button>
           </>
@@ -1261,15 +165,16 @@ export function IAgro() {
       >
         <p className="text-sm text-muted-foreground">
           Tem certeza que deseja excluir a interação
-          {threadToDelete?.title ? ` "${threadToDelete.title}"` : ''}?
+          {chat.threadToDelete?.title ? ` "${chat.threadToDelete.title}"` : ''}?
           <br />
           Essa ação remove a conversa do histórico.
         </p>
       </Modal>
 
+      {/* Modal: attachment picker */}
       <FileAttachmentPickerModal
-        isOpen={iagroAttachmentModalOpen}
-        onClose={() => setIagroAttachmentModalOpen(false)}
+        isOpen={chat.iagroAttachmentModalOpen}
+        onClose={() => chat.setIagroAttachmentModalOpen(false)}
         title="Anexar ficheiros"
         description={
           <p>
@@ -1280,17 +185,18 @@ export function IAgro() {
         accept="image/*,.txt,.csv,.json,.md,.pdf,.doc,.docx"
         multiple
         onFilesSelected={(files) => {
-          handleFilesSelected(files);
-          setIagroAttachmentModalOpen(false);
+          chat.handleFilesSelected(files);
+          chat.setIagroAttachmentModalOpen(false);
         }}
       />
 
+      {/* Modal: encerrar atendimento */}
       <EncerrarAtendimentoModal
-        isOpen={encerrarModalOpen}
-        onClose={() => setEncerrarModalOpen(false)}
-        onConfirmSemAvaliacao={() => void encerrarSemAvaliacaoIAgro()}
-        onConfirmComAvaliacao={(a) => void encerrarComAvaliacaoIAgro(a)}
-        loading={encerrando}
+        isOpen={chat.encerrarModalOpen}
+        onClose={() => chat.setEncerrarModalOpen(false)}
+        onConfirmSemAvaliacao={() => void chat.encerrarSemAvaliacaoIAgro()}
+        onConfirmComAvaliacao={(a) => void chat.encerrarComAvaliacaoIAgro(a)}
+        loading={chat.encerrando}
       />
     </div>
   );
