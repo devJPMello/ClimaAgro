@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Outlet, Link, useLocation } from 'react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router';
 import {
   Cloud,
   LayoutDashboard,
@@ -16,7 +16,9 @@ import {
   Handshake,
   MessagesSquare,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useClerk, useUser } from '@clerk/clerk-react';
+import { useUnreadAlerts } from '../../lib/hooks/useUnreadAlerts';
 
 const navigationMain = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -34,12 +36,31 @@ const perfilNavItem = { name: 'Perfil', path: '/perfil', icon: User };
 
 export function RootLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { signOut } = useClerk();
   const { user } = useUser();
+  const { count: alertCount, markAllSeen } = useUnreadAlerts();
+  const toastShownRef = useRef(false);
 
   const navigation = useMemo(() => {
     return [...navigationMain, perfilNavItem];
   }, []);
+
+  useEffect(() => {
+    if (toastShownRef.current || alertCount === 0) return;
+    toastShownRef.current = true;
+    toast.warning(
+      `${alertCount} alerta${alertCount > 1 ? 's' : ''} climático${alertCount > 1 ? 's' : ''} crítico${alertCount > 1 ? 's' : ''} na sua região`,
+      {
+        description: 'Veja os detalhes na página de Alertas.',
+        duration: 8000,
+        action: {
+          label: 'Ver alertas',
+          onClick: () => void navigate('/alertas'),
+        },
+      },
+    );
+  }, [alertCount, navigate]);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -95,19 +116,30 @@ export function RootLayout() {
             {navigation.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
+              const isAlertas = item.path === '/alertas';
 
               return (
                 <Link
                   key={item.path}
                   to={item.path}
-                  onClick={() => setSidebarOpen(false)}
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    if (isAlertas) markAllSeen();
+                  }}
                   className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${
                     isActive
                       ? 'bg-sidebar-primary text-sidebar-primary-foreground shadow-lg'
                       : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground'
                   }`}
                 >
-                  <Icon className="w-5 h-5 flex-shrink-0" />
+                  <div className="relative flex-shrink-0">
+                    <Icon className="w-5 h-5" />
+                    {isAlertas && alertCount > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-0.5 flex items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-white leading-none">
+                        {alertCount > 99 ? '99+' : alertCount}
+                      </span>
+                    )}
+                  </div>
                   <span>{item.name}</span>
                 </Link>
               );
