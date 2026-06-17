@@ -53,6 +53,33 @@ import { useNavigate } from 'react-router';
 
 type LocalMediaItem = { url: string; kind: LocalAttachmentKind };
 
+const IAGRO_MAX_FILE_BYTES = 8 * 1024 * 1024; // multer limit no backend
+
+function validateIAgroFiles(files: File[]): { valid: File[]; rejected: string[] } {
+  const valid: File[] = [];
+  const rejected: string[] = [];
+  for (const file of files) {
+    if (file.size > IAGRO_MAX_FILE_BYTES) {
+      rejected.push(`"${file.name}" (${(file.size / 1024 / 1024).toFixed(1)} MB) — máx. 8 MB`);
+      continue;
+    }
+    const isImage = file.type.startsWith('image/');
+    const isPdf = file.type === 'application/pdf';
+    const isText = /^text\//.test(file.type) || file.type === 'application/json';
+    const isDoc =
+      file.type === 'application/msword' ||
+      file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const ext = (file.name.split('.').pop() ?? '').toLowerCase();
+    const allowedByExt = ['md', 'csv', 'txt', 'json'].includes(ext);
+    if (!isImage && !isPdf && !isText && !isDoc && !allowedByExt) {
+      rejected.push(`"${file.name}" — tipo de ficheiro não suportado`);
+      continue;
+    }
+    valid.push(file);
+  }
+  return { valid, rejected };
+}
+
 export function IAgro() {
   const navigate = useNavigate();
   const { user } = useUser();
@@ -464,14 +491,28 @@ export function IAgro() {
     if (!fileList) return;
     const files = Array.from(fileList);
     if (files.length === 0) return;
+
+    const { valid, rejected } = validateIAgroFiles(files);
+
+    if (rejected.length > 0) {
+      toast.error(
+        rejected.length === 1
+          ? `Ficheiro rejeitado: ${rejected[0]}`
+          : `${rejected.length} ficheiros rejeitados:\n${rejected.slice(0, 3).join('\n')}`,
+        { duration: 6000 }
+      );
+    }
+
+    if (valid.length === 0) return;
+
     const newPreviews = new Map(pendingPreviews);
-    files.forEach((f) => {
+    valid.forEach((f) => {
       if (f.type.startsWith('image/') || f.type === 'application/pdf') {
         newPreviews.set(f, URL.createObjectURL(f));
       }
     });
     setPendingPreviews(newPreviews);
-    setPendingFiles((prev) => [...prev, ...files].slice(0, 6));
+    setPendingFiles((prev) => [...prev, ...valid].slice(0, 6));
   }
 
   function removePendingFile(index: number) {
