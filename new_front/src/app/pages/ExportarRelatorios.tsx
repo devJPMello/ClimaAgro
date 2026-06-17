@@ -22,6 +22,13 @@ import {
 
 const PAGE_SIZE_HISTORICO = 4;
 
+type ExportStep = 'coletando' | 'gerando' | 'registrando';
+const EXPORT_STEPS: Array<{ key: ExportStep; label: string }> = [
+  { key: 'coletando', label: 'Coletando dados' },
+  { key: 'gerando', label: 'Gerando arquivo' },
+  { key: 'registrando', label: 'Salvando registro' },
+];
+
 type FiltroTipoHistorico = 'todos' | ReportTipoKey;
 type OrdenacaoHistorico = 'recente' | 'tipo_asc' | 'local_asc';
 
@@ -49,7 +56,8 @@ export function ExportarRelatorios() {
   const [anoInicio, setAnoInicio] = useState(yearOptions[Math.min(2, yearOptions.length - 1)]?.value ?? '2024');
   const [anoFim, setAnoFim] = useState(yearOptions[0]?.value ?? '2026');
   const [formato, setFormato] = useState('pdf');
-  const [loading, setLoading] = useState(false);
+  const [exportStep, setExportStep] = useState<ExportStep | null>(null);
+  const loading = exportStep !== null;
   const [loadingHistorico, setLoadingHistorico] = useState(true);
   const [exportacoes, setExportacoes] = useState<ReportExportItemDto[]>([]);
   const [paginaHistorico, setPaginaHistorico] = useState(1);
@@ -138,7 +146,7 @@ export function ExportarRelatorios() {
       toast.error('Selecione uma UF para definir o escopo do relatório.');
       return;
     }
-    setLoading(true);
+    setExportStep('coletando');
     try {
       const local = displayLocalidadeLabel(localidade);
       const tipo = labelTipoRelatorio(tipoRelatorio);
@@ -157,6 +165,7 @@ export function ExportarRelatorios() {
         endDate,
       });
 
+      setExportStep('gerando');
       downloadReportFile({
         titulo: tipo,
         local,
@@ -171,6 +180,7 @@ export function ExportarRelatorios() {
         );
       }
 
+      setExportStep('registrando');
       await createReportExport({
         tipo,
         local,
@@ -184,7 +194,7 @@ export function ExportarRelatorios() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao gerar ou registrar exportação.');
     } finally {
-      setLoading(false);
+      setExportStep(null);
     }
   };
 
@@ -324,6 +334,41 @@ export function ExportarRelatorios() {
                   </li>
                 </ul>
               </div>
+
+              {exportStep && (
+                <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+                  <div className="flex items-center justify-between mb-2">
+                    {EXPORT_STEPS.map((s, i) => {
+                      const stepIndex = EXPORT_STEPS.findIndex((x) => x.key === exportStep);
+                      const done = i < stepIndex;
+                      const active = i === stepIndex;
+                      return (
+                        <div key={s.key} className="flex flex-1 items-center gap-0">
+                          <div className="flex flex-col items-center gap-1">
+                            <div
+                              className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium transition-colors ${
+                                done
+                                  ? 'bg-primary text-primary-foreground'
+                                  : active
+                                  ? 'bg-primary/20 border-2 border-primary text-primary'
+                                  : 'bg-muted border border-border text-muted-foreground'
+                              }`}
+                            >
+                              {done ? <CheckCircle className="w-4 h-4" /> : active ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : i + 1}
+                            </div>
+                            <span className={`text-[11px] whitespace-nowrap ${active ? 'text-primary font-medium' : done ? 'text-foreground' : 'text-muted-foreground'}`}>
+                              {s.label}
+                            </span>
+                          </div>
+                          {i < EXPORT_STEPS.length - 1 && (
+                            <div className={`flex-1 h-0.5 mx-1 mb-4 rounded ${i < stepIndex ? 'bg-primary' : 'bg-border'}`} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <Button
                 variant="primary"

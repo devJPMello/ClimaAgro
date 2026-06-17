@@ -9,10 +9,11 @@ import {
 } from 'recharts';
 import { Bookmark, Calendar, Trash2, TrendingDown, TrendingUp, Minus } from 'lucide-react';
 import { EmptyState } from '../components/ui/EmptyState';
+import { LazyRender } from '../components/ui/LazyRender';
 import {
   getClimateSeriesByUf,
-  listClimateUfs,
 } from '../../lib/api/climateApi';
+import { useClimateUfs } from '../../lib/hooks/useClimateUfs';
 import {
   listProductivityProductLabels,
   listProductivityRecords,
@@ -306,6 +307,7 @@ export function SeriesTemporais() {
   const [uf, setUf] = useState('');
   const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([UF_SELECT_PLACEHOLDER_OPTION]);
   const profileUf = useProfileUf();
+  const { ufs: climateUfs } = useClimateUfs();
 
   useEffect(() => {
     if (uf !== '') return; // usuário já escolheu algo
@@ -395,26 +397,18 @@ export function SeriesTemporais() {
   }, [uf]);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const data = await listClimateUfs();
-        if (!cancelled && data.length) {
-          const onlyUfs = data
-            .filter((x) => /^[A-Z]{2}$/.test(String(x.value || '').trim().toUpperCase()))
-            .map((x) => {
-              const value = String(x.value || '').trim().toUpperCase();
-              return { value, label: formatUfLabel(value) };
-            });
-          if (onlyUfs.length) {
-            setUfOptions([UF_SELECT_PLACEHOLDER_OPTION, UF_ALL_OPTION, ...onlyUfs]);
-            if (uf && uf !== 'ALL' && !onlyUfs.some((x) => x.value === uf)) setUf('');
-          }
-        }
-      } catch { /* fallback em memória */ }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+    if (!climateUfs.length) return;
+    const onlyUfs = climateUfs
+      .filter((x) => /^[A-Z]{2}$/.test(String(x.value || '').trim().toUpperCase()))
+      .map((x) => {
+        const value = String(x.value || '').trim().toUpperCase();
+        return { value, label: formatUfLabel(value) };
+      });
+    if (onlyUfs.length) {
+      setUfOptions([UF_SELECT_PLACEHOLDER_OPTION, UF_ALL_OPTION, ...onlyUfs]);
+      if (uf && uf !== 'ALL' && !onlyUfs.some((x) => x.value === uf)) setUf('');
+    }
+  }, [climateUfs]);
 
   async function loadSeriesVariable(variavel: ClimateSeriesVariable) {
     if (!isUfValid(uf)) {
@@ -660,16 +654,18 @@ export function SeriesTemporais() {
               ) : dadosProdutividade.length === 0 && !loading ? (
                 <EmptyState icon={Calendar} title="Sem dados de produtividade" description="Rode o seed ou sync no backend e verifique se existe produtividade para esta UF/cultura." />
               ) : (
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={dadosProdutividade}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
-                    <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-                    <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} formatter={formatTooltipProdutividade} />
-                    <Legend />
-                    <Line type="monotone" dataKey="produtividadeNum" stroke="#1976D2" strokeWidth={3} dot={{ fill: '#1976D2', r: 5 }} activeDot={{ r: 7 }} connectNulls name="Produtividade (t/ha)" />
-                  </LineChart>
-                </ResponsiveContainer>
+                <LazyRender height={300}>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={dadosProdutividade}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
+                      <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
+                      <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} formatter={formatTooltipProdutividade} />
+                      <Legend />
+                      <Line type="monotone" dataKey="produtividadeNum" stroke="#1976D2" strokeWidth={3} dot={{ fill: '#1976D2', r: 5 }} activeDot={{ r: 7 }} connectNulls name="Produtividade (t/ha)" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </LazyRender>
               )}
             </CardBody>
           </Card>
@@ -685,18 +681,20 @@ export function SeriesTemporais() {
               ) : dadosClimaticos.length === 0 && !loading ? (
                 <EmptyState icon={Calendar} title="Sem dados climáticos no período" description="Sincronize dados (POST /api/climate/sync) ou importe medições para esta UF." />
               ) : (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={dadosClimaticos}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
-                    <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-                    <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} />
-                    <Legend />
-                    <Bar dataKey="temperatura" fill="#F97316" name="Temperatura (°C)" />
-                    <Bar dataKey="precipitacao" fill="#42A5F5" name="Precipitação (mm)" />
-                    <Bar dataKey="umidade" fill="#10B981" name="Umidade (%)" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <LazyRender height={300}>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={dadosClimaticos}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
+                      <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
+                      <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} />
+                      <Legend />
+                      <Bar dataKey="temperatura" fill="#F97316" name="Temperatura (°C)" />
+                      <Bar dataKey="precipitacao" fill="#42A5F5" name="Precipitação (mm)" />
+                      <Bar dataKey="umidade" fill="#10B981" name="Umidade (%)" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </LazyRender>
               )}
             </CardBody>
           </Card>
@@ -714,18 +712,20 @@ export function SeriesTemporais() {
               ) : dadosComparativos.length === 0 && !loading ? (
                 <EmptyState icon={Calendar} title="Sem dados comparativos" description="Verifique se existem dados de clima e produtividade para esta UF, cultura e intervalo de anos." />
               ) : (
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={dadosComparativos}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
-                    <YAxis yAxisId="left" stroke="#64748b" style={{ fontSize: '12px' }} />
-                    <YAxis yAxisId="right" orientation="right" stroke="#64748b" style={{ fontSize: '12px' }} />
-                    <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} />
-                    <Legend />
-                    <Line yAxisId="left" type="monotone" dataKey="clima" stroke="#F97316" strokeWidth={2} dot={{ fill: '#F97316' }} name="Chuva acumulada (mm)" />
-                    <Line yAxisId="right" type="monotone" dataKey="produtividade" stroke="#1976D2" strokeWidth={2} dot={{ fill: '#1976D2' }} name="Produtividade (t/ha)" />
-                  </LineChart>
-                </ResponsiveContainer>
+                <LazyRender height={300}>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={dadosComparativos}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
+                      <YAxis yAxisId="left" stroke="#64748b" style={{ fontSize: '12px' }} />
+                      <YAxis yAxisId="right" orientation="right" stroke="#64748b" style={{ fontSize: '12px' }} />
+                      <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} />
+                      <Legend />
+                      <Line yAxisId="left" type="monotone" dataKey="clima" stroke="#F97316" strokeWidth={2} dot={{ fill: '#F97316' }} name="Chuva acumulada (mm)" />
+                      <Line yAxisId="right" type="monotone" dataKey="produtividade" stroke="#1976D2" strokeWidth={2} dot={{ fill: '#1976D2' }} name="Produtividade (t/ha)" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </LazyRender>
               )}
             </CardBody>
           </Card>
@@ -811,6 +811,7 @@ export function SeriesTemporais() {
                   </CardDescription>
                 </CardHeader>
                 <CardBody>
+                  <LazyRender height={340}>
                   <ResponsiveContainer width="100%" height={340}>
                     <ComposedChart data={dadosAnuais} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -851,6 +852,7 @@ export function SeriesTemporais() {
                       />
                     </ComposedChart>
                   </ResponsiveContainer>
+                  </LazyRender>
 
                   {/* Legenda de cores */}
                   <div className="mt-4 flex flex-wrap gap-3 text-xs text-muted-foreground">

@@ -5,7 +5,8 @@ import { MapPin } from 'lucide-react';
 import { BrazilMap } from '../components/maps/BrazilMap';
 import { MapMetricLegend } from '../components/maps/MapMetricLegend';
 import { normalizeBrazilMapMetric, type BrazilMapMetric } from '../components/maps/brazilMapConfig';
-import { getClimateSeriesByUf, listClimateUfs } from '../../lib/api/climateApi';
+import { getClimateSeriesByUf } from '../../lib/api/climateApi';
+import { useClimateUfs } from '../../lib/hooks/useClimateUfs';
 import { CLIMATE_PERIOD_OPTIONS } from '../../lib/filters/appFilters';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
@@ -73,6 +74,7 @@ export function MapaClimatico() {
     { value: '', label: 'Selecione ou "Todos os estados"' },
     UF_ALL_OPTION,
   ]);
+  const { ufs: climateUfs } = useClimateUfs();
   const profileUf = useProfileUf();
 
   // Na primeira visita (uf vazio), pré-seleciona a UF do perfil ou "Todos os estados"
@@ -87,29 +89,17 @@ export function MapaClimatico() {
   }, [metric, setMetric]);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const data = await listClimateUfs();
-        if (!cancelled && data.length) {
-          const fromApi = data
-            .map((x) => {
-              const value = String(x.value ?? '').trim();
-              if (value === 'ALL') return null;
-              const sigla = value.toUpperCase();
-              return { value: sigla, label: /^[A-Z]{2}$/.test(sigla) ? formatUfLabel(sigla) : x.label };
-            })
-            .filter((o): o is { value: string; label: string } => o != null);
-          setUfOptions([UF_ALL_OPTION, ...fromApi]);
-        }
-      } catch {
-        // fallback local
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!climateUfs.length) return;
+    const fromApi = climateUfs
+      .map((x) => {
+        const value = String(x.value ?? '').trim();
+        if (value === 'ALL') return null;
+        const sigla = value.toUpperCase();
+        return { value: sigla, label: /^[A-Z]{2}$/.test(sigla) ? formatUfLabel(sigla) : x.label };
+      })
+      .filter((o): o is { value: string; label: string } => o != null);
+    setUfOptions([UF_ALL_OPTION, ...fromApi]);
+  }, [climateUfs]);
 
   const { status, data, error, reload } = useAsyncResource(
     async () => {

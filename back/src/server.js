@@ -14,13 +14,21 @@ const logger = require('./lib/logger');
 
 const RATE_LIMIT_MSG = { success: false, message: 'Muitas requisições. Tente novamente em 1 minuto.' };
 
+function makeHandler(windowMs) {
+  return (req, res, _next, options) => {
+    const retryAfterSecs = Math.ceil((options?.windowMs ?? windowMs) / 1000);
+    res.setHeader('Retry-After', retryAfterSecs);
+    res.status(429).json(RATE_LIMIT_MSG);
+  };
+}
+
 // 100 req/min — dados climáticos, produtividade, alertas, geo
 const climateLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: Number(process.env.CLIMATE_RATE_LIMIT_PER_MIN || 100),
   standardHeaders: true,
   legacyHeaders: false,
-  message: RATE_LIMIT_MSG,
+  handler: makeHandler(60 * 1000),
 });
 
 // 30 req/min — autenticação, perfil, agrônomos, chat híbrido
@@ -29,7 +37,7 @@ const userLimiter = rateLimit({
   max: Number(process.env.USER_RATE_LIMIT_PER_MIN || 30),
   standardHeaders: true,
   legacyHeaders: false,
-  message: RATE_LIMIT_MSG,
+  handler: makeHandler(60 * 1000),
 });
 
 // 20 req/min — relatórios e superset (I/O pesado, PDF, BI)
@@ -38,7 +46,16 @@ const reportLimiter = rateLimit({
   max: Number(process.env.REPORT_RATE_LIMIT_PER_MIN || 20),
   standardHeaders: true,
   legacyHeaders: false,
-  message: RATE_LIMIT_MSG,
+  handler: makeHandler(60 * 1000),
+});
+
+// 20 req/min — endpoints de IA (fallback global; ai.js aplica limites por rota também)
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: Number(process.env.AI_RATE_LIMIT_PER_MIN || 20),
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: makeHandler(60 * 1000),
 });
 
 const app = express();
@@ -91,6 +108,7 @@ app.use(
   userLimiter
 );
 app.use(['/api/reports', '/api/superset'], reportLimiter);
+app.use('/api/ai', aiLimiter);
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
