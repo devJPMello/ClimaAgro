@@ -6,6 +6,10 @@ export const STORAGE_KEYS = {
   ALERTAS_SEVERIDADE: 'climaagro.pref.alertas.severidade',
   ALERTAS_TIPO: 'climaagro.pref.alertas.tipo',
   ALERTAS_UF: 'climaagro.pref.alertas.uf',
+  ALERTAS_BUSCA: 'climaagro.pref.alertas.busca',
+
+  // Séries Temporais — análises salvas
+  SERIES_SAVED_QUERIES: 'climaagro.pref.series.savedQueries',
 
   // Notificações
   NOTIF_ALERTAS_SEEN: 'climaagro.notif.alertas.seen',

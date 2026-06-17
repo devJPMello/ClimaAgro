@@ -8,7 +8,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { Modal } from '../components/ui/Modal';
 import {
   AlertTriangle, MapPin,
-  ChevronLeft, ChevronRight, Eye, Handshake,
+  ChevronLeft, ChevronRight, Eye, Handshake, Search,
 } from 'lucide-react';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
@@ -108,6 +108,7 @@ export function Alertas() {
   const [severidadeFiltro, setSeveridadeFiltro] = usePersistedState(STORAGE_KEYS.ALERTAS_SEVERIDADE, 'todos');
   const [tipoFiltro, setTipoFiltro] = usePersistedState(STORAGE_KEYS.ALERTAS_TIPO, 'todos');
   const [ufFiltro, setUfFiltro] = usePersistedState(STORAGE_KEYS.ALERTAS_UF, 'ALL');
+  const [busca, setBusca] = usePersistedState(STORAGE_KEYS.ALERTAS_BUSCA, '');
   const [page, setPage] = useState(1);
   const profileUf = useProfileUf();
 
@@ -119,7 +120,7 @@ export function Alertas() {
 
   useEffect(() => {
     setPage(1);
-  }, [severidadeFiltro, tipoFiltro, ufFiltro]);
+  }, [severidadeFiltro, tipoFiltro, ufFiltro, busca]);
 
   const { status, data, error, reload } = useAsyncResource(
     () =>
@@ -132,8 +133,8 @@ export function Alertas() {
   }, [ufFiltro, setUfFiltro]);
 
   const filtros = useMemo(
-    () => ({ severidadeFiltro, tipoFiltro }),
-    [severidadeFiltro, tipoFiltro],
+    () => ({ severidadeFiltro, tipoFiltro, busca }),
+    [severidadeFiltro, tipoFiltro, busca],
   );
 
   const filterItems = (items: ClimateAlertDto[]) =>
@@ -141,6 +142,15 @@ export function Alertas() {
       if (filtros.severidadeFiltro !== 'todos' && alerta.severidade !== filtros.severidadeFiltro) return false;
       if (filtros.tipoFiltro !== 'todos' && !alerta.tipo.toLowerCase().includes(filtros.tipoFiltro.toLowerCase()))
         return false;
+      if (filtros.busca.trim()) {
+        const q = filtros.busca.toLowerCase();
+        const match =
+          alerta.tipo.toLowerCase().includes(q) ||
+          alerta.local.toLowerCase().includes(q) ||
+          (alerta.recomendacao?.toLowerCase().includes(q) ?? false) ||
+          (alerta.impactoEstimado?.toLowerCase().includes(q) ?? false);
+        if (!match) return false;
+      }
       return true;
     });
 
@@ -237,6 +247,21 @@ export function Alertas() {
                     </div>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:flex-wrap sm:gap-3">
                       <div className="sm:w-52">
+                        <div className="space-y-1.5">
+                          <label className="block text-sm text-foreground">Buscar</label>
+                          <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+                            <input
+                              type="search"
+                              value={busca}
+                              onChange={(e) => setBusca(e.target.value)}
+                              placeholder="Tipo, local, recomendação..."
+                              className="w-full pl-9 pr-3 py-2.5 bg-input-background border border-border rounded-lg text-sm text-foreground transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder:text-muted-foreground"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="sm:w-52">
                         <Select
                           label="Severidade"
                           value={severidadeFiltro}
@@ -276,10 +301,10 @@ export function Alertas() {
                           options={ALERTAS_UF_OPTIONS}
                         />
                       </div>
-                      {(severidadeFiltro !== 'todos' || tipoFiltro !== 'todos' || ufFiltro !== 'ALL') && (
+                      {(severidadeFiltro !== 'todos' || tipoFiltro !== 'todos' || ufFiltro !== 'ALL' || busca !== '') && (
                         <button
                           type="button"
-                          onClick={() => { setSeveridadeFiltro('todos'); setTipoFiltro('todos'); setUfFiltro('ALL'); }}
+                          onClick={() => { setSeveridadeFiltro('todos'); setTipoFiltro('todos'); setUfFiltro('ALL'); setBusca(''); }}
                           className="text-xs text-primary hover:underline sm:pb-2.5 text-left"
                         >
                           Limpar

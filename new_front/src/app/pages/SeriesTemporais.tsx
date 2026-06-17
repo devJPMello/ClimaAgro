@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
@@ -7,7 +7,7 @@ import {
   ComposedChart, Cell, ReferenceLine,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { Calendar, TrendingDown, TrendingUp, Minus } from 'lucide-react';
+import { Bookmark, Calendar, Trash2, TrendingDown, TrendingUp, Minus } from 'lucide-react';
 import { EmptyState } from '../components/ui/EmptyState';
 import {
   getClimateSeriesByUf,
@@ -23,6 +23,17 @@ import { buildProductivityCropSelectOptions, getProductivityYearOptions } from '
 import type { ClimateSeriesVariable } from '../../lib/api/contracts/climate';
 import { formatUfLabel, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
 import { useProfileUf } from '../../lib/hooks/useProfileUf';
+import { usePersistedState } from '../../lib/hooks/usePersistedState';
+import { STORAGE_KEYS } from '../../lib/storage/storageKeys';
+
+type SavedQuery = {
+  id: string;
+  name: string;
+  uf: string;
+  cultura: string;
+  startYear: string;
+  endYear: string;
+};
 
 type ProdRow = { mes: string; produtividade: number | null; produtividadeNum?: number | null };
 type ClimaRow = { mes: string; temperatura: number; precipitacao: number; umidade: number };
@@ -317,6 +328,38 @@ export function SeriesTemporais() {
   const [dadosClimaticos, setDadosClimaticos] = useState<ClimaRow[]>([]);
   const [dadosComparativos, setDadosComparativos] = useState<CompRow[]>([]);
   const [activeTab, setActiveTab] = useState<'serie' | 'correlacao'>('serie');
+  const [savedQueries, setSavedQueries] = usePersistedState<SavedQuery[]>(STORAGE_KEYS.SERIES_SAVED_QUERIES, []);
+  const [loadedQueryId, setLoadedQueryId] = useState('');
+  const [savingName, setSavingName] = useState<string | null>(null);
+  const saveInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (savingName !== null) saveInputRef.current?.focus();
+  }, [savingName]);
+
+  function handleLoadQuery(id: string) {
+    const q = savedQueries.find((item) => item.id === id);
+    if (!q) { setLoadedQueryId(''); return; }
+    setUf(q.uf);
+    setCultura(q.cultura);
+    setStartYear(q.startYear);
+    setEndYear(q.endYear);
+    setLoadedQueryId(id);
+  }
+
+  function handleSaveQuery() {
+    const name = savingName?.trim();
+    if (!name) return;
+    const id = String(Date.now());
+    setSavedQueries((prev) => [...prev, { id, name, uf, cultura, startYear, endYear }]);
+    setLoadedQueryId(id);
+    setSavingName(null);
+  }
+
+  function handleDeleteQuery(id: string) {
+    setSavedQueries((prev) => prev.filter((q) => q.id !== id));
+    if (loadedQueryId === id) setLoadedQueryId('');
+  }
 
   const dadosAnuais = useMemo(
     () => aggregateAnual(dadosClimaticos, dadosProdutividade),
@@ -515,6 +558,63 @@ export function SeriesTemporais() {
               Atualizar gráficos
             </Button>
             {error && <span className="text-sm text-destructive">{error}</span>}
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-border flex flex-col sm:flex-row sm:items-end gap-3">
+            {savedQueries.length > 0 && (
+              <div className="flex items-end gap-2 flex-1 min-w-0">
+                <div className="flex-1 min-w-0">
+                  <Select
+                    label="Carregar análise salva"
+                    value={loadedQueryId}
+                    onChange={(e) => handleLoadQuery(e.target.value)}
+                    options={[
+                      { value: '', label: 'Selecionar...' },
+                      ...savedQueries.map((q) => ({ value: q.id, label: q.name })),
+                    ]}
+                  />
+                </div>
+                {loadedQueryId && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteQuery(loadedQueryId)}
+                    className="mb-0.5 p-2.5 rounded-lg border border-border text-muted-foreground hover:text-destructive hover:border-destructive/40 hover:bg-destructive/5 transition-all"
+                    title="Excluir esta análise salva"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {savingName !== null ? (
+              <div className="flex items-center gap-2">
+                <input
+                  ref={saveInputRef}
+                  type="text"
+                  value={savingName}
+                  onChange={(e) => setSavingName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveQuery();
+                    if (e.key === 'Escape') setSavingName(null);
+                  }}
+                  placeholder="Nome da análise..."
+                  maxLength={60}
+                  className="h-[42px] px-3 bg-input-background border border-border rounded-lg text-sm text-foreground transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder:text-muted-foreground w-52"
+                />
+                <Button variant="primary" onClick={handleSaveQuery} disabled={!savingName.trim()}>
+                  Salvar
+                </Button>
+                <Button variant="ghost" onClick={() => setSavingName(null)}>
+                  Cancelar
+                </Button>
+              </div>
+            ) : (
+              <Button variant="ghost" onClick={() => setSavingName('')}>
+                <Bookmark className="w-4 h-4" />
+                Salvar configuração
+              </Button>
+            )}
           </div>
         </CardBody>
       </Card>
