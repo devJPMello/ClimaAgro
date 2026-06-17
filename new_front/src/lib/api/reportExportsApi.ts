@@ -1,14 +1,13 @@
 import { httpClient } from './httpClient';
 import type { ReportExportCreateBody, ReportExportItemDto, ReportExportListDto } from './contracts/reportExports';
-
-const STORAGE_KEY = 'climaagro_export_client_id';
+import { STORAGE_KEYS } from '../storage/storageKeys';
 
 function getOrCreateExportClientId(): string {
   try {
-    let id = window.localStorage.getItem(STORAGE_KEY);
+    let id = window.localStorage.getItem(STORAGE_KEYS.REPORT_EXPORT_CLIENT_ID);
     if (!id) {
       id = crypto.randomUUID();
-      window.localStorage.setItem(STORAGE_KEY, id);
+      window.localStorage.setItem(STORAGE_KEYS.REPORT_EXPORT_CLIENT_ID, id);
     }
     return id;
   } catch {

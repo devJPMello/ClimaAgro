@@ -50,6 +50,7 @@ import { LocalAttachmentThumbnail, type LocalAttachmentKind } from '../component
 import { EncerrarAtendimentoModal } from '../components/chat/EncerrarAtendimentoModal';
 import { FileAttachmentPickerModal } from '../components/chat/FileAttachmentPickerModal';
 import { useNavigate } from 'react-router';
+import { STORAGE_KEYS, iagroThreadImagesKey } from '../../lib/storage/storageKeys';
 
 type LocalMediaItem = { url: string; kind: LocalAttachmentKind };
 
@@ -115,7 +116,6 @@ export function IAgro() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const [isRecording, setIsRecording] = useState(false);
-  const IMAGE_CACHE_PREFIX = 'climaagro.iagro.thread-images.';
 
   const quickActions = [
     {
@@ -232,7 +232,7 @@ export function IAgro() {
     threadIdRef.current = threadId;
     if (threadId) {
       try {
-        sessionStorage.setItem('climaagro.iagro.activeThreadId', threadId);
+        sessionStorage.setItem(STORAGE_KEYS.IAGRO_ACTIVE_THREAD_ID, threadId);
       } catch {
         /* ignore */
       }
@@ -329,7 +329,7 @@ export function IAgro() {
 
   function loadCachedThreadImages(targetThreadId: string): Record<string, string[]> {
     try {
-      const raw = localStorage.getItem(`${IMAGE_CACHE_PREFIX}${targetThreadId}`);
+      const raw = localStorage.getItem(iagroThreadImagesKey(targetThreadId));
       if (!raw) return {};
       const parsed = JSON.parse(raw) as unknown;
       if (!parsed || typeof parsed !== 'object') return {};
@@ -344,7 +344,7 @@ export function IAgro() {
     try {
       const cache = loadCachedThreadImages(targetThreadId);
       cache[key] = images;
-      localStorage.setItem(`${IMAGE_CACHE_PREFIX}${targetThreadId}`, JSON.stringify(cache));
+      localStorage.setItem(iagroThreadImagesKey(targetThreadId), JSON.stringify(cache));
     } catch {
       toast.warning('Não foi possível manter todas as imagens no cache local.');
     }

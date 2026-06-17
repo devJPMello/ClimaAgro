@@ -3,12 +3,11 @@ import { useUser } from '@clerk/clerk-react';
 import { getMyDualProfile } from '../api/dualProfileApi';
 import { listClimateAlerts } from '../api/alertsApi';
 import type { ClimateAlertDto } from '../api/contracts/alerts';
-
-const SEEN_KEY = 'climaagro.notif.alertas.seen';
+import { STORAGE_KEYS } from '../storage/storageKeys';
 
 function getSeenIds(): Set<string> {
   try {
-    const raw = localStorage.getItem(SEEN_KEY);
+    const raw = localStorage.getItem(STORAGE_KEYS.NOTIF_ALERTAS_SEEN);
     return new Set(raw ? (JSON.parse(raw) as string[]) : []);
   } catch {
     return new Set();
@@ -17,7 +16,7 @@ function getSeenIds(): Set<string> {
 
 function saveSeenIds(ids: Set<string>) {
   try {
-    localStorage.setItem(SEEN_KEY, JSON.stringify([...ids]));
+    localStorage.setItem(STORAGE_KEYS.NOTIF_ALERTAS_SEEN, JSON.stringify([...ids]));
   } catch { /* silent */ }
 }
 

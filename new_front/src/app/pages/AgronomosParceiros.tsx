@@ -32,6 +32,7 @@ import { cadastrarAgronomoParceiro, listarAgronomosParceiros } from '../../lib/a
 import { escalateToSpecialist } from '../../lib/api/hybridChatApi';
 import { notifyWhatsappDelivery } from '../../lib/whatsappNotify';
 import { scanCreaCarteira } from '../../lib/api/agronomistOnboardingApi';
+import { STORAGE_KEYS } from '../../lib/storage/storageKeys';
 import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 import { formatMunicipioComUf, formatUfLabel, UF_NOME } from '../../lib/geo/brazilStatesMalha';
 
@@ -215,7 +216,7 @@ export function AgronomosParceiros() {
       return;
     }
     try {
-      setIagroThreadId(sessionStorage.getItem('climaagro.iagro.activeThreadId'));
+      setIagroThreadId(sessionStorage.getItem(STORAGE_KEYS.IAGRO_ACTIVE_THREAD_ID));
     } catch {
       setIagroThreadId(null);
     }
@@ -320,7 +321,7 @@ export function AgronomosParceiros() {
     }
     let threadId: string | null = null;
     try {
-      threadId = sessionStorage.getItem('climaagro.iagro.activeThreadId');
+      threadId = sessionStorage.getItem(STORAGE_KEYS.IAGRO_ACTIVE_THREAD_ID);
     } catch {
       threadId = null;
     }

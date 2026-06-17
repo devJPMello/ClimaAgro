@@ -25,6 +25,7 @@ import {
   type UnifiedChatMessage,
 } from '../../lib/api/hybridChatApi';
 import { notifyWhatsappDelivery } from '../../lib/whatsappNotify';
+import { STORAGE_KEYS, iagroThreadImagesKey } from '../../lib/storage/storageKeys';
 
 function maskWhatsapp(digits: string) {
   const d = String(digits || '').replace(/\D/g, '');
@@ -46,8 +47,6 @@ function displayUserMessageText(raw: string): string {
 
 type LocalMediaItem = { url: string; kind: LocalAttachmentKind };
 
-const IMAGE_CACHE_PREFIX = 'climaagro.iagro.thread-images.';
-
 function buildMessageImageKey(text: string): string {
   return String(text || '').trim();
 }
@@ -58,7 +57,7 @@ function dataUrlToLocalKind(dataUrl: string): LocalAttachmentKind {
 
 function loadCachedThreadImages(targetThreadId: string): Record<string, string[]> {
   try {
-    const raw = localStorage.getItem(`${IMAGE_CACHE_PREFIX}${targetThreadId}`);
+    const raw = localStorage.getItem(iagroThreadImagesKey(targetThreadId));
     if (!raw) return {};
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object') return {};

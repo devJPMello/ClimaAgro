@@ -17,6 +17,7 @@ import type { ClimateAlertDto, ClimateAlertListDto, ClimateAlertSeverity } from 
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { UF_NOME } from '../../lib/geo/brazilStatesMalha';
 import { useProfileUf } from '../../lib/hooks/useProfileUf';
+import { STORAGE_KEYS } from '../../lib/storage/storageKeys';
 
 const ALERTAS_UF_OPTIONS = [
   { value: 'ALL', label: 'Todos os estados' },
@@ -104,9 +105,9 @@ function tipoToEspecialidade(tipo: string): string {
 
 export function Alertas() {
   const navigate = useNavigate();
-  const [severidadeFiltro, setSeveridadeFiltro] = usePersistedState('climaagro.pref.alertas.severidade', 'todos');
-  const [tipoFiltro, setTipoFiltro] = usePersistedState('climaagro.pref.alertas.tipo', 'todos');
-  const [ufFiltro, setUfFiltro] = usePersistedState('climaagro.pref.alertas.uf', 'ALL');
+  const [severidadeFiltro, setSeveridadeFiltro] = usePersistedState(STORAGE_KEYS.ALERTAS_SEVERIDADE, 'todos');
+  const [tipoFiltro, setTipoFiltro] = usePersistedState(STORAGE_KEYS.ALERTAS_TIPO, 'todos');
+  const [ufFiltro, setUfFiltro] = usePersistedState(STORAGE_KEYS.ALERTAS_UF, 'ALL');
   const [page, setPage] = useState(1);
   const profileUf = useProfileUf();
 

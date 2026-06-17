@@ -18,6 +18,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { EmptyState } from '../components/ui/EmptyState';
+import { STORAGE_KEYS } from '../../lib/storage/storageKeys';
 
 type StatItem = {
   label: string;
@@ -88,8 +89,6 @@ export function Perfil() {
     []
   );
 
-  const LEGACY_MUN_STORAGE_KEY = 'climaagro.pref.perfil.municipioFavorito';
-
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
@@ -107,7 +106,7 @@ export function Perfil() {
           setMunicipioFavorito(p.municipio);
         } else {
           try {
-            const raw = window.localStorage.getItem(LEGACY_MUN_STORAGE_KEY);
+            const raw = window.localStorage.getItem(STORAGE_KEYS.PERFIL_MUNICIPIO_FAVORITO);
             if (raw != null) {
               const parsed = JSON.parse(raw) as string;
               if (typeof parsed === 'string' && parsed.trim()) {
@@ -120,7 +119,7 @@ export function Perfil() {
         }
       } catch {
         try {
-          const raw = window.localStorage.getItem(LEGACY_MUN_STORAGE_KEY);
+          const raw = window.localStorage.getItem(STORAGE_KEYS.PERFIL_MUNICIPIO_FAVORITO);
           if (raw != null) {
             const parsed = JSON.parse(raw) as string;
             if (typeof parsed === 'string' && parsed.trim()) {

@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { STORAGE_KEYS } from '../../lib/storage/storageKeys';
 
 type Theme = 'light' | 'dark';
 
@@ -12,7 +13,7 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    const saved = localStorage.getItem('climaagro-theme') as Theme | null;
+    const saved = localStorage.getItem(STORAGE_KEYS.THEME) as Theme | null;
     if (saved === 'light' || saved === 'dark') return saved;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
@@ -21,7 +22,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const root = document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(theme);
-    localStorage.setItem('climaagro-theme', theme);
+    localStorage.setItem(STORAGE_KEYS.THEME, theme);
   }, [theme]);
 
   const toggleTheme = () => setThemeState((prev) => (prev === 'light' ? 'dark' : 'light'));
