@@ -83,6 +83,24 @@ const DualUserProfile = sequelize.define(
       defaultValue: 0,
       field: 'parceiro_avaliacao_qtd',
     },
+    notifAlertasCriticos: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+      field: 'notif_alertas_criticos',
+    },
+    notifRelatorios: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+      field: 'notif_relatorios',
+    },
+    notifAtualizacoes: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'notif_atualizacoes',
+    },
   },
   {
     tableName: 'dual_user_profiles',

@@ -7,6 +7,9 @@ export type DualProfileDto = {
   email: string;
   telefone: string | null;
   tipo: string;
+  notifAlertasCriticos: boolean;
+  notifRelatorios: boolean;
+  notifAtualizacoes: boolean;
 };
 
 function clerkHeaders(clerkUserId: string): Record<string, string> {
@@ -24,11 +27,14 @@ export async function getMyDualProfile(clerkUserId: string): Promise<DualProfile
 export async function putMyDualProfile(
   clerkUserId: string,
   body: {
-    uf: string;
-    municipio: string;
+    uf?: string;
+    municipio?: string;
     telefone?: string | null;
-    nome: string;
-    email: string;
+    nome?: string;
+    email?: string;
+    notifAlertasCriticos?: boolean;
+    notifRelatorios?: boolean;
+    notifAtualizacoes?: boolean;
   }
 ): Promise<DualProfileDto> {
   const res = await httpClient.put<{ profile: DualProfileDto }>('dual-profile/me', body, {

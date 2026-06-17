@@ -19,7 +19,7 @@ router.get('/me', async (req, res) => {
     }
     const row = await models.DualUserProfile.findOne({
       where: { clerkUserId },
-      attributes: ['uf', 'municipio', 'nome', 'email', 'telefone', 'tipo'],
+      attributes: ['uf', 'municipio', 'nome', 'email', 'telefone', 'tipo', 'notifAlertasCriticos', 'notifRelatorios', 'notifAtualizacoes'],
     });
     return res.json({ profile: row });
   } catch (e) {
@@ -94,11 +94,14 @@ router.put('/me', async (req, res) => {
       if (telefone !== undefined) patch.telefone = telefone || null;
       if (nomeIn) patch.nome = nomeIn;
       if (emailIn) patch.email = emailIn;
+      if (typeof body.notifAlertasCriticos === 'boolean') patch.notifAlertasCriticos = body.notifAlertasCriticos;
+      if (typeof body.notifRelatorios === 'boolean') patch.notifRelatorios = body.notifRelatorios;
+      if (typeof body.notifAtualizacoes === 'boolean') patch.notifAtualizacoes = body.notifAtualizacoes;
       if (Object.keys(patch).length) {
         await row.update(patch);
       }
       await row.reload({
-        attributes: ['uf', 'municipio', 'nome', 'email', 'telefone', 'tipo'],
+        attributes: ['uf', 'municipio', 'nome', 'email', 'telefone', 'tipo', 'notifAlertasCriticos', 'notifRelatorios', 'notifAtualizacoes'],
       });
     }
 
@@ -110,6 +113,9 @@ router.put('/me', async (req, res) => {
         email: row.email,
         telefone: row.telefone,
         tipo: row.tipo,
+        notifAlertasCriticos: row.notifAlertasCriticos,
+        notifRelatorios: row.notifRelatorios,
+        notifAtualizacoes: row.notifAtualizacoes,
       },
     });
   } catch (e) {

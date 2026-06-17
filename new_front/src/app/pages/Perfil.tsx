@@ -100,6 +100,9 @@ export function Perfil() {
         if (p?.uf && UF_IBGE_ID_BY_SIGLA[p.uf]) {
           setUfSigla(p.uf);
         }
+        if (p?.notifAlertasCriticos !== undefined) setNotifAlertasCriticos(p.notifAlertasCriticos);
+        if (p?.notifRelatorios !== undefined) setNotifRelatorios(p.notifRelatorios);
+        if (p?.notifAtualizacoes !== undefined) setNotifAtualizacoes(p.notifAtualizacoes);
         if (p?.municipio) {
           setMunicipioFavorito(p.municipio);
         } else {
@@ -190,6 +193,24 @@ export function Perfil() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Não foi possível salvar.';
       toast.error(msg);
+    }
+  };
+
+  const handleNotifChange = async (
+    field: 'notifAlertasCriticos' | 'notifRelatorios' | 'notifAtualizacoes',
+    value: boolean,
+  ) => {
+    if (!user?.id) return;
+    if (field === 'notifAlertasCriticos') setNotifAlertasCriticos(value);
+    if (field === 'notifRelatorios') setNotifRelatorios(value);
+    if (field === 'notifAtualizacoes') setNotifAtualizacoes(value);
+    try {
+      await putMyDualProfile(user.id, { [field]: value });
+    } catch {
+      if (field === 'notifAlertasCriticos') setNotifAlertasCriticos(!value);
+      if (field === 'notifRelatorios') setNotifRelatorios(!value);
+      if (field === 'notifAtualizacoes') setNotifAtualizacoes(!value);
+      toast.error('Não foi possível salvar a preferência.');
     }
   };
 
@@ -428,23 +449,38 @@ export function Perfil() {
           <Card>
             <CardHeader>
               <CardTitle>Preferências de Notificação</CardTitle>
-              <CardDescription>Escolha como deseja receber notificações</CardDescription>
+              <CardDescription>Escolha quais avisos deseja receber na plataforma</CardDescription>
             </CardHeader>
-            <CardBody className="space-y-4">
+            <CardBody className="space-y-5">
               <Checkbox
-                label="Alertas climáticos críticos"
+                label={
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-sm font-medium text-foreground">Alertas climáticos críticos</span>
+                    <span className="text-xs text-muted-foreground">Eventos extremos como secas, geadas, granizo e tempestades severas</span>
+                  </span>
+                }
                 checked={notifAlertasCriticos}
-                onChange={(e) => setNotifAlertasCriticos(e.target.checked)}
+                onChange={(e) => void handleNotifChange('notifAlertasCriticos', e.target.checked)}
               />
               <Checkbox
-                label="Relatórios prontos para download"
+                label={
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-sm font-medium text-foreground">Relatórios disponíveis</span>
+                    <span className="text-xs text-muted-foreground">Aviso quando um relatório climático estiver pronto para download</span>
+                  </span>
+                }
                 checked={notifRelatorios}
-                onChange={(e) => setNotifRelatorios(e.target.checked)}
+                onChange={(e) => void handleNotifChange('notifRelatorios', e.target.checked)}
               />
               <Checkbox
-                label="Atualizações do sistema e novidades"
+                label={
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-sm font-medium text-foreground">Novidades da plataforma</span>
+                    <span className="text-xs text-muted-foreground">Novas funcionalidades, melhorias e comunicados do ClimaAgro</span>
+                  </span>
+                }
                 checked={notifAtualizacoes}
-                onChange={(e) => setNotifAtualizacoes(e.target.checked)}
+                onChange={(e) => void handleNotifChange('notifAtualizacoes', e.target.checked)}
               />
             </CardBody>
           </Card>
