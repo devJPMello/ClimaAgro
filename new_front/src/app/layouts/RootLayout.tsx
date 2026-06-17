@@ -19,6 +19,8 @@ import {
 import { toast } from 'sonner';
 import { useClerk, useUser } from '@clerk/clerk-react';
 import { useUnreadAlerts } from '../../lib/hooks/useUnreadAlerts';
+import { useOnboardingStatus } from '../../lib/hooks/useOnboardingStatus';
+import { OnboardingWizard } from '../components/onboarding/OnboardingWizard';
 
 const navigationMain = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -42,6 +44,7 @@ export function RootLayout() {
   const { signOut } = useClerk();
   const { user } = useUser();
   const { count: alertCount, markAllSeen } = useUnreadAlerts();
+  const { show: showOnboarding, dismiss: dismissOnboarding, complete: completeOnboarding } = useOnboardingStatus();
   const toastShownRef = useRef(false);
 
   useEffect(() => {
@@ -195,6 +198,10 @@ export function RootLayout() {
           <Outlet />
         </main>
       </div>
+
+      {showOnboarding && (
+        <OnboardingWizard onComplete={completeOnboarding} onSkip={dismissOnboarding} />
+      )}
     </div>
   );
 }

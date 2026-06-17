@@ -25,6 +25,9 @@ export const STORAGE_KEYS = {
 
   // Relatórios — identificador anónimo de cliente para histórico de exportações
   REPORT_EXPORT_CLIENT_ID: 'climaagro_export_client_id',
+
+  // Onboarding — culturas de interesse selecionadas no wizard
+  CULTURAS_PREFERIDAS: 'climaagro.pref.culturas',
 } as const;
 
 /** Gera a chave de cache de imagens para uma thread específica do IAgro. */
