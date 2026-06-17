@@ -2,8 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardBody, CardHeader, CardTitle, CardDescription } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Calendar } from 'lucide-react';
+import {
+  LineChart, Line, BarChart, Bar,
+  ComposedChart, Cell, ReferenceLine,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
+import { Calendar, TrendingDown, TrendingUp, Minus } from 'lucide-react';
 import { EmptyState } from '../components/ui/EmptyState';
 import {
   getClimateSeriesByUf,
@@ -23,6 +27,33 @@ import { useProfileUf } from '../../lib/hooks/useProfileUf';
 type ProdRow = { mes: string; produtividade: number | null; produtividadeNum?: number | null };
 type ClimaRow = { mes: string; temperatura: number; precipitacao: number; umidade: number };
 type CompRow = { mes: string; clima: number; produtividade: number };
+
+type AnualClassificacao = 'seca_severa' | 'seca' | 'normal' | 'excesso' | 'excesso_severo';
+type AnualRow = {
+  year: string;
+  precipitacaoTotal: number;
+  temperaturaMedia: number;
+  umidadeMedia: number;
+  produtividadeMedia: number | null;
+  classificacao: AnualClassificacao;
+  desvioPercent: number;
+};
+
+const CLASSIF_COLOR: Record<AnualClassificacao, string> = {
+  seca_severa: '#EF4444',
+  seca: '#F97316',
+  normal: '#22C55E',
+  excesso: '#3B82F6',
+  excesso_severo: '#6366F1',
+};
+
+const CLASSIF_LABEL: Record<AnualClassificacao, string> = {
+  seca_severa: 'Seca severa',
+  seca: 'Seca',
+  normal: 'Normal',
+  excesso: 'Excesso de chuva',
+  excesso_severo: 'Excesso severo',
+};
 
 const MAX_CONCURRENT = 6;
 
@@ -44,7 +75,6 @@ async function concurrentMap<T, R>(
   return results;
 }
 
-/** Datas no eixo X e no cabeçalho do tooltip (tema escuro). */
 const TOOLTIP_DATE_LABEL_STYLE = { color: '#000000' };
 
 function formatTooltipProdutividade(value: unknown): string {
@@ -130,7 +160,6 @@ function aggregateClimateByMonth(
   });
 }
 
-/** Agrupa por mês-ano (`periodRef`) no formato `YYYY-MM`. */
 function aggregateProductivityByMonthYear(
   rows: ProductivityListResponse['data'],
   startYear: string,
@@ -148,19 +177,108 @@ function aggregateProductivityByMonthYear(
   return buildYearMonthKeysRange(startYear, endYear).map((ym) => {
     const vals = map.get(ym) || [];
     if (!vals.length) {
-      return {
-        mes: mesLabelFromYm(ym),
-        produtividade: null,
-        produtividadeNum: null,
-      };
+      return { mes: mesLabelFromYm(ym), produtividade: null, produtividadeNum: null };
     }
     const avg = Math.round((vals.reduce((x, y) => x + y, 0) / vals.length) * 100) / 100;
+    return { mes: mesLabelFromYm(ym), produtividade: avg, produtividadeNum: avg };
+  });
+}
+
+/** Converte rótulo "Jan/20" → "2020". */
+function yearFromMesLabel(mes: string): string {
+  const yy = mes.split('/')[1]?.trim();
+  if (!yy) return mes;
+  const n = parseInt(yy, 10);
+  return String(n < 50 ? 2000 + n : 1900 + n);
+}
+
+/** Agrega dados mensais em linhas anuais e classifica precipitação vs média. */
+function aggregateAnual(climaRows: ClimaRow[], prodRows: ProdRow[]): AnualRow[] {
+  const byYear = new Map<string, { precips: number[]; temps: number[]; hums: number[]; prods: number[] }>();
+
+  for (const row of climaRows) {
+    const y = yearFromMesLabel(row.mes);
+    if (!byYear.has(y)) byYear.set(y, { precips: [], temps: [], hums: [], prods: [] });
+    const b = byYear.get(y)!;
+    b.precips.push(row.precipitacao);
+    b.temps.push(row.temperatura);
+    b.hums.push(row.umidade);
+  }
+  for (const row of prodRows) {
+    const v = row.produtividadeNum ?? row.produtividade;
+    if (v == null) continue;
+    const y = yearFromMesLabel(row.mes);
+    if (!byYear.has(y)) byYear.set(y, { precips: [], temps: [], hums: [], prods: [] });
+    byYear.get(y)!.prods.push(v);
+  }
+
+  const avgArr = (arr: number[]) => (arr.length ? arr.reduce((a, x) => a + x, 0) / arr.length : 0);
+  const years = [...byYear.keys()].sort();
+
+  const rows: AnualRow[] = years.map((year) => {
+    const b = byYear.get(year)!;
     return {
-      mes: mesLabelFromYm(ym),
-      produtividade: avg,
-      produtividadeNum: avg,
+      year,
+      precipitacaoTotal: Math.round(b.precips.reduce((a, x) => a + x, 0) * 10) / 10,
+      temperaturaMedia: Math.round(avgArr(b.temps) * 10) / 10,
+      umidadeMedia: Math.round(avgArr(b.hums) * 10) / 10,
+      produtividadeMedia: b.prods.length ? Math.round(avgArr(b.prods) * 100) / 100 : null,
+      classificacao: 'normal' as AnualClassificacao,
+      desvioPercent: 0,
     };
   });
+
+  const validPrecips = rows.filter((r) => r.precipitacaoTotal > 0).map((r) => r.precipitacaoTotal);
+  const meanPrecip = validPrecips.length ? avgArr(validPrecips) : 0;
+
+  return rows.map((r) => {
+    if (meanPrecip === 0 || r.precipitacaoTotal === 0) return r;
+    const desvioPercent = Math.round(((r.precipitacaoTotal - meanPrecip) / meanPrecip) * 100);
+    let classificacao: AnualClassificacao;
+    if (desvioPercent < -30) classificacao = 'seca_severa';
+    else if (desvioPercent < -15) classificacao = 'seca';
+    else if (desvioPercent > 30) classificacao = 'excesso_severo';
+    else if (desvioPercent > 15) classificacao = 'excesso';
+    else classificacao = 'normal';
+    return { ...r, classificacao, desvioPercent };
+  });
+}
+
+type CorrelacaoTooltipProps = {
+  active?: boolean;
+  payload?: Array<{ name: string; value: number; payload: AnualRow }>;
+  label?: string;
+};
+
+function CorrelacaoTooltip({ active, payload, label }: CorrelacaoTooltipProps) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+  return (
+    <div className="rounded-lg border border-border bg-white shadow-lg px-4 py-3 text-sm dark:bg-card">
+      <p className="font-semibold mb-2 text-foreground">{label}</p>
+      <p className="text-muted-foreground">
+        Precipitação: <strong className="text-foreground">{row.precipitacaoTotal.toFixed(0)} mm</strong>
+      </p>
+      <p className="text-muted-foreground">
+        Desvio:{' '}
+        <strong style={{ color: CLASSIF_COLOR[row.classificacao] }}>
+          {row.desvioPercent > 0 ? '+' : ''}{row.desvioPercent}%
+        </strong>
+      </p>
+      <p className="text-muted-foreground">
+        Classificação:{' '}
+        <strong style={{ color: CLASSIF_COLOR[row.classificacao] }}>
+          {CLASSIF_LABEL[row.classificacao]}
+        </strong>
+      </p>
+      {row.produtividadeMedia != null && (
+        <p className="text-muted-foreground">
+          Produtividade: <strong className="text-foreground">{row.produtividadeMedia.toFixed(2)} t/ha</strong>
+        </p>
+      )}
+    </div>
+  );
 }
 
 const CULTURA_FALLBACK_OPTIONS = [
@@ -177,6 +295,7 @@ export function SeriesTemporais() {
       if (ufOptions.some((o) => o.value === profileUf)) setUf(profileUf);
     }
   }, [profileUf, ufOptions, uf]);
+
   const yearOptions = useMemo(() => getProductivityYearOptions(), []);
   const [cultura, setCultura] = useState('');
   const [culturaOptions, setCulturaOptions] =
@@ -188,6 +307,18 @@ export function SeriesTemporais() {
   const [dadosProdutividade, setDadosProdutividade] = useState<ProdRow[]>([]);
   const [dadosClimaticos, setDadosClimaticos] = useState<ClimaRow[]>([]);
   const [dadosComparativos, setDadosComparativos] = useState<CompRow[]>([]);
+  const [activeTab, setActiveTab] = useState<'serie' | 'correlacao'>('serie');
+
+  const dadosAnuais = useMemo(
+    () => aggregateAnual(dadosClimaticos, dadosProdutividade),
+    [dadosClimaticos, dadosProdutividade],
+  );
+
+  const avgPrecipAnual = useMemo(() => {
+    const vals = dadosAnuais.filter((r) => r.precipitacaoTotal > 0).map((r) => r.precipitacaoTotal);
+    return vals.length ? Math.round(vals.reduce((a, x) => a + x, 0) / vals.length) : 0;
+  }, [dadosAnuais]);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -206,13 +337,9 @@ export function SeriesTemporais() {
             ? c
             : opts.find((o) => o.value === '')?.value ?? opts[0]?.value ?? ''
         );
-      } catch {
-        /* mantém fallback estático */
-      }
+      } catch { /* mantém fallback estático */ }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [uf]);
 
   useEffect(() => {
@@ -229,18 +356,12 @@ export function SeriesTemporais() {
             });
           if (onlyUfs.length) {
             setUfOptions([UF_SELECT_PLACEHOLDER_OPTION, ...onlyUfs]);
-            if (uf && !onlyUfs.some((x) => x.value === uf)) {
-              setUf('');
-            }
+            if (uf && !onlyUfs.some((x) => x.value === uf)) setUf('');
           }
         }
-      } catch {
-        /* fallback em memória */
-      }
+      } catch { /* fallback em memória */ }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   async function loadSeriesVariable(variavel: ClimateSeriesVariable) {
@@ -249,16 +370,7 @@ export function SeriesTemporais() {
     }
     const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
     const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
-    const start = `${ys}-01-01`;
-    const end = `${ye}-12-31`;
-    return getClimateSeriesByUf({
-      uf,
-      start,
-      end,
-      variavel,
-      limit: 1000,
-      offset: 0,
-    });
+    return getClimateSeriesByUf({ uf, start: `${ys}-01-01`, end: `${ye}-12-31`, variavel, limit: 1000, offset: 0 });
   }
 
   const carregar = useCallback(async () => {
@@ -283,41 +395,26 @@ export function SeriesTemporais() {
           const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
           const years = Array.from({ length: ye - ys + 1 }, (_, idx) => String(ys + idx));
           const responses = await concurrentMap(years, MAX_CONCURRENT, (year) =>
-            listProductivityRecords({
-              state: uf,
-              productLabel: cultura || undefined,
-              year,
-              limit: 500,
-            }),
+            listProductivityRecords({ state: uf, productLabel: cultura || undefined, year, limit: 500 }),
           );
-          return responses.flatMap((prodRes) => (prodRes.success && Array.isArray(prodRes.data) ? prodRes.data : []));
+          return responses.flatMap((r) => (r.success && Array.isArray(r.data) ? r.data : []));
         })(),
       ]);
+
       let climateMonthly = aggregateClimateByMonth(tempSeries, precipSeries, humSeries, startYear, endYear);
       const monthsWithAnyClimate = climateMonthly.filter(
         (m) => m.temperatura !== 0 || m.umidade !== 0 || m.precipitacao !== 0
       ).length;
-      const shouldUseFallback = monthsWithAnyClimate < 3;
-      if (shouldUseFallback && /^[A-Z]{2}$/.test(uf)) {
+
+      if (monthsWithAnyClimate < 3 && /^[A-Z]{2}$/.test(uf)) {
         const byMonth = new Map<string, { t: number[]; h: number[]; p: number[] }>();
         const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
         const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
-        const targetUfs = [uf];
-
-        const fallbackTasks = targetUfs.flatMap((stateUf) =>
-          Array.from({ length: ye - ys + 1 }, (_, idx) => ({ stateUf, y: String(ys + idx) }))
-        );
+        const fallbackTasks = Array.from({ length: ye - ys + 1 }, (_, idx) => ({ stateUf: uf, y: String(ys + idx) }));
         const fallbackResponses = await concurrentMap(
-          fallbackTasks,
-          MAX_CONCURRENT,
-          ({ stateUf, y }) =>
-            getClimateVsProductivity({
-              state: stateUf,
-              cropType: undefined,
-              season: seasonFromYear(y),
-            }),
+          fallbackTasks, MAX_CONCURRENT,
+          ({ stateUf, y }) => getClimateVsProductivity({ state: stateUf, cropType: undefined, season: seasonFromYear(y) }),
         );
-
         for (const fallback of fallbackResponses) {
           if (!(fallback.success && Array.isArray(fallback.data) && fallback.data.length)) continue;
           for (const row of fallback.data) {
@@ -344,19 +441,14 @@ export function SeriesTemporais() {
           };
         });
       }
-      setDadosClimaticos(climateMonthly);
 
+      setDadosClimaticos(climateMonthly);
       const prodMonthly = aggregateProductivityByMonthYear(pRows, startYear, endYear);
       setDadosProdutividade(prodMonthly);
-
       const prodByMes = new Map(prodMonthly.map((r) => [r.mes, r.produtividadeNum ?? r.produtividade ?? null]));
       setDadosComparativos(
         climateMonthly
-          .map((row) => ({
-            mes: row.mes,
-            clima: row.precipitacao,
-            produtividade: Number(prodByMes.get(row.mes) ?? 0),
-          }))
+          .map((row) => ({ mes: row.mes, clima: row.precipitacao, produtividade: Number(prodByMes.get(row.mes) ?? 0) }))
           .filter((row) => row.clima > 0 || row.produtividade > 0)
       );
     } catch (e) {
@@ -386,15 +478,11 @@ export function SeriesTemporais() {
         </p>
       </div>
 
+      {/* Filtros */}
       <Card>
         <CardBody>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Select
-              label="UF"
-              value={uf}
-              onChange={(e) => setUf(e.target.value)}
-              options={ufOptions}
-            />
+            <Select label="UF" value={uf} onChange={(e) => setUf(e.target.value)} options={ufOptions} />
             <Select
               label="Cultura (produtividade)"
               value={cultura}
@@ -403,23 +491,12 @@ export function SeriesTemporais() {
               disabled={!ufValid}
             />
           </div>
-
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Select
-              label="Ano inicial"
-              value={startYear}
-              onChange={(e) => setStartYear(e.target.value)}
-              options={yearOptions}
-            />
-            <Select
-              label="Ano final"
-              value={endYear}
-              onChange={(e) => setEndYear(e.target.value)}
-              options={yearOptions}
-            />
+            <Select label="Ano inicial" value={startYear} onChange={(e) => setStartYear(e.target.value)} options={yearOptions} />
+            <Select label="Ano final" value={endYear} onChange={(e) => setEndYear(e.target.value)} options={yearOptions} />
           </div>
-          <div className="mt-2 grid grid-cols-1 md:grid-cols-1 gap-4">
-            <p className="text-sm text-muted-foreground self-end pb-2 md:col-span-1">
+          <div className="mt-2">
+            <p className="text-sm text-muted-foreground">
               O intervalo de anos filtra clima e produtividade para os gráficos abaixo.
             </p>
           </div>
@@ -432,162 +509,315 @@ export function SeriesTemporais() {
         </CardBody>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Produtividade ao Longo do Tempo</CardTitle>
-          <CardDescription>
-            Média mensal de produtividade na UF/cultura para o intervalo selecionado
-          </CardDescription>
-        </CardHeader>
-        <CardBody>
-          {!ufValid && !loading ? (
-            <EmptyState
-              icon={Calendar}
-              title="Escolha um estado"
-              description="Selecione uma UF acima para carregar a produtividade e os gráficos."
-            />
-          ) : dadosProdutividade.length === 0 && !loading ? (
-            <EmptyState
-              icon={Calendar}
-              title="Sem dados de produtividade"
-              description="Rode o seed ou sync no backend e verifique se existe produtividade para esta UF/cultura."
-            />
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={dadosProdutividade}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
-                <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                  }}
-                  labelStyle={TOOLTIP_DATE_LABEL_STYLE}
-                  formatter={formatTooltipProdutividade}
-                />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="produtividadeNum"
-                  stroke="#1976D2"
-                  strokeWidth={3}
-                  dot={{ fill: '#1976D2', r: 5 }}
-                  activeDot={{ r: 7 }}
-                  connectNulls
-                  name="Produtividade (t/ha)"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </CardBody>
-      </Card>
+      {/* Tabs */}
+      <div className="flex overflow-hidden rounded-lg border border-border bg-card self-start w-fit">
+        {(
+          [
+            { key: 'serie', label: 'Série Mensal' },
+            { key: 'correlacao', label: 'Correlação por Safra' },
+          ] as const
+        ).map((tab, i) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setActiveTab(tab.key)}
+            className={[
+              'px-5 py-2.5 text-sm font-medium transition-colors',
+              i > 0 ? 'border-l border-border' : '',
+              activeTab === tab.key
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+            ].join(' ')}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Variáveis Climáticas</CardTitle>
-          <CardDescription>
-            Série mensal de clima no intervalo selecionado
-          </CardDescription>
-        </CardHeader>
-        <CardBody>
-          {!ufValid && !loading ? (
-            <EmptyState
-              icon={Calendar}
-              title="Escolha um estado"
-              description="Selecione uma UF acima para carregar a série climática."
-            />
-          ) : dadosClimaticos.length === 0 && !loading ? (
-            <EmptyState
-              icon={Calendar}
-              title="Sem dados climáticos no período"
-              description="Sincronize dados (POST /api/climate/sync) ou importe medições para esta UF."
-            />
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={dadosClimaticos}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
-                <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                  }}
-                  labelStyle={TOOLTIP_DATE_LABEL_STYLE}
-                />
-                <Legend />
-                <Bar dataKey="temperatura" fill="#F97316" name="Temperatura (°C)" />
-                <Bar dataKey="precipitacao" fill="#42A5F5" name="Precipitação (mm)" />
-                <Bar dataKey="umidade" fill="#10B981" name="Umidade (%)" />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </CardBody>
-      </Card>
+      {/* ─── Tab: Série Mensal ─── */}
+      {activeTab === 'serie' && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Produtividade ao Longo do Tempo</CardTitle>
+              <CardDescription>Média mensal de produtividade na UF/cultura para o intervalo selecionado</CardDescription>
+            </CardHeader>
+            <CardBody>
+              {!ufValid && !loading ? (
+                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF acima para carregar a produtividade e os gráficos." />
+              ) : dadosProdutividade.length === 0 && !loading ? (
+                <EmptyState icon={Calendar} title="Sem dados de produtividade" description="Rode o seed ou sync no backend e verifique se existe produtividade para esta UF/cultura." />
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={dadosProdutividade}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
+                    <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
+                    <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} formatter={formatTooltipProdutividade} />
+                    <Legend />
+                    <Line type="monotone" dataKey="produtividadeNum" stroke="#1976D2" strokeWidth={3} dot={{ fill: '#1976D2', r: 5 }} activeDot={{ r: 7 }} connectNulls name="Produtividade (t/ha)" />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </CardBody>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Clima vs Produtividade</CardTitle>
-          <CardDescription>
-            Chuva mensal e produtividade mensal juntas para a UF/cultura/intervalo selecionados
-          </CardDescription>
-        </CardHeader>
-        <CardBody>
-          {!ufValid && !loading ? (
-            <EmptyState
-              icon={Calendar}
-              title="Escolha um estado"
-              description="Selecione uma UF acima para comparar clima e produtividade."
-            />
-          ) : dadosComparativos.length === 0 && !loading ? (
-            <EmptyState
-              icon={Calendar}
-              title="Sem dados comparativos"
-              description="Verifique se existem dados de clima e produtividade para esta UF, cultura e intervalo de anos."
-            />
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={dadosComparativos}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
-                <YAxis yAxisId="left" stroke="#64748b" style={{ fontSize: '12px' }} />
-                <YAxis yAxisId="right" orientation="right" stroke="#64748b" style={{ fontSize: '12px' }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                  }}
-                  labelStyle={TOOLTIP_DATE_LABEL_STYLE}
-                />
-                <Legend />
-                <Line
-                  yAxisId="left"
-                  type="monotone"
-                  dataKey="clima"
-                  stroke="#F97316"
-                  strokeWidth={2}
-                  dot={{ fill: '#F97316' }}
-                  name="Chuva acumulada (mm)"
-                />
-                <Line
-                  yAxisId="right"
-                  type="monotone"
-                  dataKey="produtividade"
-                  stroke="#1976D2"
-                  strokeWidth={2}
-                  dot={{ fill: '#1976D2' }}
-                  name="Produtividade (t/ha)"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </CardBody>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Variáveis Climáticas</CardTitle>
+              <CardDescription>Série mensal de clima no intervalo selecionado</CardDescription>
+            </CardHeader>
+            <CardBody>
+              {!ufValid && !loading ? (
+                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF acima para carregar a série climática." />
+              ) : dadosClimaticos.length === 0 && !loading ? (
+                <EmptyState icon={Calendar} title="Sem dados climáticos no período" description="Sincronize dados (POST /api/climate/sync) ou importe medições para esta UF." />
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={dadosClimaticos}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
+                    <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
+                    <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} />
+                    <Legend />
+                    <Bar dataKey="temperatura" fill="#F97316" name="Temperatura (°C)" />
+                    <Bar dataKey="precipitacao" fill="#42A5F5" name="Precipitação (mm)" />
+                    <Bar dataKey="umidade" fill="#10B981" name="Umidade (%)" />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </CardBody>
+          </Card>
 
+          <Card>
+            <CardHeader>
+              <CardTitle>Clima vs Produtividade</CardTitle>
+              <CardDescription>Chuva mensal e produtividade mensal juntas para a UF/cultura/intervalo selecionados</CardDescription>
+            </CardHeader>
+            <CardBody>
+              {!ufValid && !loading ? (
+                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF acima para comparar clima e produtividade." />
+              ) : dadosComparativos.length === 0 && !loading ? (
+                <EmptyState icon={Calendar} title="Sem dados comparativos" description="Verifique se existem dados de clima e produtividade para esta UF, cultura e intervalo de anos." />
+              ) : (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={dadosComparativos}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
+                    <YAxis yAxisId="left" stroke="#64748b" style={{ fontSize: '12px' }} />
+                    <YAxis yAxisId="right" orientation="right" stroke="#64748b" style={{ fontSize: '12px' }} />
+                    <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} />
+                    <Legend />
+                    <Line yAxisId="left" type="monotone" dataKey="clima" stroke="#F97316" strokeWidth={2} dot={{ fill: '#F97316' }} name="Chuva acumulada (mm)" />
+                    <Line yAxisId="right" type="monotone" dataKey="produtividade" stroke="#1976D2" strokeWidth={2} dot={{ fill: '#1976D2' }} name="Produtividade (t/ha)" />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </CardBody>
+          </Card>
+        </>
+      )}
+
+      {/* ─── Tab: Correlação por Safra ─── */}
+      {activeTab === 'correlacao' && (
+        <div className="space-y-6">
+          {!ufValid && !loading ? (
+            <Card>
+              <CardBody>
+                <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF e clique em Atualizar gráficos para ver a correlação anual." />
+              </CardBody>
+            </Card>
+          ) : dadosAnuais.length < 2 && !loading ? (
+            <Card>
+              <CardBody>
+                <EmptyState icon={Calendar} title="Dados insuficientes" description="São necessários ao menos 2 anos de dados para calcular desvios e classificações. Amplie o intervalo ou sincronize mais dados." />
+              </CardBody>
+            </Card>
+          ) : (
+            <>
+              {/* KPIs de classificação */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {(Object.entries(CLASSIF_LABEL) as [AnualClassificacao, string][]).map(([key, label]) => {
+                  const count = dadosAnuais.filter((r) => r.classificacao === key).length;
+                  return (
+                    <div
+                      key={key}
+                      className="rounded-xl border border-border bg-card px-4 py-3"
+                      style={{ borderLeftWidth: 4, borderLeftColor: CLASSIF_COLOR[key] }}
+                    >
+                      <p className="text-2xl font-semibold" style={{ fontFamily: 'var(--font-serif)', color: CLASSIF_COLOR[key] }}>
+                        {count}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Insight: impacto das secas na produtividade */}
+              {(() => {
+                const droughtRows = dadosAnuais.filter(
+                  (r) => (r.classificacao === 'seca_severa' || r.classificacao === 'seca') && r.produtividadeMedia != null
+                );
+                const normalRows = dadosAnuais.filter(
+                  (r) => r.classificacao === 'normal' && r.produtividadeMedia != null
+                );
+                if (!droughtRows.length || !normalRows.length) return null;
+                const avgD = droughtRows.reduce((a, r) => a + r.produtividadeMedia!, 0) / droughtRows.length;
+                const avgN = normalRows.reduce((a, r) => a + r.produtividadeMedia!, 0) / normalRows.length;
+                const diff = ((avgD - avgN) / avgN) * 100;
+                const years = droughtRows.map((r) => r.year).join(', ');
+                return (
+                  <div className="flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
+                    <TrendingDown className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>
+                      Em anos de seca ({years}), a produtividade média foi{' '}
+                      <strong>{Math.abs(diff).toFixed(0)}% {diff < 0 ? 'menor' : 'maior'}</strong> que em anos normais{' '}
+                      <span className="text-amber-700 dark:text-amber-300">
+                        ({avgD.toFixed(2)} vs {avgN.toFixed(2)} t/ha)
+                      </span>.
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* Gráfico principal: precipitação anual (barras coloridas) + produtividade (linha) */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Precipitação Anual vs Produtividade</CardTitle>
+                  <CardDescription>
+                    Cada barra representa 1 ano. A cor indica o desvio em relação à média histórica de chuva.
+                    A linha mostra a produtividade média anual da cultura selecionada.
+                  </CardDescription>
+                </CardHeader>
+                <CardBody>
+                  <ResponsiveContainer width="100%" height={340}>
+                    <ComposedChart data={dadosAnuais} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="year" stroke="#64748b" style={{ fontSize: '13px' }} />
+                      <YAxis yAxisId="left" stroke="#64748b" style={{ fontSize: '12px' }} unit=" mm" />
+                      <YAxis yAxisId="right" orientation="right" stroke="#1976D2" style={{ fontSize: '12px' }} unit=" t/ha" />
+                      <Tooltip content={<CorrelacaoTooltip />} />
+                      <Legend
+                        payload={[
+                          { value: 'Precipitação total (mm)', type: 'square', color: '#22C55E' },
+                          { value: 'Produtividade (t/ha)', type: 'line', color: '#1976D2' },
+                        ]}
+                      />
+                      {avgPrecipAnual > 0 && (
+                        <ReferenceLine
+                          yAxisId="left"
+                          y={avgPrecipAnual}
+                          stroke="#6B7280"
+                          strokeDasharray="6 3"
+                          label={{ value: `Média: ${avgPrecipAnual} mm`, position: 'insideTopRight', fill: '#6B7280', fontSize: 11 }}
+                        />
+                      )}
+                      <Bar yAxisId="left" dataKey="precipitacaoTotal" name="Precipitação (mm)" maxBarSize={72}>
+                        {dadosAnuais.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={CLASSIF_COLOR[entry.classificacao]} />
+                        ))}
+                      </Bar>
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="produtividadeMedia"
+                        name="Produtividade (t/ha)"
+                        stroke="#1976D2"
+                        strokeWidth={2.5}
+                        dot={{ fill: '#1976D2', r: 5 }}
+                        activeDot={{ r: 7 }}
+                        connectNulls
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+
+                  {/* Legenda de cores */}
+                  <div className="mt-4 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                    {(Object.entries(CLASSIF_LABEL) as [AnualClassificacao, string][]).map(([key, label]) => (
+                      <span key={key} className="flex items-center gap-1.5">
+                        <span className="inline-block w-3 h-3 rounded-sm" style={{ background: CLASSIF_COLOR[key] }} />
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                </CardBody>
+              </Card>
+
+              {/* Tabela ano a ano */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Detalhamento por Ano</CardTitle>
+                  <CardDescription>Precipitação acumulada, desvio da média histórica e produtividade para cada safra</CardDescription>
+                </CardHeader>
+                <CardBody className="!p-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b-2 border-border bg-muted/40">
+                          <th className="pl-5 pr-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Ano</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Chuva (mm)</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Desvio</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Classificação</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Temp. média (°C)</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">Produtividade</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/60">
+                        {dadosAnuais.map((row, idx) => (
+                          <tr
+                            key={row.year}
+                            className={`transition-colors hover:bg-muted/50 ${idx % 2 === 1 ? 'bg-muted/20' : ''}`}
+                            style={{ borderLeft: `3px solid ${CLASSIF_COLOR[row.classificacao]}` }}
+                          >
+                            <td className="pl-4 pr-4 py-4 font-semibold text-foreground">{row.year}</td>
+                            <td className="px-4 py-4 tabular-nums text-foreground">
+                              {row.precipitacaoTotal > 0 ? `${row.precipitacaoTotal.toFixed(0)} mm` : '—'}
+                            </td>
+                            <td className="px-4 py-4">
+                              {row.desvioPercent !== 0 ? (
+                                <span className="inline-flex items-center gap-1 tabular-nums font-medium" style={{ color: CLASSIF_COLOR[row.classificacao] }}>
+                                  {row.desvioPercent < 0
+                                    ? <TrendingDown className="w-3.5 h-3.5" />
+                                    : <TrendingUp className="w-3.5 h-3.5" />
+                                  }
+                                  {row.desvioPercent > 0 ? '+' : ''}{row.desvioPercent}%
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-muted-foreground">
+                                  <Minus className="w-3.5 h-3.5" /> 0%
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-4">
+                              <span
+                                className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
+                                style={{
+                                  background: `${CLASSIF_COLOR[row.classificacao]}20`,
+                                  color: CLASSIF_COLOR[row.classificacao],
+                                  border: `1px solid ${CLASSIF_COLOR[row.classificacao]}40`,
+                                }}
+                              >
+                                {CLASSIF_LABEL[row.classificacao]}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4 tabular-nums text-foreground">
+                              {row.temperaturaMedia > 0 ? `${row.temperaturaMedia.toFixed(1)} °C` : '—'}
+                            </td>
+                            <td className="px-4 py-4 tabular-nums font-medium text-foreground">
+                              {row.produtividadeMedia != null ? `${row.produtividadeMedia.toFixed(2)} t/ha` : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardBody>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
