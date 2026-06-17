@@ -1,4 +1,5 @@
 import { httpClient } from './httpClient';
+import { getCachedClerkToken } from './authTokenStore';
 
 export type IAgroMessage = {
   id: string;
@@ -40,7 +41,10 @@ function getApiBase(): string {
 }
 
 function clerkHeaders(clerkUserId: string): Record<string, string> {
-  return { 'X-Clerk-User-Id': clerkUserId };
+  const headers: Record<string, string> = { 'X-Clerk-User-Id': clerkUserId };
+  const token = getCachedClerkToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
 }
 
 export async function sendIAgroMessage(

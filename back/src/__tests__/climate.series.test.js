@@ -28,7 +28,7 @@ describe('climate routes - uf series', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     app = express();
-    app.use('/api/climate', require('./climate'));
+    app.use('/api/climate', require('../routes/climate'));
   });
 
   test('valida UF inválida', async () => {

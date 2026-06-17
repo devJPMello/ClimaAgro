@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router';
 import {
   Cloud,
@@ -34,6 +34,8 @@ const navigationMain = [
 
 const perfilNavItem = { name: 'Perfil', path: '/perfil', icon: User };
 
+const navigation = [...navigationMain, perfilNavItem];
+
 export function RootLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -41,10 +43,6 @@ export function RootLayout() {
   const { user } = useUser();
   const { count: alertCount, markAllSeen } = useUnreadAlerts();
   const toastShownRef = useRef(false);
-
-  const navigation = useMemo(() => {
-    return [...navigationMain, perfilNavItem];
-  }, []);
 
   useEffect(() => {
     if (toastShownRef.current || alertCount === 0) return;

@@ -1,4 +1,5 @@
 import { ApiError } from './errors';
+import { getClerkToken } from './authTokenStore';
 
 const DEFAULT_TIMEOUT_MS = 25_000;
 const MAX_RETRIES = 2;
@@ -143,11 +144,16 @@ export async function httpRequest<T>(
   } = options;
   const url = resolveUrl(path);
 
+  const clerkToken = await getClerkToken();
+  const autoHeaders: Record<string, string> = {};
+  if (clerkToken) autoHeaders.Authorization = `Bearer ${clerkToken}`;
+
   const init: RequestInit = {
     method,
     headers: {
       'Content-Type': 'application/json',
       ...headers,
+      ...autoHeaders,
     },
     signal,
   };

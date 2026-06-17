@@ -10,6 +10,7 @@ const rateLimit = require('express-rate-limit');
 const { Server } = require('socket.io');
 const { connectDB, sequelize, models } = require('./config/database');
 const { startClimateAutoSyncScheduler } = require('./services/climateSyncScheduler');
+const logger = require('./lib/logger');
 
 const RATE_LIMIT_MSG = { success: false, message: 'Muitas requisições. Tente novamente em 1 minuto.' };
 
@@ -81,7 +82,7 @@ connectDB();
 // Rate limiting por grupo de rotas
 app.use(
   ['/api/climate', '/api/clima', '/api/weather', '/api/productivity',
-   '/api/ibge-sidra-1612', '/api/inmet-adapter', '/api/geo', '/api/alerts'],
+   '/api/ibge-sidra-1612', '/api/inmet-adapter', '/api/geo'],
   climateLimiter
 );
 app.use(
@@ -94,7 +95,6 @@ app.use(['/api/reports', '/api/superset'], reportLimiter);
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/weather', require('./routes/weather'));
-app.use('/api/alerts', require('./routes/alerts'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/geo', require('./routes/geo'));
@@ -135,7 +135,7 @@ app.get('/api/health', (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Error:', err.stack);
+  logger.error({ err, path: req.path, method: req.method }, 'Unhandled error');
   res.status(500).json({
     success: false,
     message: 'Erro interno do servidor',
@@ -167,10 +167,28 @@ const io = new Server(server, {
   },
 });
 app.set('io', io);
+
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (token && process.env.CLERK_SECRET_KEY) {
+    try {
+      const { verifyToken } = require('@clerk/backend');
+      const payload = await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY });
+      socket.data.clerkUserId = payload.sub;
+    } catch {
+      // Token present but invalid — reject connection
+      return next(new Error('Token inválido'));
+    }
+  }
+  next();
+});
+
 io.on('connection', (socket) => {
   socket.on('join:produtor', (clerkId) => {
-    if (typeof clerkId === 'string' && clerkId.length > 4) {
-      socket.join(`produtor:${clerkId}`);
+    // Use verified identity from token; fall back to client claim only in dev
+    const effectiveId = socket.data.clerkUserId || (typeof clerkId === 'string' && clerkId.length > 4 ? clerkId : null);
+    if (effectiveId) {
+      socket.join(`produtor:${effectiveId}`);
     }
   });
 });

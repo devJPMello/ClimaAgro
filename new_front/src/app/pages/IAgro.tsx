@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { io, type Socket } from 'socket.io-client';
-import { useUser } from '@clerk/clerk-react';
+import { useUser, useAuth } from '@clerk/clerk-react';
 import {
   Camera,
   Cloud,
@@ -84,6 +84,7 @@ function validateIAgroFiles(files: File[]): { valid: File[]; rejected: string[] 
 export function IAgro() {
   const navigate = useNavigate();
   const { user } = useUser();
+  const { getToken } = useAuth();
   const [threads, setThreads] = useState<IAgroThread[]>([]);
   const [messages, setMessages] = useState<UnifiedChatMessage[]>([]);
   const [hybridConversation, setHybridConversation] = useState<HybridConversationDto | null>(null);
@@ -241,26 +242,36 @@ export function IAgro() {
 
   useEffect(() => {
     if (!user?.id) return;
+    let mounted = true;
+    let socket: Socket;
     const base = resolveSocketBaseUrl();
-    const socket = io(base, { path: '/socket.io', transports: ['websocket', 'polling'] });
-    socketRef.current = socket;
-    socket.on('connect', () => {
-      socket.emit('join:produtor', user.id);
-    });
-    socket.on('hybrid:message', (payload: { threadId?: string; message?: UnifiedChatMessage }) => {
-      if (!payload?.message) return;
-      const active = threadIdRef.current;
-      if (payload.threadId && active && payload.threadId !== active) return;
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === payload.message!.id)) return prev;
-        return [...prev, { ...payload.message!, kind: 'hybrid' }];
+    getToken().then((token) => {
+      if (!mounted) return;
+      socket = io(base, {
+        path: '/socket.io',
+        transports: ['websocket', 'polling'],
+        auth: { token: token || '' },
+      });
+      socketRef.current = socket;
+      socket.on('connect', () => {
+        socket.emit('join:produtor', user.id);
+      });
+      socket.on('hybrid:message', (payload: { threadId?: string; message?: UnifiedChatMessage }) => {
+        if (!payload?.message) return;
+        const active = threadIdRef.current;
+        if (payload.threadId && active && payload.threadId !== active) return;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === payload.message!.id)) return prev;
+          return [...prev, { ...payload.message!, kind: 'hybrid' }];
+        });
       });
     });
     return () => {
-      socket.disconnect();
+      mounted = false;
+      socket?.disconnect();
       socketRef.current = null;
     };
-  }, [user?.id]);
+  }, [user?.id, getToken]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -279,14 +290,12 @@ export function IAgro() {
       recognitionRef.current?.stop();
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+    const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!SR) {
       toast.error('Reconhecimento de voz não suportado. Use Chrome ou Edge.');
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const recognition = new SR() as any;
+    const recognition = new SR();
     recognition.lang = 'pt-BR';
     recognition.interimResults = true;
     recognition.continuous = false;

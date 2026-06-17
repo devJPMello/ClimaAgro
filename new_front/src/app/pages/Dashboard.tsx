@@ -119,10 +119,10 @@ export function Dashboard() {
         {(summary) => (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {summary.kpis.map((kpi, index) => {
+              {summary.kpis.map((kpi) => {
                 const Icon = KPI_ICONS[kpi.metric];
                 const { metric: _m, ...kpiProps } = kpi;
-                return <KPICard key={index} {...kpiProps} icon={Icon} color={KPI_COLORS[kpi.metric]} />;
+                return <KPICard key={kpi.metric} {...kpiProps} icon={Icon} color={KPI_COLORS[kpi.metric]} />;
               })}
             </div>
 
@@ -162,8 +162,8 @@ export function Dashboard() {
                   onScroll={updateScrollState}
                   className="flex gap-4 overflow-x-auto scroll-smooth pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 >
-                  {summary.regioes.map((regiao, index) => (
-                    <div key={index} className="flex-shrink-0 w-64 rounded-xl border border-border bg-card overflow-hidden">
+                  {summary.regioes.map((regiao) => (
+                    <div key={regiao.uf ?? regiao.estado} className="flex-shrink-0 w-64 rounded-xl border border-border bg-card overflow-hidden">
                       <div className="px-4 py-3 bg-primary/10 border-b border-border">
                         <p className="text-base text-primary">{regiao.uf ?? '—'}</p>
                         <p className="text-xs text-muted-foreground truncate">{regiao.estado}</p>
@@ -204,10 +204,10 @@ export function Dashboard() {
           Acesso Rápido
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {atalhos.map((atalho, index) => {
+          {atalhos.map((atalho) => {
             const Icon = atalho.icon;
             return (
-              <Link key={index} to={atalho.path}>
+              <Link key={atalho.path} to={atalho.path}>
                 <Card className="hover:shadow-lg transition-all duration-200 hover:-translate-y-1 h-full">
                   <CardBody>
                     <div className={`w-12 h-12 rounded-lg ${atalho.color} flex items-center justify-center mb-4`}>

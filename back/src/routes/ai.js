@@ -8,17 +8,19 @@ const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const ChatHistory = require('../models/ChatHistory');
 const { buildIagroDataContext } = require('../services/iagroDataContextService');
+const { clerkAuth } = require('../middleware/clerkAuth');
 
 const MAX_ATTACHMENT_TEXT_CHARS = 12000;
 
 const router = express.Router();
+router.use(clerkAuth);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { files: 6, fileSize: 8 * 1024 * 1024 },
 });
 
 function clerkUserIdFromReq(req) {
-  return String(req.headers['x-clerk-user-id'] || '').trim();
+  return String(req.clerkUserId || req.headers['x-clerk-user-id'] || '').trim();
 }
 
 /** Impede escrita em thread de outro usuário; atribui clerk aos registros legados sem dono. */
@@ -527,7 +529,7 @@ router.post(
   }
 );
 
-router.get('/chat/threads', async (req, res) => {
+router.get('/chat/threads', aiReportLimiter, async (req, res) => {
   try {
     const clerkUserId = clerkUserIdFromReq(req);
     if (!clerkUserId) {
@@ -574,7 +576,7 @@ router.get('/chat/threads', async (req, res) => {
   }
 });
 
-router.get('/chat/history', async (req, res) => {
+router.get('/chat/history', aiReportLimiter, async (req, res) => {
     const threadId = String(req.query.threadId || '').trim();
     if (!threadId) {
       return res.status(400).json({ message: 'threadId é obrigatório.' });

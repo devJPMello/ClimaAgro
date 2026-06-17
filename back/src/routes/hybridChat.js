@@ -42,12 +42,13 @@ function maybeParseMultipart(req, res, next) {
 }
 
 
-function normalizeDigits(value) {
-  return String(value || '').replace(/\D/g, '');
-}
+const { normalizeDigits } = require('../utils/formatting');
+const { clerkAuth } = require('../middleware/clerkAuth');
+
+router.use(clerkAuth);
 
 function headerProdutorId(req) {
-  return String(req.headers['x-clerk-user-id'] || req.query.produtorClerkId || '').trim();
+  return String(req.clerkUserId || req.headers['x-clerk-user-id'] || req.query.produtorClerkId || '').trim();
 }
 
 /** Bloqueia acesso se o thread já estiver associado a outro Clerk ID. */

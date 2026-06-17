@@ -87,15 +87,13 @@ async function buildDashboardPrincipalStates({ models }) {
   const principalUfs = await pickDashboardPrincipalUfs(GeoData);
   const principalSet = new Set(principalUfs);
 
-  const stateRows = [];
-  for (const sig of principalUfs) {
-    const row = await GeoData.findOne({
-      where: { category: 'state', isActive: true, state: sig },
-      attributes: ['id', 'name', 'state'],
-      order: [['name', 'ASC']]
-    });
-    if (row) stateRows.push(row);
-  }
+  const allStateRows = await GeoData.findAll({
+    where: { category: 'state', isActive: true, state: { [Op.in]: principalUfs } },
+    attributes: ['id', 'name', 'state'],
+    order: [['name', 'ASC']]
+  });
+  const stateRowMap = new Map(allStateRows.map((r) => [String(r.state).toUpperCase(), r]));
+  const stateRows = principalUfs.map((sig) => stateRowMap.get(sig)).filter(Boolean);
 
   if (stateRows.length === 0) {
     return {
@@ -281,17 +279,13 @@ async function buildDashboardPrincipalStates({ models }) {
     }
   }
 
-  const prodAggRows = await Promise.all(
-    stateRows.map(async (s) => {
-      const [aggProd] = await Productivity.findAll({
-        attributes: [[fn('AVG', col('productivity')), 'v']],
-        where: { state: s.state, year: latestYear },
-        raw: true
-      });
-      return { uf: String(s.state).toUpperCase(), aggProd };
-    })
-  );
-  const prodMap = new Map(prodAggRows.map((x) => [x.uf, x.aggProd]));
+  const prodGroupRows = await Productivity.findAll({
+    attributes: ['state', [fn('AVG', col('productivity')), 'v']],
+    where: { state: { [Op.in]: principalUfs }, year: latestYear },
+    group: ['state'],
+    raw: true
+  });
+  const prodMap = new Map(prodGroupRows.map((x) => [String(x.state).toUpperCase(), x]));
 
   const regioes = [];
   for (const s of stateRows) {

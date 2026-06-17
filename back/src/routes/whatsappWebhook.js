@@ -1,36 +1,9 @@
 const express = require('express');
 const HybridConversation = require('../models/HybridConversation');
 const HybridMessage = require('../models/HybridMessage');
+const { normalizeDigits, phonesMatch, extractText } = require('../utils/formatting');
 
 const router = express.Router();
-
-function normalizeDigits(value) {
-  return String(value || '').replace(/\D/g, '');
-}
-
-function phonesMatch(stored, inbound) {
-  const s = normalizeDigits(stored);
-  const i = normalizeDigits(inbound);
-  if (!s || !i) return false;
-  if (s === i) return true;
-  if (i.endsWith(s) || s.endsWith(i)) return true;
-  if (s.slice(-9) === i.slice(-9)) return true;
-  return false;
-}
-
-/** Extrai texto de qualquer tipo de mensagem Evolution API. */
-function extractText(message) {
-  if (!message) return '';
-  return (
-    message.conversation ||
-    message.extendedTextMessage?.text ||
-    message.imageMessage?.caption ||
-    message.videoMessage?.caption ||
-    message.documentMessage?.caption ||
-    message.audioMessage?.caption ||
-    ''
-  );
-}
 
 /** GET — verificação manual no navegador. */
 router.get('/', (_req, res) => {

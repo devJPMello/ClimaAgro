@@ -1,7 +1,7 @@
 const express = require('express');
 const { Op, fn, col } = require('sequelize');
 const User = require('../models/User');
-const { adminAuth } = require('../middleware/auth');
+const { clerkAdminAuth: adminAuth } = require('../middleware/clerkAdminAuth');
 
 const router = express.Router();
 
@@ -13,9 +13,13 @@ router.get('/', adminAuth, async (req, res) => {
     if (role) where.role = role;
     if (isActive !== undefined) where.isActive = isActive === 'true';
     if (search) {
+      const safeSearch = String(search).trim();
+      if (safeSearch.length > 200) {
+        return res.status(400).json({ success: false, message: 'Parâmetro search excede limite de 200 caracteres.' });
+      }
       where[Op.or] = [
-        { name: { [Op.iLike]: `%${search}%` } },
-        { email: { [Op.iLike]: `%${search}%` } }
+        { name: { [Op.iLike]: `%${safeSearch}%` } },
+        { email: { [Op.iLike]: `%${safeSearch}%` } }
       ];
     }
 

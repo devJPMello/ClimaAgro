@@ -92,6 +92,9 @@ router.get('/', [
     const includeWhere = { isActive: true };
     
     if (startDate && endDate) {
+      if (new Date(startDate) > new Date(endDate)) {
+        return res.status(400).json({ success: false, message: 'startDate não pode ser posterior a endDate.' });
+      }
       whereClause.date = {
         [require('sequelize').Op.between]: [startDate, endDate]
       };

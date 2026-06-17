@@ -68,6 +68,10 @@ router.get('/climate-vs-productivity', [
     if (!baseYear) {
       return res.status(400).json({ success: false, message: 'Safra inválida.' });
     }
+    const currentYear = new Date().getFullYear();
+    if (baseYear < 2000 || baseYear > currentYear + 1) {
+      return res.status(400).json({ success: false, message: 'Safra fora do intervalo válido (2000 até ano atual).' });
+    }
     let startDate = `${baseYear}-01-01`;
     let endDate = `${baseYear}-12-31`;
     // Open-Meteo archive só aceita datas até "hoje".

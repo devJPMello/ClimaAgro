@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { io, type Socket } from 'socket.io-client';
-import { useUser } from '@clerk/clerk-react';
+import { useUser, useAuth } from '@clerk/clerk-react';
 import { Cloud, Loader2, MessageCircle, Mic, MicOff, Paperclip, SendHorizonal, Star, Trash2, X } from 'lucide-react';
 import { Card, CardBody } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -69,6 +69,7 @@ function loadCachedThreadImages(targetThreadId: string): Record<string, string[]
 
 export function MinhasConversas() {
   const { user } = useUser();
+  const { getToken } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const threadParam = searchParams.get('thread');
@@ -235,39 +236,44 @@ export function MinhasConversas() {
 
   useEffect(() => {
     if (!user?.id) return;
+    let mounted = true;
+    let socket: Socket;
     const base = resolveSocketBaseUrl();
-    const socket: Socket = io(base, { path: '/socket.io', transports: ['websocket', 'polling'] });
-    let isFirstConnect = true;
-    socket.on('connect', () => {
-      console.log('[Socket.IO] Conectado, entrando na sala produtor:', user.id);
-      socket.emit('join:produtor', user.id);
-      if (!isFirstConnect) {
-        const currentSelected = selectedRef.current;
-        if (currentSelected && user.id) {
-          getHybridTimeline(currentSelected.iaThreadId, user.id)
-            .then((r) => setMessages(r.messages || []))
-            .catch(() => {/* silencioso */});
+    getToken().then((token) => {
+      if (!mounted) return;
+      socket = io(base, {
+        path: '/socket.io',
+        transports: ['websocket', 'polling'],
+        auth: { token: token || '' },
+      });
+      let isFirstConnect = true;
+      socket.on('connect', () => {
+        socket.emit('join:produtor', user.id);
+        if (!isFirstConnect) {
+          const currentSelected = selectedRef.current;
+          if (currentSelected && user.id) {
+            getHybridTimeline(currentSelected.iaThreadId, user.id)
+              .then((r) => setMessages(r.messages || []))
+              .catch(() => {/* silencioso */});
+          }
         }
-      }
-      isFirstConnect = false;
-    });
-    socket.on('disconnect', (reason) => {
-      console.warn('[Socket.IO] Desconectado:', reason);
-    });
-    socket.on('hybrid:message', (payload: { threadId?: string; message?: UnifiedChatMessage }) => {
-      console.log('[Socket.IO] hybrid:message recebido:', payload?.message?.id, payload?.threadId);
-      if (!payload?.message) return;
-      const active = threadIdRef.current;
-      if (payload.threadId && active && payload.threadId !== active) return;
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === payload.message!.id)) return prev;
-        return [...prev, { ...payload.message!, kind: 'hybrid' }];
+        isFirstConnect = false;
+      });
+      socket.on('hybrid:message', (payload: { threadId?: string; message?: UnifiedChatMessage }) => {
+        if (!payload?.message) return;
+        const active = threadIdRef.current;
+        if (payload.threadId && active && payload.threadId !== active) return;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === payload.message!.id)) return prev;
+          return [...prev, { ...payload.message!, kind: 'hybrid' }];
+        });
       });
     });
     return () => {
-      socket.disconnect();
+      mounted = false;
+      socket?.disconnect();
     };
-  }, [user?.id]);
+  }, [user?.id, getToken]);
 
   // Polling de backup: recarrega o histórico a cada 5s enquanto há conversa ativa aberta.
   // Garante que mensagens apareçam mesmo se o Socket.IO não entregar o evento.
@@ -294,14 +300,12 @@ export function MinhasConversas() {
       recognitionRef.current?.stop();
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+    const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!SR) {
       toast.error('Reconhecimento de voz não suportado. Use Chrome ou Edge.');
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const recognition = new SR() as any;
+    const recognition = new SR();
     recognition.lang = 'pt-BR';
     recognition.interimResults = true;
     recognition.continuous = false;
@@ -311,11 +315,11 @@ export function MinhasConversas() {
       setIsRecording(false);
       recognitionRef.current = null;
     };
-    recognition.onerror = (err: { error?: string }) => {
+    recognition.onerror = (ev: SpeechRecognitionErrorEvent) => {
       setIsRecording(false);
-      if (err.error !== 'aborted') toast.error(`Erro no microfone: ${err.error ?? 'desconhecido'}`);
+      if (ev.error !== 'aborted') toast.error(`Erro no microfone: ${ev.error ?? 'desconhecido'}`);
     };
-    recognition.onresult = (ev: { results: ArrayLike<{ 0: { transcript: string } }> }) => {
+    recognition.onresult = (ev: SpeechRecognitionEvent) => {
       const transcript = Array.from(ev.results).map((r) => r[0].transcript).join('');
       setInput(transcript);
     };

@@ -1,9 +1,23 @@
 const axios = require('axios');
+const { normalizeDigits } = require('../utils/formatting');
 
 const MAX_CHARS = 1590;
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 500;
 
-function normalizeDigits(value) {
-  return String(value || '').replace(/\D/g, '');
+async function withRetry(fn) {
+  let lastError;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastError = e;
+      const isTransient = !e.response || e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT' || e.code === 'ECONNABORTED';
+      if (!isTransient || attempt === MAX_RETRIES) break;
+      await new Promise((r) => setTimeout(r, RETRY_BASE_MS * attempt));
+    }
+  }
+  throw lastError;
 }
 
 function getConfig() {
@@ -83,10 +97,12 @@ async function sendMessage(toDigits, text) {
     let lastId = null;
     for (let i = 0; i < chunks.length; i++) {
       const body = chunks.length > 1 ? `(${i + 1}/${chunks.length})\n${chunks[i]}` : chunks[i];
-      const res = await axios.post(
-        `${apiUrl}/message/sendText/${instance}`,
-        { number, text: body },
-        { headers: { apikey: apiKey }, timeout: 15000 }
+      const res = await withRetry(() =>
+        axios.post(
+          `${apiUrl}/message/sendText/${instance}`,
+          { number, text: body },
+          { headers: { apikey: apiKey }, timeout: 15000 }
+        )
       );
       lastId = res.data?.key?.id || res.data?.id || null;
       console.log(`[Evolution] Parte ${i + 1}/${chunks.length} enviada. id: ${lastId}`);
@@ -124,16 +140,18 @@ async function sendMedia(toDigits, caption, buffer, mimeType) {
   const safeCaption = String(caption || '').trim().slice(0, MAX_CHARS);
 
   try {
-    const res = await axios.post(
-      `${apiUrl}/message/sendMedia/${instance}`,
-      {
-        number,
-        mediatype,
-        mimetype: mimeType,
-        caption: safeCaption,
-        media: buffer.toString('base64'),
-      },
-      { headers: { apikey: apiKey }, timeout: 30000 }
+    const res = await withRetry(() =>
+      axios.post(
+        `${apiUrl}/message/sendMedia/${instance}`,
+        {
+          number,
+          mediatype,
+          mimetype: mimeType,
+          caption: safeCaption,
+          media: buffer.toString('base64'),
+        },
+        { headers: { apikey: apiKey }, timeout: 30000 }
+      )
     );
     const id = res.data?.key?.id || res.data?.id || null;
     return { sent: true, sid: id };

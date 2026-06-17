@@ -62,6 +62,20 @@ async function ensureExternalMessageIdColumn() {
   console.log('✅ Coluna external_message_id criada com sucesso.');
 }
 
+async function ensureIndexes() {
+  const indexDefs = [
+    { name: 'idx_climate_data_uf_date', table: 'climate_data', cols: '(uf, date)' },
+    { name: 'idx_hybrid_messages_conversation_id', table: 'hybrid_messages', cols: '(conversation_id)' },
+  ];
+  for (const { name, table, cols } of indexDefs) {
+    try {
+      await sequelize.query(`CREATE INDEX IF NOT EXISTS ${name} ON ${table} ${cols};`);
+    } catch (e) {
+      console.warn(`⚠️  Não foi possível criar índice ${name}:`, e.message);
+    }
+  }
+}
+
 const connectDB = async () => {
   try {
     await sequelize.authenticate();
@@ -82,14 +96,17 @@ const connectDB = async () => {
       console.log('✅ PostGIS já está instalado');
     }
     
-    // Sincronizar modelos (apenas em desenvolvimento)
-    if (process.env.NODE_ENV === 'development') {
+    // Sincronizar modelos (apenas explicitamente habilitado via SEQUELIZE_UNSAFE_SYNC=true)
+    if (process.env.NODE_ENV !== 'production' && process.env.SEQUELIZE_UNSAFE_SYNC === 'true') {
       await sequelize.sync({ alter: true });
       console.log('✅ Modelos sincronizados');
     }
 
     // Migração: garante coluna external_message_id em hybrid_messages (todos os ambientes)
     await ensureExternalMessageIdColumn();
+
+    // Garante índices críticos (CREATE INDEX IF NOT EXISTS — não bloqueia se já existirem)
+    await ensureIndexes();
   } catch (error) {
     console.error('❌ Erro ao conectar com PostgreSQL:', error.message);
     process.exit(1);

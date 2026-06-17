@@ -24,7 +24,7 @@ export function BrazilMap({ metric, valuesByUf, dataRevision = 0 }: BrazilMapPro
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadGeojson = async () => {
+  const loadGeojson = async (outerSignal?: AbortSignal) => {
     const envUrl = (import.meta.env.VITE_BRAZIL_STATES_GEOJSON_URL as string | undefined)?.trim();
     const tryUrls = [
       ...(envUrl ? [envUrl] : []),
@@ -37,8 +37,10 @@ export function BrazilMap({ metric, valuesByUf, dataRevision = 0 }: BrazilMapPro
       setError(null);
       let lastStatus = 0;
       for (const url of tryUrls) {
+        if (outerSignal?.aborted) return;
         const controller = new AbortController();
         const t = window.setTimeout(() => controller.abort(), 60_000);
+        outerSignal?.addEventListener('abort', () => controller.abort(), { once: true });
         try {
           // eslint-disable-next-line no-await-in-loop
           const response = await fetch(url, { signal: controller.signal });
@@ -49,9 +51,12 @@ export function BrazilMap({ metric, valuesByUf, dataRevision = 0 }: BrazilMapPro
           if (!data || data.type !== 'FeatureCollection' || !Array.isArray(data.features)) {
             continue;
           }
-          setGeojsonData(normalizeBrazilStatesFeatureCollection(data));
+          if (!outerSignal?.aborted) {
+            setGeojsonData(normalizeBrazilStatesFeatureCollection(data));
+          }
           return;
         } catch {
+          if (outerSignal?.aborted) return;
           // tenta próxima URL
         } finally {
           window.clearTimeout(t);
@@ -63,15 +68,18 @@ export function BrazilMap({ metric, valuesByUf, dataRevision = 0 }: BrazilMapPro
           : 'Não foi possível carregar a malha dos estados. Verifique a rede ou defina VITE_BRAZIL_STATES_GEOJSON_URL.'
       );
     } catch (err) {
+      if (outerSignal?.aborted) return;
       setGeojsonData(null);
       setError(err instanceof Error ? err.message : 'Falha ao carregar dados do mapa');
     } finally {
-      setLoading(false);
+      if (!outerSignal?.aborted) setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadGeojson();
+    const controller = new AbortController();
+    void loadGeojson(controller.signal);
+    return () => controller.abort();
   }, []);
 
   const layerKey = useMemo(() => `${metric}-${dataRevision}`, [metric, dataRevision]);
