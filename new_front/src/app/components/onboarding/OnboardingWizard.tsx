@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useUser } from '@clerk/clerk-react';
-import { Check, ChevronRight } from 'lucide-react';
+import { Check, ChevronRight, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { Modal } from '../ui/Modal';
 import { Select } from '../ui/Select';
@@ -15,18 +15,20 @@ import { STORAGE_KEYS } from '../../../lib/storage/storageKeys';
 const UF_OPTIONS = [UF_SELECT_PLACEHOLDER_OPTION, ...brazilUfSelectOptionsAlphabetical()];
 const CROP_OPTIONS = PRODUCTIVITY_CROP_OPTIONS.filter((o) => o.value !== '');
 
-const STEPS = ['Estado', 'Município', 'Culturas'] as const;
+const STEPS = ['Estado', 'Município', 'Culturas', 'Privacidade'] as const;
 
 const STEP_TITLE = [
   'Qual é o seu estado?',
   'Qual é o seu município?',
   'Quais culturas você acompanha?',
+  'Política de Privacidade',
 ];
 
 const STEP_DESC = [
   'Vamos personalizar os dados climáticos e alertas para a sua região.',
   'Com o município definido, os dados são ainda mais precisos para a sua localidade.',
   'Escolha as culturas de interesse para receber alertas e análises relevantes. Você pode selecionar várias — ou pular esta etapa.',
+  'Leia como tratamos seus dados pessoais em conformidade com a LGPD (Lei 13.709/2018).',
 ];
 
 interface OnboardingWizardProps {
@@ -40,6 +42,7 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
   const [uf, setUf] = useState('');
   const [municipio, setMunicipio] = useState('');
   const [culturas, setCulturas] = useState<string[]>([]);
+  const [lgpdConsent, setLgpdConsent] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const ufIbgeId = uf ? UF_IBGE_ID_BY_SIGLA[uf] : undefined;
@@ -50,6 +53,7 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
   function canAdvance() {
     if (step === 0) return /^[A-Z]{2}$/.test(uf);
     if (step === 1) return municipio !== '';
+    if (step === 3) return lgpdConsent;
     return true;
   }
 
@@ -73,7 +77,11 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
     if (!user?.id) return;
     setSaving(true);
     try {
-      await putMyDualProfile(user.id, { uf, municipio: municipio || undefined });
+      await putMyDualProfile(user.id, {
+        uf,
+        municipio: municipio || undefined,
+        lgpdConsentDate: new Date().toISOString(),
+      });
       if (culturas.length > 0) {
         localStorage.setItem(STORAGE_KEYS.CULTURAS_PREFERIDAS, JSON.stringify(culturas));
       }
@@ -173,6 +181,69 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
             })}
           </div>
         )}
+
+        {step === 3 && (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground space-y-3 max-h-52 overflow-y-auto">
+              <div className="flex items-center gap-2 text-foreground font-medium">
+                <Shield className="w-4 h-4 text-primary shrink-0" />
+                Política de Privacidade — ClimaAgro
+              </div>
+              <p>
+                O ClimaAgro coleta e processa seus dados pessoais (nome, e-mail, telefone e
+                localização) exclusivamente para personalizar alertas climáticos, relatórios
+                agrícolas e consultas ao IAgro, conforme o <strong>art. 7º, I</strong> da
+                LGPD (Lei 13.709/2018).
+              </p>
+              <p>
+                <strong>Dados coletados:</strong> nome, e-mail, telefone, UF e município,
+                histórico de conversas com o IAgro e preferências de notificação. Para
+                agrônomos parceiros, também são coletados CPF e registro CREA para fins
+                de verificação profissional.
+              </p>
+              <p>
+                <strong>Compartilhamento:</strong> seus dados não são vendidos nem
+                compartilhados com terceiros. Agrônomos parceiros recebem somente o resumo
+                do caso quando você solicita atendimento humano.
+              </p>
+              <p>
+                <strong>Retenção:</strong> histórico de chat e relatórios são mantidos por
+                até 2 anos ou até a exclusão da conta.
+              </p>
+              <p>
+                <strong>Seus direitos (art. 18 da LGPD):</strong> você pode acessar,
+                corrigir ou excluir seus dados a qualquer momento em{' '}
+                <em>Perfil → Excluir Conta</em>.
+              </p>
+              <p>
+                <strong>Encarregado de Dados (DPO):</strong>{' '}
+                joaopedromendesmello@gmail.com
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setLgpdConsent((v) => !v)}
+              className={`w-full flex items-start gap-3 px-4 py-3 rounded-lg border text-sm text-left transition-colors ${
+                lgpdConsent
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-card text-foreground hover:border-primary/40'
+              }`}
+            >
+              <div
+                className={`w-5 h-5 rounded border shrink-0 mt-0.5 flex items-center justify-center transition-colors ${
+                  lgpdConsent ? 'bg-primary border-primary' : 'border-border'
+                }`}
+              >
+                {lgpdConsent && <Check className="w-3 h-3 text-primary-foreground" />}
+              </div>
+              <span>
+                Li e aceito a Política de Privacidade do ClimaAgro e consinto com o
+                tratamento dos meus dados pessoais conforme descrito acima.
+              </span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Footer */}
@@ -199,10 +270,10 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
           >
             {step < STEPS.length - 1 ? (
               <>
-                Próximo <ChevronRight className="w-4 h-4" />
+                {step === 2 ? 'Próximo' : 'Próximo'} <ChevronRight className="w-4 h-4" />
               </>
             ) : (
-              'Concluir'
+              'Aceitar e Concluir'
             )}
           </Button>
         </div>

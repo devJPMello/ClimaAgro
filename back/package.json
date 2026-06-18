@@ -24,6 +24,7 @@
     "migrate:productivity-label": "node src/scripts/migrateProductivityProductLabel.js",
     "migrate:productivity-municipality": "node src/scripts/migrateProductivityMunicipalityColumns.js",
     "migrate:productivity-crop-type-varchar": "node src/scripts/migrateCropTypeEnumToVarchar.js",
+    "migrate:lgpd-consent-date": "node src/scripts/migrateLgpdConsentDate.js",
     "geo:ensure-tocantins-municipios": "node src/scripts/ensureTocantinsMunicipiosGeoData.js",
     "geo:geocode-tocantins": "node src/scripts/geocodeTocantinsMunicipiosGeoData.js",
     "geo:ensure-brazil-states": "node src/scripts/ensureBrazilStatesGeoData.js"

@@ -11,6 +11,7 @@ export type DualProfileDto = {
   notifAlertasCriticos: boolean;
   notifRelatorios: boolean;
   notifAtualizacoes: boolean;
+  lgpdConsentDate: string | null;
 };
 
 function clerkHeaders(clerkUserId: string): Record<string, string> {
@@ -39,10 +40,17 @@ export async function putMyDualProfile(
     notifAlertasCriticos?: boolean;
     notifRelatorios?: boolean;
     notifAtualizacoes?: boolean;
+    lgpdConsentDate?: string;
   }
 ): Promise<DualProfileDto> {
   const res = await httpClient.put<{ profile: DualProfileDto }>('dual-profile/me', body, {
     headers: clerkHeaders(clerkUserId),
   });
   return res.profile;
+}
+
+export async function deleteMyAccount(clerkUserId: string): Promise<void> {
+  await httpClient.delete('dual-profile/me', {
+    headers: clerkHeaders(clerkUserId),
+  });
 }

@@ -101,6 +101,12 @@ const DualUserProfile = sequelize.define(
       defaultValue: false,
       field: 'notif_atualizacoes',
     },
+    /** Data em que o usuário aceitou a Política de Privacidade (LGPD art. 7º, I). */
+    lgpdConsentDate: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'lgpd_consent_date',
+    },
   },
   {
     tableName: 'dual_user_profiles',

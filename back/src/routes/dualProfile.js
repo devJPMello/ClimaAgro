@@ -1,5 +1,6 @@
 const express = require('express');
 const { models } = require('../config/database');
+const { Op } = require('sequelize');
 const { normalizeUf } = require('../utils/brazilUfs');
 
 const router = express.Router();
@@ -19,7 +20,7 @@ router.get('/me', async (req, res) => {
     }
     const row = await models.DualUserProfile.findOne({
       where: { clerkUserId },
-      attributes: ['uf', 'municipio', 'nome', 'email', 'telefone', 'tipo', 'notifAlertasCriticos', 'notifRelatorios', 'notifAtualizacoes'],
+      attributes: ['uf', 'municipio', 'nome', 'email', 'telefone', 'tipo', 'notifAlertasCriticos', 'notifRelatorios', 'notifAtualizacoes', 'lgpdConsentDate'],
     });
     return res.json({ profile: row });
   } catch (e) {
@@ -97,11 +98,12 @@ router.put('/me', async (req, res) => {
       if (typeof body.notifAlertasCriticos === 'boolean') patch.notifAlertasCriticos = body.notifAlertasCriticos;
       if (typeof body.notifRelatorios === 'boolean') patch.notifRelatorios = body.notifRelatorios;
       if (typeof body.notifAtualizacoes === 'boolean') patch.notifAtualizacoes = body.notifAtualizacoes;
+      if (body.lgpdConsentDate) patch.lgpdConsentDate = new Date(body.lgpdConsentDate);
       if (Object.keys(patch).length) {
         await row.update(patch);
       }
       await row.reload({
-        attributes: ['uf', 'municipio', 'nome', 'email', 'telefone', 'tipo', 'notifAlertasCriticos', 'notifRelatorios', 'notifAtualizacoes'],
+        attributes: ['uf', 'municipio', 'nome', 'email', 'telefone', 'tipo', 'notifAlertasCriticos', 'notifRelatorios', 'notifAtualizacoes', 'lgpdConsentDate'],
       });
     }
 
@@ -116,11 +118,44 @@ router.put('/me', async (req, res) => {
         notifAlertasCriticos: row.notifAlertasCriticos,
         notifRelatorios: row.notifRelatorios,
         notifAtualizacoes: row.notifAtualizacoes,
+        lgpdConsentDate: row.lgpdConsentDate ?? null,
       },
     });
   } catch (e) {
     console.error('dual-profile PUT /me:', e);
     return res.status(500).json({ message: 'Erro ao salvar perfil.' });
+  }
+});
+
+/**
+ * DELETE /api/dual-profile/me — exclui todos os dados do usuário (LGPD art. 18, VI — direito ao esquecimento).
+ * Remove: DualUserProfile, ChatHistory, HybridConversation.
+ */
+router.delete('/me', async (req, res) => {
+  try {
+    const clerkUserId = clerkUserIdFromReq(req);
+    if (!clerkUserId) {
+      return res.status(401).json({ message: 'Faça login.' });
+    }
+
+    const profile = await models.DualUserProfile.findOne({ where: { clerkUserId } });
+    if (!profile) {
+      return res.status(404).json({ message: 'Perfil não encontrado.' });
+    }
+
+    await Promise.all([
+      models.ChatHistory.destroy({ where: { clerkUserId } }),
+      models.HybridConversation.destroy({ where: { produtorClerkId: clerkUserId } }),
+    ]);
+    await profile.destroy();
+
+    return res.json({
+      success: true,
+      message: 'Conta e dados pessoais removidos com sucesso. Conforme a LGPD, art. 18, VI.',
+    });
+  } catch (e) {
+    console.error('dual-profile DELETE /me:', e);
+    return res.status(500).json({ message: 'Erro ao excluir conta.' });
   }
 });
 

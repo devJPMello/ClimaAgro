@@ -4,20 +4,21 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
 import { Checkbox } from '../components/ui/Checkbox';
-import { User, Mail, Moon, Phone, MapPin, Bell, FileText, Calendar, Sun } from 'lucide-react';
+import { User, Mail, Moon, Phone, MapPin, Bell, FileText, Calendar, Sun, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import { useUser } from '@clerk/clerk-react';
+import { useUser, useClerk } from '@clerk/clerk-react';
 import { TO_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
 import { UF_NOME } from '../../lib/geo/brazilStatesMalha';
 import { UF_IBGE_ID_BY_SIGLA } from '../../lib/geo/ufIbgeIds';
 import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
-import { getMyDualProfile, putMyDualProfile } from '../../lib/api/dualProfileApi';
+import { getMyDualProfile, putMyDualProfile, deleteMyAccount } from '../../lib/api/dualProfileApi';
 import { listReportExports } from '../../lib/api/reportExportsApi';
 import { listClimateAlerts } from '../../lib/api/alertsApi';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { EmptyState } from '../components/ui/EmptyState';
+import { Modal } from '../components/ui/Modal';
 import { STORAGE_KEYS } from '../../lib/storage/storageKeys';
 
 type StatItem = {
@@ -68,7 +69,10 @@ function calcDaysSince(value: Date | number | null | undefined): string {
 export function Perfil() {
   const { theme, setTheme } = useTheme();
   const { user } = useUser();
+  const { signOut } = useClerk();
   const [editando, setEditando] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
   const [telefone, setTelefone] = useState('');
@@ -99,6 +103,7 @@ export function Perfil() {
         if (p?.uf && UF_IBGE_ID_BY_SIGLA[p.uf]) {
           setUfSigla(p.uf);
         }
+        if (p?.telefone) setTelefone(p.telefone);
         if (p?.notifAlertasCriticos !== undefined) setNotifAlertasCriticos(p.notifAlertasCriticos);
         if (p?.notifRelatorios !== undefined) setNotifRelatorios(p.notifRelatorios);
         if (p?.notifAtualizacoes !== undefined) setNotifAtualizacoes(p.notifAtualizacoes);
@@ -210,6 +215,21 @@ export function Perfil() {
       if (field === 'notifRelatorios') setNotifRelatorios(!value);
       if (field === 'notifAtualizacoes') setNotifAtualizacoes(!value);
       toast.error('Não foi possível salvar a preferência.');
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!user?.id) return;
+    setDeleting(true);
+    try {
+      await deleteMyAccount(user.id);
+      toast.success('Conta excluída. Seus dados foram removidos conforme a LGPD.');
+      await signOut();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Não foi possível excluir a conta.';
+      toast.error(msg);
+      setDeleting(false);
+      setConfirmDelete(false);
     }
   };
 
@@ -346,24 +366,67 @@ export function Perfil() {
 
               {editando && (
                 <>
-                  <div className="flex gap-3 pt-4">
-                    <Button variant="primary" onClick={handleSalvar}>
-                      Salvar Alterações
-                    </Button>
-                    <Button variant="ghost" onClick={() => setEditando(false)}>
-                      Cancelar
+                  <div className="flex items-center justify-between gap-3 pt-4">
+                    <div className="flex gap-3">
+                      <Button variant="primary" onClick={handleSalvar}>
+                        Salvar Alterações
+                      </Button>
+                      <Button variant="ghost" onClick={() => setEditando(false)}>
+                        Cancelar
+                      </Button>
+                    </div>
+                    <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+                      Excluir Conta
                     </Button>
                   </div>
 
-                  <hr className="border-border" />
-
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium">Zona de perigo</p>
-                    <Button variant="danger" className="w-full">Excluir Conta</Button>
-                    <p className="text-xs text-muted-foreground">
-                      Esta ação é irreversível e todos os seus dados serão removidos.
-                    </p>
-                  </div>
+                  <Modal
+                    isOpen={confirmDelete}
+                    onClose={() => !deleting && setConfirmDelete(false)}
+                    title="Excluir Conta"
+                    size="md"
+                    footer={
+                      <>
+                        <Button
+                          variant="ghost"
+                          onClick={() => setConfirmDelete(false)}
+                          disabled={deleting}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          variant="danger"
+                          onClick={() => void handleDeleteAccount()}
+                          loading={deleting}
+                          disabled={deleting}
+                        >
+                          Confirmar exclusão
+                        </Button>
+                      </>
+                    }
+                  >
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-center w-14 h-14 rounded-full bg-destructive/10 mx-auto">
+                        <AlertTriangle className="w-7 h-7 text-destructive" />
+                      </div>
+                      <p className="text-center text-sm font-medium text-foreground">
+                        Tem certeza que deseja excluir sua conta?
+                      </p>
+                      <p className="text-sm text-muted-foreground text-center">
+                        Esta ação é <strong>irreversível</strong>. Os seguintes dados serão
+                        removidos permanentemente:
+                      </p>
+                      <ul className="text-sm text-muted-foreground space-y-1.5 pl-4 list-disc">
+                        <li>Perfil e informações pessoais</li>
+                        <li>Histórico de conversas com o IAgro</li>
+                        <li>Conversas com agrônomos parceiros</li>
+                      </ul>
+                      <p className="text-xs text-muted-foreground text-center border-t border-border pt-3">
+                        Conforme o art. 18, VI da LGPD — direito ao esquecimento.
+                        Você será desconectado automaticamente.
+                      </p>
+                    </div>
+                  </Modal>
                 </>
               )}
             </CardBody>
