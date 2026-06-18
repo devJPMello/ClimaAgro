@@ -13,6 +13,11 @@ const { Op } = require('sequelize');
 
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
+// Scripts precisam de conexão direta (sem PgBouncer pooler) para DDL e bulk inserts no Neon.
+if (process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = process.env.DATABASE_URL.replace(/-pooler(\.\w)/, '$1');
+}
+
 const { sequelize, models } = require('../config/database');
 const { IbgeSidra1612Row, Productivity, GeoData } = models;
 const { mapProductLabelToCropType } = require('../utils/sidra1612ProductCropMap');
@@ -199,7 +204,17 @@ async function main() {
   const filterYear = parseYearArg();
   const filterPeriod = parsePeriodArg();
 
-  await sequelize.authenticate();
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await sequelize.authenticate();
+      break;
+    } catch (err) {
+      if (attempt === 5) throw err;
+      console.log(`⏳ Banco indisponível (Neon acordando?), aguardando 3s... (${attempt}/5)`);
+      await new Promise((r) => setTimeout(r, 3000));
+      sequelize.connectionManager.pool.clear();
+    }
+  }
   await Productivity.sync({ alter: true });
   await IbgeSidra1612Row.sync({ alter: true });
   await ensureMonthlyUniqueConstraint();

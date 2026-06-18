@@ -15,6 +15,7 @@ import {
   Bot,
   Handshake,
   MessagesSquare,
+  ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useClerk, useUser } from '@clerk/clerk-react';
@@ -35,6 +36,7 @@ const navigationMain = [
 ];
 
 const perfilNavItem = { name: 'Perfil', path: '/perfil', icon: User };
+const adminNavItem = { name: 'Admin — Agrônomos', path: '/admin/agronomos', icon: ShieldCheck };
 
 const navigation = [...navigationMain, perfilNavItem];
 
@@ -68,6 +70,13 @@ export function RootLayout() {
 
   const userName = user?.fullName || user?.firstName || 'Usuário';
   const userEmail = user?.primaryEmailAddress?.emailAddress || 'sem-email@conta.com';
+
+  const adminIds = (import.meta.env.VITE_ADMIN_USER_IDS as string | undefined ?? '')
+    .split(',')
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+  const isAdmin = adminIds.length > 0 && !!user?.id && adminIds.includes(user.id);
+  const navItems = isAdmin ? [...navigation, adminNavItem] : navigation;
 
   const handleLogout = async () => {
     setUserMenuOpen(false);
@@ -114,7 +123,7 @@ export function RootLayout() {
 
           {/* Navigation */}
           <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
-            {navigation.map((item) => {
+            {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
               const isAlertas = item.path === '/alertas';

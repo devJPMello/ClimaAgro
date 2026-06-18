@@ -115,7 +115,7 @@ router.post('/cadastro', async (req, res) => {
         crea,
         cpf: cpfDigits,
         parceiro: true,
-        parceiroAtivo: true,
+        parceiroAtivo: false,
         whatsapp,
       },
     });
@@ -130,7 +130,6 @@ router.post('/cadastro', async (req, res) => {
         crea,
         cpf: cpfDigits,
         parceiro: true,
-        parceiroAtivo: true,
         whatsapp,
       });
     }
@@ -138,8 +137,8 @@ router.post('/cadastro', async (req, res) => {
     return res.status(created ? 201 : 200).json({
       success: true,
       message: created
-        ? 'Cadastro de agrônomo parceiro realizado com sucesso.'
-        : 'Cadastro de agrônomo parceiro atualizado com sucesso.',
+        ? 'Cadastro recebido com sucesso! Seu perfil passará por análise antes de aparecer na plataforma.'
+        : 'Cadastro atualizado. Aguarde a revisão pela equipe ClimaAgro.',
     });
   } catch (error) {
     return res.status(500).json({ message: 'Falha ao cadastrar agrônomo parceiro.' });

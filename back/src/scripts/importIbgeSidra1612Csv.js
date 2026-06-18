@@ -13,6 +13,11 @@ const path = require('path');
 
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
+// Scripts precisam de conexão direta (sem PgBouncer pooler) para DDL e bulk inserts no Neon.
+if (process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = process.env.DATABASE_URL.replace(/-pooler(\.\w)/, '$1');
+}
+
 const { sequelize, models } = require('../config/database');
 const { IbgeSidra1612Row, GeoData } = models;
 const { normalizeMunicipalityKey } = require('../utils/municipalityNameMatch');
@@ -60,6 +65,8 @@ function parseDataLine(line) {
     cur += ch;
   }
   parts.push(cur);
+  // Suporta CSV sem coluna Período (5 cols) inserindo vazio na posição 1
+  if (parts.length === 5) parts.splice(1, 0, '');
   if (parts.length !== 6) return null;
   return parts.map((p) => String(p).trim());
 }
@@ -107,6 +114,20 @@ async function loadGeoDataIdByStateName() {
   return map;
 }
 
+async function connectWithRetry(retries = 5, delayMs = 3000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await sequelize.authenticate();
+      return;
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      console.log(`⏳ Banco indisponível (Neon acordando?), aguardando ${delayMs / 1000}s... (${i + 1}/${retries})`);
+      await new Promise((r) => setTimeout(r, delayMs));
+      sequelize.connectionManager.pool.clear();
+    }
+  }
+}
+
 async function main() {
   const { replace } = parseArgs();
   const csvPath = resolveCsvPath();
@@ -116,7 +137,7 @@ async function main() {
     process.exit(1);
   }
 
-  await sequelize.authenticate();
+  await connectWithRetry();
   await IbgeSidra1612Row.sync({ alter: true });
 
   if (replace) {

@@ -93,7 +93,7 @@ export const PRODUCTIVITY_CROP_OPTIONS = [
 
 export function getProductivityYearOptions(): Array<{ value: string; label: string }> {
   const currentYear = new Date().getFullYear();
-  return Array.from({ length: 5 }, (_, idx) => {
+  return Array.from({ length: 4 }, (_, idx) => {
     const year = String(currentYear - idx);
     return { value: year, label: year };
   });

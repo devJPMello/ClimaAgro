@@ -12,6 +12,7 @@ import { ExportarRelatorios } from "./pages/ExportarRelatorios";
 import { IAgro } from "./pages/IAgro";
 import { MinhasConversas } from "./pages/MinhasConversas";
 import { AgronomosParceiros } from "./pages/AgronomosParceiros";
+import { AdminAgronomos } from "./pages/AdminAgronomos";
 import { Perfil } from "./pages/Perfil";
 import { NotFound } from "./pages/NotFound";
 import { RequireAuth, RequireGuest } from "./components/auth/RouteGuards";
@@ -54,6 +55,7 @@ export const router = createBrowserRouter([
       { path: "iagro", Component: IAgro },
       { path: "minhas-conversas", Component: MinhasConversas },
       { path: "parceiros", Component: AgronomosParceiros },
+      { path: "admin/agronomos", Component: AdminAgronomos },
       { path: "perfil", Component: Perfil },
       { path: "*", Component: NotFound },
     ],

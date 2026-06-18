@@ -182,7 +182,18 @@ function aggregateProductivityByMonthYear(
     const p = num(r.productivity);
     if (p == null) continue;
     const key = String(r.periodRef || '').trim();
-    if (!/^\d{4}-\d{2}$/.test(key)) continue;
+    if (!/^\d{4}-\d{2}$/.test(key)) {
+      // Dado anual (IBGE/CONAB) sem mês: distribui o valor por todos os meses do ano
+      const yr = String(r.year || '').trim();
+      if (/^\d{4}$/.test(yr)) {
+        for (let m = 1; m <= 12; m++) {
+          const ym = `${yr}-${String(m).padStart(2, '0')}`;
+          if (!map.has(ym)) map.set(ym, []);
+          map.get(ym)!.push(p);
+        }
+      }
+      continue;
+    }
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(p);
   }
@@ -448,44 +459,61 @@ export function SeriesTemporais() {
       ]);
 
       let climateMonthly = aggregateClimateByMonth(tempSeries, precipSeries, humSeries, startYear, endYear);
-      const monthsWithAnyClimate = climateMonthly.filter(
-        (m) => m.temperatura !== 0 || m.umidade !== 0 || m.precipitacao !== 0
-      ).length;
 
-      if (monthsWithAnyClimate < 3 && /^[A-Z]{2}$/.test(uf)) {
-        const byMonth = new Map<string, { t: number[]; h: number[]; p: number[] }>();
+      if (/^[A-Z]{2}$/.test(uf)) {
+        const allYmKeys = buildYearMonthKeysRange(startYear, endYear);
         const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
         const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
-        const fallbackTasks = Array.from({ length: ye - ys + 1 }, (_, idx) => ({ stateUf: uf, y: String(ys + idx) }));
-        const fallbackResponses = await concurrentMap(
-          fallbackTasks, MAX_CONCURRENT,
-          ({ stateUf, y }) => getClimateVsProductivity({ state: stateUf, cropType: undefined, season: seasonFromYear(y) }),
-        );
-        for (const fallback of fallbackResponses) {
-          if (!(fallback.success && Array.isArray(fallback.data) && fallback.data.length)) continue;
-          for (const row of fallback.data) {
-            const ym = String(row.month || '').trim();
-            if (!/^\d{4}-\d{2}$/.test(ym)) continue;
-            if (!byMonth.has(ym)) byMonth.set(ym, { t: [], h: [], p: [] });
-            const b = byMonth.get(ym)!;
-            const t = Number(row.avgTemperature ?? NaN);
-            const h = Number(row.avgHumidity ?? NaN);
-            const p = Number(row.climate ?? NaN);
-            if (Number.isFinite(t)) b.t.push(t);
-            if (Number.isFinite(h)) b.h.push(h);
-            if (Number.isFinite(p)) b.p.push(p);
+
+        // Verifica cobertura por ano (quantos meses têm dado real no banco)
+        const yearCoverage = new Map<string, number>();
+        for (let i = 0; i < allYmKeys.length; i++) {
+          const year = allYmKeys[i].slice(0, 4);
+          const row = climateMonthly[i];
+          const hasData = row.temperatura !== 0 || row.umidade !== 0 || row.precipitacao !== 0;
+          yearCoverage.set(year, (yearCoverage.get(year) ?? 0) + (hasData ? 1 : 0));
+        }
+
+        // Busca open-meteo apenas para os anos sem dados suficientes no banco
+        const yearsNeedingFallback = Array.from({ length: ye - ys + 1 }, (_, i) => String(ys + i))
+          .filter((y) => (yearCoverage.get(y) ?? 0) < 3);
+
+        if (yearsNeedingFallback.length > 0) {
+          const fallbackResponses = await concurrentMap(
+            yearsNeedingFallback, MAX_CONCURRENT,
+            (y) => getClimateVsProductivity({ state: uf, cropType: undefined, season: seasonFromYear(y) }),
+          );
+          const openMeteoByYm = new Map<string, { t: number[]; h: number[]; p: number[] }>();
+          for (const fallback of fallbackResponses) {
+            if (!(fallback.success && Array.isArray(fallback.data) && fallback.data.length)) continue;
+            for (const row of fallback.data) {
+              const ym = String(row.month || '').trim();
+              if (!/^\d{4}-\d{2}$/.test(ym)) continue;
+              if (!openMeteoByYm.has(ym)) openMeteoByYm.set(ym, { t: [], h: [], p: [] });
+              const b = openMeteoByYm.get(ym)!;
+              const t = Number(row.avgTemperature ?? NaN);
+              const h = Number(row.avgHumidity ?? NaN);
+              const p = Number(row.climate ?? NaN);
+              if (Number.isFinite(t)) b.t.push(t);
+              if (Number.isFinite(h)) b.h.push(h);
+              if (Number.isFinite(p)) b.p.push(p);
+            }
+          }
+          // Substitui apenas os meses dos anos que precisavam de fallback
+          for (let i = 0; i < allYmKeys.length; i++) {
+            const ym = allYmKeys[i];
+            if (!yearsNeedingFallback.includes(ym.slice(0, 4))) continue;
+            const it = openMeteoByYm.get(ym);
+            if (!it) continue;
+            const avg = (arr: number[]) => (arr.length ? arr.reduce((a, x) => a + x, 0) / arr.length : 0);
+            climateMonthly[i] = {
+              mes: mesLabelFromYm(ym),
+              temperatura: Math.round(avg(it.t) * 10) / 10,
+              umidade: Math.round(avg(it.h) * 10) / 10,
+              precipitacao: Math.round(avg(it.p) * 10) / 10,
+            };
           }
         }
-        climateMonthly = buildYearMonthKeysRange(startYear, endYear).map((ym) => {
-          const it = byMonth.get(ym);
-          const avg = (arr?: number[]) => (arr && arr.length ? arr.reduce((a, x) => a + x, 0) / arr.length : 0);
-          return {
-            mes: mesLabelFromYm(ym),
-            temperatura: Math.round(avg(it?.t) * 10) / 10,
-            umidade: Math.round(avg(it?.h) * 10) / 10,
-            precipitacao: Math.round(avg(it?.p) * 10) / 10,
-          };
-        });
       }
 
       setDadosClimaticos(climateMonthly);
