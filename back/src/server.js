@@ -111,6 +111,30 @@ app.use(
 app.use(['/api/reports', '/api/superset'], reportLimiter);
 app.use('/api/ai', aiLimiter);
 
+// Documentação Swagger — /api/docs (sem rate limit, sem auth)
+{
+  const swaggerUi = require('swagger-ui-express');
+  const YAML = require('yamljs');
+  const path = require('path');
+  const swaggerDoc = YAML.load(path.join(__dirname, 'docs/openapi.yaml'));
+  app.use(
+    '/api/docs',
+    // Swagger UI precisa de inline scripts/styles — relaxa CSP apenas nesta rota
+    (req, res, next) => {
+      res.setHeader(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      );
+      next();
+    },
+    swaggerUi.serve,
+    swaggerUi.setup(swaggerDoc, {
+      customSiteTitle: 'ClimaAgro API Docs',
+      swaggerOptions: { persistAuthorization: true },
+    })
+  );
+}
+
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/weather', require('./routes/weather'));

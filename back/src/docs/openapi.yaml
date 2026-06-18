@@ -1,0 +1,1090 @@
+openapi: 3.0.3
+
+info:
+  title: ClimaAgro API
+  description: |
+    API do sistema **ClimaAgro** — plataforma de monitoramento climático e produtividade agrícola para produtores brasileiros.
+
+    ## Visão Geral
+    A API integra dados de fontes oficiais (CPTEC/INPE, INMET, IBGE/SIDRA) com funcionalidades de:
+    - Consulta de séries temporais climáticas por estado
+    - Alertas meteorológicos oficiais multi-fonte
+    - Relatórios exportáveis (PDF/CSV)
+    - Consultoria agronômica via IA (Google Gemini)
+    - Escalada para agrônomos parceiros via WhatsApp
+
+    ## Autenticação
+    A maioria dos endpoints requer autenticação via **Clerk**. Envie o Bearer JWT no header `Authorization`,
+    ou o header `X-Clerk-User-Id` em ambiente de desenvolvimento.
+
+    ## Rate Limiting
+    | Grupo | Limite |
+    |---|---|
+    | Dados climáticos, produtividade, geo | 100 req/min |
+    | Perfil, chat híbrido, agrônomos | 30 req/min |
+    | Relatórios | 20 req/min |
+    | IA | 20 req/min |
+
+  version: 1.0.0
+  contact:
+    name: ClimaAgro — TCC
+    email: joaopedromendesmello@gmail.com
+
+servers:
+  - url: http://localhost:5000
+    description: Desenvolvimento local
+  - url: https://api.climaagro.app
+    description: Produção (Cloudflare Tunnel)
+
+tags:
+  - name: Clima
+    description: Dados climáticos (CPTEC, Open-Meteo, INMET)
+  - name: Produtividade
+    description: Dados agrícolas (IBGE/SIDRA tabela 1612)
+  - name: Alertas
+    description: Alertas meteorológicos oficiais
+  - name: Relatórios
+    description: Exportação de relatórios PDF/CSV
+  - name: Chat Híbrido
+    description: Escalada IA → agrônomo parceiro via WhatsApp
+  - name: Perfil
+    description: Perfil do usuário (produtor ou agrônomo)
+  - name: Agrônomos
+    description: Diretório de agrônomos parceiros
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Componentes reutilizáveis
+# ──────────────────────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT emitido pelo Clerk após autenticação
+    ClerkUserIdHeader:
+      type: apiKey
+      in: header
+      name: X-Clerk-User-Id
+      description: Fallback de desenvolvimento (desabilitado em produção com CLERK_SECRET_KEY)
+
+  schemas:
+    # ── Erro padrão ─────────────────────────────────────────────────────────
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: Erro interno do servidor.
+
+    ValidationError:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+
+    # ── Clima ────────────────────────────────────────────────────────────────
+    ClimateSeriesPoint:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+          example: "2025-01-15"
+        uf:
+          type: string
+          example: TO
+        value:
+          type: number
+          format: float
+          example: 28.4
+
+    ClimateEstatisticas:
+      type: object
+      properties:
+        media:
+          type: number
+          example: 26.1
+        min:
+          type: number
+          example: 18.5
+        max:
+          type: number
+          example: 38.2
+
+    ClimateSeriesResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        metadata:
+          type: object
+          properties:
+            uf:
+              type: string
+              example: TO
+            periodo:
+              type: object
+              properties:
+                start:
+                  type: string
+                  format: date
+                end:
+                  type: string
+                  format: date
+            variavel:
+              type: string
+              example: temperatura_media
+            fonte:
+              type: string
+              example: cptec/open-meteo
+            unidade:
+              type: string
+              example: "°C"
+        serieTemporal:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClimateSeriesPoint'
+        estatisticas:
+          $ref: '#/components/schemas/ClimateEstatisticas'
+        pagination:
+          type: object
+          properties:
+            limit:
+              type: integer
+            offset:
+              type: integer
+            returned:
+              type: integer
+
+    DashboardSummary:
+      type: object
+      properties:
+        kpis:
+          type: array
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+                example: Temperatura Média
+              value:
+                type: number
+                example: 28.4
+              unidade:
+                type: string
+                example: "°C"
+              variacao:
+                type: number
+                example: 1.2
+        regioes:
+          type: array
+          items:
+            type: object
+            properties:
+              uf:
+                type: string
+                example: TO
+              temperatura_media:
+                type: number
+              precipitacao:
+                type: number
+
+    OfficialAlert:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum: [inmet, cptec, rule]
+          example: inmet
+        externalId:
+          type: string
+          example: "INMET-2025-000123"
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+          example: high
+        title:
+          type: string
+          example: "Chuvas intensas no Tocantins"
+        description:
+          type: string
+        validFrom:
+          type: string
+          format: date-time
+        validTo:
+          type: string
+          format: date-time
+        affectedStates:
+          type: array
+          items:
+            type: string
+          example: [TO, PA, MA]
+
+    # ── Relatórios ───────────────────────────────────────────────────────────
+    ReportExportItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tipo:
+          type: string
+          example: Clima
+        local:
+          type: string
+          example: Tocantins
+        periodo:
+          type: string
+          example: Janeiro/2026
+        formato:
+          type: string
+          enum: [PDF, CSV, EXCEL]
+          example: PDF
+        status:
+          type: string
+          enum: [registrado, processando, concluido, falha]
+          example: concluido
+        data:
+          type: string
+          example: "15/01/2026, 10:30:00"
+        foiGeradoComIA:
+          type: boolean
+          example: true
+
+    ReportExportCreateBody:
+      type: object
+      required: [tipo, local, periodo, formato]
+      properties:
+        tipo:
+          type: string
+          maxLength: 160
+          example: Clima
+        local:
+          type: string
+          maxLength: 200
+          example: Tocantins
+        periodo:
+          type: string
+          maxLength: 240
+          example: Janeiro/2026
+        formato:
+          type: string
+          maxLength: 16
+          example: pdf
+        status:
+          type: string
+          enum: [registrado, processando, concluido, falha]
+          default: registrado
+        foiGeradoComIA:
+          type: boolean
+          default: false
+
+    # ── Chat Híbrido ─────────────────────────────────────────────────────────
+    EscalateBody:
+      type: object
+      required: [threadId]
+      properties:
+        threadId:
+          type: string
+          description: ID do tópico de chat com o IAgro
+          example: thread_abc123
+        whatsappAgronomo:
+          type: string
+          description: Número WhatsApp do agrônomo (se auto-pick estiver desativado)
+          example: "5562999991234"
+        agronomoParceiroId:
+          type: string
+          format: uuid
+        produtorNome:
+          type: string
+          example: João da Silva
+        casoDestaque:
+          type: string
+          example: Lagarta do cartucho na soja — 3º instar larval
+        specialtyFilter:
+          type: string
+          example: Pragas
+        autoPickBySpecialty:
+          type: boolean
+          default: false
+          description: Busca automaticamente o agrônomo disponível pela especialidade
+
+    EscalateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        conversationId:
+          type: string
+          format: uuid
+        waUrl:
+          type: string
+          example: "https://wa.me/5562999991234?text=..."
+        summary:
+          type: string
+          description: Corpo da mensagem enviada ao agrônomo via WhatsApp
+        intervencaoHumana:
+          type: boolean
+          example: true
+        atendimentoAtivo:
+          type: boolean
+          example: true
+        agronomoParceiroId:
+          type: string
+          format: uuid
+        agronomoNome:
+          type: string
+          example: Dra. Ana Fitossanitária
+        agronomoEspecialidade:
+          type: string
+          example: Pragas
+
+    # ── Perfil ───────────────────────────────────────────────────────────────
+    DualUserProfile:
+      type: object
+      properties:
+        clerkUserId:
+          type: string
+        nome:
+          type: string
+          example: João da Silva
+        email:
+          type: string
+          format: email
+        telefone:
+          type: string
+          example: "62999991234"
+        uf:
+          type: string
+          example: TO
+        municipio:
+          type: string
+          example: Palmas
+        tipo:
+          type: string
+          enum: [produtor, agronomo]
+        notificacoesAlertas:
+          type: boolean
+        notificacoesRelatorios:
+          type: boolean
+        notificacoesAtualizacoes:
+          type: boolean
+
+    # ── Agrônomos ────────────────────────────────────────────────────────────
+    AgronomistaItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        nome:
+          type: string
+          example: Dra. Maria Oliveira
+        especialidade:
+          type: string
+          example: Fitossanidade
+        crea:
+          type: string
+          example: "GO-12345/D"
+        uf:
+          type: string
+          example: GO
+        avaliacaoMedia:
+          type: number
+          format: float
+          minimum: 1
+          maximum: 5
+          example: 4.8
+        parceiroAtivo:
+          type: boolean
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Paths
+# ──────────────────────────────────────────────────────────────────────────────
+paths:
+
+  # ── Clima ──────────────────────────────────────────────────────────────────
+
+  /api/climate/series:
+    get:
+      tags: [Clima]
+      summary: Série temporal climática por estado
+      description: |
+        Retorna a série temporal de uma variável climática para um estado específico ou
+        a média nacional (`uf=ALL`). Dados oriundos de CPTEC/INPE e Open-Meteo.
+      parameters:
+        - name: uf
+          in: query
+          required: true
+          schema:
+            type: string
+            example: TO
+          description: Sigla do estado (AC–TO) ou `ALL` para agregado nacional
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2025-01-01"
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2025-06-30"
+        - name: variavel
+          in: query
+          required: true
+          schema:
+            type: string
+            enum:
+              - temperatura_media
+              - temperatura_maxima
+              - temperatura_minima
+              - precipitacao
+              - umidade
+              - vento
+              - pressao
+          description: Variável climática desejada
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20000
+            default: 365
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: perUf
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Quando `uf=ALL`, divide a série por estado ao invés de agregar
+      responses:
+        '200':
+          description: Série temporal retornada com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClimateSeriesResponse'
+              example:
+                success: true
+                metadata:
+                  uf: TO
+                  periodo:
+                    start: "2025-01-01"
+                    end: "2025-06-30"
+                  variavel: temperatura_media
+                  fonte: cptec/open-meteo
+                  unidade: "°C"
+                serieTemporal:
+                  - date: "2025-01-01"
+                    uf: TO
+                    value: 28.4
+                  - date: "2025-01-02"
+                    uf: TO
+                    value: 29.1
+                estatisticas:
+                  media: 28.7
+                  min: 22.0
+                  max: 38.5
+                pagination:
+                  limit: 365
+                  offset: 0
+                  returned: 2
+        '400':
+          description: Parâmetros inválidos (UF inexistente, datas inconsistentes, variável desconhecida)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                success: false
+                message: "UF inválida: XX"
+
+  /api/climate/dashboard-summary:
+    get:
+      tags: [Clima]
+      summary: Resumo de KPIs para o painel principal
+      description: Retorna indicadores agregados (temperatura, precipitação, alertas ativos) por região, usados pelo Dashboard.
+      parameters:
+        - name: uf
+          in: query
+          schema:
+            type: string
+            example: TO
+          description: Filtrar por estado (opcional; sem filtro retorna todos)
+      responses:
+        '200':
+          description: Resumo gerado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardSummary'
+
+  /api/climate/ufs:
+    get:
+      tags: [Clima]
+      summary: Lista estados com dados disponíveis
+      description: Retorna as siglas dos estados que possuem ao menos um registro climático no banco.
+      responses:
+        '200':
+          description: Lista de UFs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  ufs:
+                    type: array
+                    items:
+                      type: string
+                    example: [GO, MA, PA, TO]
+
+  /api/climate/sync:
+    post:
+      tags: [Clima]
+      summary: Disparar sincronização de dados climáticos
+      description: |
+        Aciona manualmente a ingestão de dados das fontes oficiais (CPTEC/INPE, Open-Meteo, INMET).
+        Em produção, requer o header `X-ClimaAgro-Sync-Token` com o valor de `CLIMATE_SYNC_SECRET`.
+        Em desenvolvimento sem a variável configurada, o endpoint é aberto.
+      security: []
+      parameters:
+        - name: X-ClimaAgro-Sync-Token
+          in: header
+          schema:
+            type: string
+          description: Token de sincronização (obrigatório em produção)
+      responses:
+        '200':
+          description: Sincronização concluída
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  inserted:
+                    type: integer
+                    example: 24
+                  updated:
+                    type: integer
+                    example: 5
+                  sources:
+                    type: array
+                    items:
+                      type: string
+                    example: [cptec, open-meteo]
+        '401':
+          description: Token ausente ou incorreto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Falha durante a sincronização
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/climate/alerts:
+    get:
+      tags: [Alertas]
+      summary: Listar alertas meteorológicos
+      description: |
+        Retorna alertas de múltiplas fontes: INMET (oficial), CPTEC (derivado) e alertas
+        gerados por regras internas (limiares de temperatura, precipitação, umidade).
+      parameters:
+        - name: uf
+          in: query
+          schema:
+            type: string
+            example: TO
+          description: Filtrar por estado afetado
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+          description: Filtrar por severidade mínima
+        - name: source
+          in: query
+          schema:
+            type: string
+            enum: [inmet, cptec, rule]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Lista de alertas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  alerts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OfficialAlert'
+                  total:
+                    type: integer
+                    example: 3
+
+  # ── Relatórios ─────────────────────────────────────────────────────────────
+
+  /api/reports/exports:
+    get:
+      tags: [Relatórios]
+      summary: Listar exportações do cliente
+      description: Retorna o histórico de exportações associadas ao `X-Export-Client-Id` do navegador (UUID persistido em localStorage).
+      parameters:
+        - name: X-Export-Client-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 64
+          description: UUID do cliente (gerado e persistido pelo frontend)
+      responses:
+        '200':
+          description: Lista de exportações
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReportExportItem'
+        '400':
+          description: Cabeçalho X-Export-Client-Id ausente ou inválido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      tags: [Relatórios]
+      summary: Registrar nova exportação
+      description: |
+        Cria um registro de exportação com status inicial `registrado`.
+        O frontend atualiza o status conforme o processo avança (processando → concluido).
+      parameters:
+        - name: X-Export-Client-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportExportCreateBody'
+            example:
+              tipo: Clima
+              local: Tocantins
+              periodo: Janeiro/2026
+              formato: pdf
+              foiGeradoComIA: true
+      responses:
+        '201':
+          description: Exportação registrada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item:
+                    $ref: '#/components/schemas/ReportExportItem'
+        '400':
+          description: Corpo inválido ou cabeçalho ausente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '500':
+          description: Erro ao registrar exportação
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ── Chat Híbrido ───────────────────────────────────────────────────────────
+
+  /api/hybrid-chat/escalate:
+    post:
+      tags: [Chat Híbrido]
+      summary: Escalar conversa IA para agrônomo parceiro
+      description: |
+        Coleta o histórico recente do IAgro (últimas 5 interações), cria ou atualiza
+        uma `HybridConversation`, envia a mensagem de contexto ao agrônomo via WhatsApp
+        (Evolution API) e retorna o link `wa.me` para o produtor continuar o atendimento.
+
+        **Modos de seleção do agrônomo:**
+        - **Explícito:** envie `whatsappAgronomo` com o número direto
+        - **Auto-pick:** envie `autoPickBySpecialty: true` + `specialtyFilter` para busca automática
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EscalateBody'
+            examples:
+              explicit:
+                summary: Número explícito
+                value:
+                  threadId: thread_abc123
+                  whatsappAgronomo: "5562999991234"
+                  produtorNome: João da Silva
+                  casoDestaque: Lagarta do cartucho na soja
+              autoPick:
+                summary: Auto-pick por especialidade
+                value:
+                  threadId: thread_abc123
+                  produtorNome: João da Silva
+                  specialtyFilter: Pragas
+                  autoPickBySpecialty: true
+      responses:
+        '200':
+          description: Escalada realizada com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscalateResponse'
+        '400':
+          description: threadId ausente, WhatsApp inválido ou sem mensagens IA no tópico
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: Não há mensagens da IA neste tópico para enviar.
+        '401':
+          description: Não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Nenhum agrônomo encontrado para a especialidade solicitada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                message: Nenhum agrônomo parceiro ativo encontrado para a especialidade "Irrigação".
+        '500':
+          description: Falha ao enviar mensagem via WhatsApp
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/hybrid-chat/status:
+    get:
+      tags: [Chat Híbrido]
+      summary: Status da conversa híbrida
+      description: Retorna o estado atual da conversa (ativa, intervenção humana, dados do agrônomo).
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      parameters:
+        - name: threadId
+          in: query
+          required: true
+          schema:
+            type: string
+          example: thread_abc123
+      responses:
+        '200':
+          description: Status retornado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversation:
+                    type: object
+                    nullable: true
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      whatsappAgronomo:
+                        type: string
+                      intervencaoHumana:
+                        type: boolean
+                      atendimentoAtivo:
+                        type: boolean
+                      avaliacaoEstrelas:
+                        type: integer
+                        nullable: true
+                        minimum: 1
+                        maximum: 5
+                  intervencaoHumana:
+                    type: boolean
+                  atendimentoAtivo:
+                    type: boolean
+        '400':
+          description: threadId ou identificação do produtor ausente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ── Perfil ─────────────────────────────────────────────────────────────────
+
+  /api/dual-profile/me:
+    get:
+      tags: [Perfil]
+      summary: Buscar perfil do usuário autenticado
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      responses:
+        '200':
+          description: Perfil do usuário
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  profile:
+                    $ref: '#/components/schemas/DualUserProfile'
+        '401':
+          description: Não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      tags: [Perfil]
+      summary: Atualizar perfil do usuário autenticado
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                uf:
+                  type: string
+                  example: TO
+                municipio:
+                  type: string
+                  example: Palmas
+                notificacoesAlertas:
+                  type: boolean
+                notificacoesRelatorios:
+                  type: boolean
+                notificacoesAtualizacoes:
+                  type: boolean
+            example:
+              uf: TO
+              municipio: Palmas
+              notificacoesAlertas: true
+              notificacoesRelatorios: true
+              notificacoesAtualizacoes: false
+      responses:
+        '200':
+          description: Perfil atualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  profile:
+                    $ref: '#/components/schemas/DualUserProfile'
+        '401':
+          description: Não autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ── Agrônomos ──────────────────────────────────────────────────────────────
+
+  /api/agronomos-parceiros:
+    get:
+      tags: [Agrônomos]
+      summary: Listar agrônomos parceiros ativos
+      description: Retorna o diretório de agrônomos parceiros cadastrados e aprovados na plataforma.
+      parameters:
+        - name: especialidade
+          in: query
+          schema:
+            type: string
+            example: Pragas
+          description: Filtrar por especialidade
+        - name: uf
+          in: query
+          schema:
+            type: string
+            example: TO
+          description: Filtrar por estado de atuação
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Lista de agrônomos parceiros
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgronomistaItem'
+                  total:
+                    type: integer
+                    example: 12
+
+  # ── Produtividade ──────────────────────────────────────────────────────────
+
+  /api/productivity/climate-vs-productivity:
+    get:
+      tags: [Produtividade]
+      summary: Correlação clima × produtividade por safra e cultura
+      description: |
+        Retorna dados para análise de correlação entre variáveis climáticas (temperatura, chuva)
+        e produtividade agrícola (ton/ha) por município, safra e cultura. Dados do IBGE/SIDRA.
+      parameters:
+        - name: uf
+          in: query
+          schema:
+            type: string
+            example: TO
+        - name: cultura
+          in: query
+          schema:
+            type: string
+            enum: [soja, milho, arroz, feijao, trigo, algodao, cana, cafe]
+            example: soja
+        - name: safra
+          in: query
+          schema:
+            type: string
+            example: "2024/25"
+        - name: variavel
+          in: query
+          schema:
+            type: string
+            enum: [temperatura_media, precipitacao, umidade]
+            example: precipitacao
+      responses:
+        '200':
+          description: Dados de correlação
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        municipio:
+                          type: string
+                          example: Palmas
+                        uf:
+                          type: string
+                          example: TO
+                        safra:
+                          type: string
+                          example: "2024/25"
+                        cultura:
+                          type: string
+                          example: soja
+                        produtividade_ton_ha:
+                          type: number
+                          example: 3.4
+                        clima_valor:
+                          type: number
+                          example: 1450.2
+                        clima_variavel:
+                          type: string
+                          example: precipitacao
