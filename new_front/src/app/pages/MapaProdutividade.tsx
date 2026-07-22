@@ -14,7 +14,6 @@ import { buildProductivityCropSelectOptions } from '../../lib/filters/appFilters
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
-import { EmptyState } from '../components/ui/EmptyState';
 import { formatUfLabel, UF_NOME } from '../../lib/geo/brazilStatesMalha';
 
 const UF_ALL_OPTION = { value: 'ALL', label: 'Todos os estados' } as const;
@@ -49,16 +48,19 @@ const YEAR_OPTIONS = [
 
 export function MapaProdutividade() {
   const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([UF_ALL_OPTION]);
-  const cropOptionsRes = useAsyncResource<CropSelectOption[]>(async () => {
-    const res = await listProductivityProductLabels();
-    const fromDb = res.success && Array.isArray(res.data) ? res.data : [];
-    return buildProductivityCropSelectOptions(fromDb);
-  }, []);
-
   const [cultura, setCultura] = usePersistedState<string>('climaagro.pref.mapaProdutividade.cultura', '');
   const [uf, setUf] = usePersistedState<string>('climaagro.pref.mapaProdutividade.uf', 'ALL');
   const [mes, setMes] = usePersistedState<string>('climaagro.pref.mapaProdutividade.mes', 'ALL');
   const [ano, setAno] = usePersistedState<string>('climaagro.pref.mapaProdutividade.ano', '2023-2026');
+
+  // Com um estado específico selecionado, mostra só as culturas que existem naquela UF;
+  // com "Todos os estados", mostra o catálogo completo (faz sentido comparar uma cultura entre UFs).
+  const cropOptionsRes = useAsyncResource<CropSelectOption[]>(async () => {
+    const stateFilter = /^[A-Z]{2}$/.test(uf) ? uf : undefined;
+    const res = await listProductivityProductLabels(stateFilter ? { state: stateFilter } : undefined);
+    const fromDb = res.success && Array.isArray(res.data) ? res.data : [];
+    return buildProductivityCropSelectOptions(fromDb);
+  }, [uf]);
 
   useEffect(() => {
     const opts = cropOptionsRes.data;
@@ -210,6 +212,7 @@ export function MapaProdutividade() {
                   <CardTitle>Filtros</CardTitle>
                 </CardHeader>
                 <CardBody className="space-y-4">
+                  <Select label="Estado (UF)" value={uf} onChange={(e) => setUf(e.target.value)} options={ufOptions} />
                   <Select
                     label="Cultura"
                     value={cultura}
@@ -230,7 +233,6 @@ export function MapaProdutividade() {
                     disabled={cropOptionsRes.status === 'loading'}
                     error={cropOptionsRes.error ?? undefined}
                   />
-                  <Select label="Estado (UF)" value={uf} onChange={(e) => setUf(e.target.value)} options={ufOptions} />
                   <Select label="Mês" value={mes} onChange={(e) => setMes(e.target.value)} options={MONTH_OPTIONS} />
                   <Select label="Ano" value={ano} onChange={(e) => setAno(e.target.value)} options={YEAR_OPTIONS} />
                   <div className="pt-4 border-t border-border">
@@ -254,21 +256,9 @@ export function MapaProdutividade() {
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <MapPin className="w-4 h-4" />
                 <span>
-                  Mapa estadual: com «Todos os estados» compara-se todas as UFs com dado; com uma UF só, o mapa foca nesse estado.
+                  Selecione "Todos os estados" para comparar a produtividade entre as UFs, ou escolha um estado específico para focar nele no mapa.
                 </span>
               </div>
-
-              {payload.itemsCount === 0 && (
-                <Card>
-                  <CardBody>
-                    <EmptyState
-                      icon={MapPin}
-                      title="Sem dados de produtividade"
-                      description="Não há registros para a cultura, estado, mês e ano escolhidos. Altere os filtros à esquerda."
-                    />
-                  </CardBody>
-                </Card>
-              )}
 
               {cultura && (
                 <Card>
