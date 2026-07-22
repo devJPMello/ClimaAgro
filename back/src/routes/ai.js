@@ -51,7 +51,8 @@ const aiReportLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: Number(process.env.AI_REPORT_RATE_LIMIT_PER_MIN || 20),
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'development',
 });
 
 const validateRequest = (req, res, next) => {

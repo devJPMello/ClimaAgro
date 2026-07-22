@@ -16,6 +16,7 @@ const scanLimiter = rateLimit({
   max: Number(process.env.CREA_SCAN_RATE_LIMIT_PER_WINDOW || 20),
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'development',
 });
 
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp']);

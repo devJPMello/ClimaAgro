@@ -22,6 +22,8 @@ function makeHandler(windowMs) {
   };
 }
 
+const isDev = () => process.env.NODE_ENV === 'development';
+
 // 100 req/min — dados climáticos, produtividade, alertas, geo
 const climateLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -29,6 +31,7 @@ const climateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: makeHandler(60 * 1000),
+  skip: isDev,
 });
 
 // 30 req/min — autenticação, perfil, agrônomos, chat híbrido
@@ -38,6 +41,7 @@ const userLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: makeHandler(60 * 1000),
+  skip: isDev,
 });
 
 // 20 req/min — relatórios e superset (I/O pesado, PDF, BI)
@@ -47,6 +51,7 @@ const reportLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: makeHandler(60 * 1000),
+  skip: isDev,
 });
 
 // 20 req/min — endpoints de IA (fallback global; ai.js aplica limites por rota também)
@@ -56,6 +61,7 @@ const aiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: makeHandler(60 * 1000),
+  skip: isDev,
 });
 
 const app = express();
