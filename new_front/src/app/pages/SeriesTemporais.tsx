@@ -319,12 +319,12 @@ export function SeriesTemporais() {
         loadSeriesVariable('precipitacao'),
         loadSeriesVariable('umidade'),
         (async (): Promise<ProductivityListResponse['data']> => {
-          if (!/^[A-Z]{2}$/.test(uf)) return [];
+          if (!/^[A-Z]{2}$/.test(uf) || !cultura) return [];
           const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
           const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
           const years = Array.from({ length: ye - ys + 1 }, (_, idx) => String(ys + idx));
           const responses = await concurrentMap(years, MAX_CONCURRENT, (year) =>
-            listProductivityRecords({ state: uf, productLabel: cultura || undefined, year, limit: 500 }),
+            listProductivityRecords({ state: uf, productLabel: cultura, year, limit: 500 }),
           );
           return responses.flatMap((r) => (r.success && Array.isArray(r.data) ? r.data : []));
         })(),
@@ -523,6 +523,8 @@ export function SeriesTemporais() {
             <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF ou 'Todos os estados' acima para carregar a produtividade e os gráficos." />
           ) : ufIsAll && !loading ? (
             <EmptyState icon={Calendar} title="Produtividade por estado específico" description="Selecione um estado específico para visualizar a produtividade ao longo do tempo." />
+          ) : !cultura && !loading ? (
+            <EmptyState icon={Calendar} title="Escolha uma cultura" description="Selecione uma cultura acima: sem esse filtro, a média misturaria produtividade de todas as culturas (unidades e escalas diferentes) num único número sem sentido." />
           ) : dadosProdutividade.length === 0 && !loading ? (
             <EmptyState icon={Calendar} title="Sem dados de produtividade" description="Rode o seed ou sync no backend e verifique se existe produtividade para esta UF/cultura." />
           ) : (
@@ -581,6 +583,8 @@ export function SeriesTemporais() {
             <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF ou 'Todos os estados' acima para comparar clima e produtividade." />
           ) : ufIsAll && !loading ? (
             <EmptyState icon={Calendar} title="Comparativo por estado específico" description="Selecione um estado específico para comparar clima e produtividade." />
+          ) : !cultura && !loading ? (
+            <EmptyState icon={Calendar} title="Escolha uma cultura" description="Selecione uma cultura acima: sem esse filtro, a produtividade comparada misturaria todas as culturas num único número sem sentido." />
           ) : dadosComparativos.length === 0 && !loading ? (
             <EmptyState icon={Calendar} title="Sem dados comparativos" description="Verifique se existem dados de clima e produtividade para esta UF, cultura e intervalo de anos." />
           ) : (
