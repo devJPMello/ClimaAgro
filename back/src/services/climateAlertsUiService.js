@@ -1,7 +1,7 @@
 const { Op } = require('sequelize');
 const crypto = require('crypto');
 const inmetAlerts = require('./inmetAlertsClient');
-const { reconcileAlertStates } = require('./inmetAdapterService');
+const { extractUfList, normalizeStateCodes } = require('./inmetAdapterService');
 const { isPrecipitationLikelyFromTempoCode } = require('../data/cptecRainTempoCodes');
 
 function fmtDateBR(isoDate) {
@@ -26,6 +26,7 @@ function buildUiItem({
   id,
   tipo,
   local,
+  estados,
   valorAtual,
   limiar,
   recomendacao,
@@ -47,6 +48,7 @@ function buildUiItem({
     id: id || crypto.randomUUID(),
     tipo,
     local,
+    estados: Array.isArray(estados) ? estados : [],
     valorAtual,
     limiar,
     recomendacao,
@@ -65,12 +67,14 @@ function deriveAlertsFromClimateRows(climateData) {
   for (const data of climateData) {
     const geo = data.geoData;
     const local = geo ? `${geo.name}${geo.state ? ` - ${geo.state}` : ''}` : '—';
+    const estados = geo?.state ? [geo.state] : [];
 
     if (data.maxTemperature != null && Number(data.maxTemperature) >= 35) {
       items.push(
         buildUiItem({
           tipo: 'Temperatura elevada',
           local,
+          estados,
           valorAtual: `${Number(data.maxTemperature).toFixed(1)}°C`,
           limiar: '35°C',
           recomendacao: 'Monitorar irrigação e estresse térmico nas próximas 48h.',
@@ -86,6 +90,7 @@ function deriveAlertsFromClimateRows(climateData) {
         buildUiItem({
           tipo: 'Temperatura baixa / geada',
           local,
+          estados,
           valorAtual: `${Number(data.minTemperature).toFixed(1)}°C`,
           limiar: '5°C',
           recomendacao: 'Proteger culturas sensíveis; revisar calendário de campo.',
@@ -101,6 +106,7 @@ function deriveAlertsFromClimateRows(climateData) {
         buildUiItem({
           tipo: 'Chuva intensa',
           local,
+          estados,
           valorAtual: `${Number(data.precipitation).toFixed(1)} mm`,
           limiar: '50 mm (dia)',
           recomendacao: 'Evitar tráfego de máquinas em solo encharcado; drenagem e segurança.',
@@ -116,6 +122,7 @@ function deriveAlertsFromClimateRows(climateData) {
         buildUiItem({
           tipo: 'Estresse hídrico',
           local,
+          estados,
           valorAtual: `${Number(data.waterStressIndex).toFixed(0)}%`,
           limiar: '80%',
           recomendacao: 'Avaliar irrigação e janelas de plantio; priorizar cultura/resíduo.',
@@ -131,6 +138,7 @@ function deriveAlertsFromClimateRows(climateData) {
         buildUiItem({
           tipo: 'Umidade baixa',
           local,
+          estados,
           valorAtual: `${Number(data.humidity).toFixed(0)}%`,
           limiar: '30%',
           recomendacao: 'Aumentar monitoramento de irrigação e umidade do solo.',
@@ -280,12 +288,14 @@ function deriveCptecOutlookAlertsFromClimateRows(climateData) {
   for (const data of climateData) {
     const geo = data.geoData;
     const local = geo ? `${geo.name}${geo.state ? ` - ${geo.state}` : ''}` : '—';
+    const estados = geo?.state ? [geo.state] : [];
     const tempo = data.metadata && data.metadata.cptec && data.metadata.cptec.tempo;
     if (tempo && isPrecipitationLikelyFromTempoCode(tempo)) {
       items.push(
         buildUiItem({
           tipo: 'Precipitação prevista (CPTEC — qualitativa)',
           local,
+          estados,
           valorAtual: `Sigla: ${String(tempo).toLowerCase()} (tabela oficial de condições do tempo)`,
           limiar: '—',
           recomendacao:
@@ -307,11 +317,13 @@ function deriveMetarWindAlertsFromClimateRows(climateData) {
     if (data.windSpeed == null || Number(data.windSpeed) < 50) continue;
     const geo = data.geoData;
     const local = geo ? `${geo.name}${geo.state ? ` - ${geo.state}` : ''}` : '—';
+    const estados = geo?.state ? [geo.state] : [];
     const fromMetar = !!(data.metadata && data.metadata.cptecMetar);
     items.push(
       buildUiItem({
         tipo: fromMetar ? 'Vento forte (METAR / CPTEC)' : 'Vento forte',
         local,
+        estados,
         valorAtual: `${Number(data.windSpeed).toFixed(0)} km/h`,
         limiar: '50 km/h',
         recomendacao: 'Evitar pulverização aérea; reforçar estruturas e toldos.',
@@ -389,8 +401,16 @@ function capPolygonToWkt(polygonText) {
   return `POLYGON((${ring}))`;
 }
 
+/**
+ * Alguns registros antigos (bug já corrigido em inmetAlertsClient.normalizeBundle) gravaram o payload
+ * duplamente aninhado (`payload.payload.cap` em vez de `payload.cap`). Aceita as duas formas.
+ */
+function capFromRow(r) {
+  return r?.payload?.cap || r?.payload?.payload?.cap || {};
+}
+
 function fullTextForOfficialAlertRow(r) {
-  const cap = r?.payload?.cap || {};
+  const cap = capFromRow(r);
   return [
     r?.title,
     r?.description,
@@ -429,20 +449,65 @@ async function citiesByCapPolygon({ GeoData, polygonText, uf, cache }) {
   return out;
 }
 
+/**
+ * Deriva as UFs cobertas pelo alerta a partir da interseção geoespacial real (municípios x polígono CAP).
+ * Fonte mais confiável que o campo `states`/`estados` do JSON de origem, que já foi observado retornando
+ * o mesmo array fixo (ex.: ["MT","MS","PA"]) para avisos de regiões completamente diferentes (ex.: Sul do país).
+ */
+async function statesByCapPolygon({ GeoData, polygonText, cache }) {
+  const wkt = capPolygonToWkt(polygonText);
+  if (!wkt || !GeoData?.sequelize) return [];
+  const key = `states:${wkt}`;
+  if (cache.has(key)) return cache.get(key);
+  // `geo_data` não tem cobertura municipal (category='municipality' está sempre vazia nesta base);
+  // usa os polígonos de UF (category='state', sempre presentes — 27 registros) para a interseção.
+  // Tolerância de 15km cobre a generalização/simplificação do contorno estadual perto de fronteiras
+  // (ex.: polígono de tempestade real toca o Paraná mas fica a <1km do contorno simplificado salvo).
+  const [rows] = await GeoData.sequelize.query(
+    `SELECT DISTINCT state
+       FROM geo_data
+      WHERE is_active = true
+        AND category = 'state'
+        AND state IS NOT NULL
+        AND ST_DWithin(
+          geom::geography,
+          ST_SetSRID(ST_GeomFromText(:wkt), 4326)::geography,
+          15000
+        )
+      ORDER BY state ASC`,
+    { replacements: { wkt } }
+  );
+  const out = (rows || []).map((r) => String(r.state || '').trim().toUpperCase()).filter(Boolean);
+  cache.set(key, out);
+  return out;
+}
+
 async function buildOfficialAlertUiItems(rows, stateFilter, cityFilter, GeoData) {
   const uf = stateFilter ? String(stateFilter).toUpperCase() : null;
   const cityNorm = cityFilter ? normalizeCityKey(cityFilter) : null;
   const cache = new Map();
   const out = [];
   for (const r of rows) {
-    const statesEffective = reconcileAlertStates(r.states, fullTextForOfficialAlertRow(r));
+    // O campo `states`/`estados` vindo da fonte configurada (INMET_ALERTS_JSON_URL) já foi observado
+    // retornando o mesmo array fixo (ex.: ["MT","MS","PA"]) para avisos de regiões completamente
+    // diferentes — não é confiável. Preferimos evidência independente: menções de UF/mesorregião no
+    // texto do aviso + interseção geoespacial real do polígono CAP contra os contornos de UF. Só cai
+    // de volta pro valor bruto da fonte quando nenhuma das duas evidências está disponível.
+    const capPolygon = capFromRow(r).polygon;
+    const textStates = extractUfList(fullTextForOfficialAlertRow(r));
+    let statesFromPolygon = [];
+    if (capPolygon) {
+      // eslint-disable-next-line no-await-in-loop
+      statesFromPolygon = await statesByCapPolygon({ GeoData, polygonText: capPolygon, cache });
+    }
+    const confirmedStates = [...new Set([...textStates, ...statesFromPolygon])].sort();
+    const statesEffective = confirmedStates.length ? confirmedStates : normalizeStateCodes(r.states);
 
     if (uf) {
       const byUf = statesEffective.includes(uf);
       if (!byUf) continue;
     }
 
-    const capPolygon = r?.payload?.cap?.polygon;
     let cities = [];
     if (capPolygon) {
       // Usa interseção geoespacial real (municípios x polígono CAP) quando disponível.
@@ -471,6 +536,7 @@ async function buildOfficialAlertUiItems(rows, stateFilter, cityFilter, GeoData)
           : statesEffective.length
             ? `UF: ${statesEffective.join(', ')}`
             : 'Brasil',
+        estados: statesEffective,
         valorAtual: (descUi || '—').slice(0, 160),
         limiar: `Vigência: ${r.validFrom} a ${r.validTo}`,
         recomendacao: descUi,

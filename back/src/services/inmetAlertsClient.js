@@ -101,7 +101,13 @@ function normalizeBundle(data) {
         validFrom,
         validTo: validTo || validFrom,
         states: states.map((x) => String(x).toUpperCase().slice(0, 2)),
-        payload: { ...it, cities: cities.map((x) => String(x).trim()).filter(Boolean) }
+        // `it.payload` (quando presente, ex.: itens já normalizados via adapter RSS/CAP) carrega o `cap`
+        // original (polygon/areaDesc). Preservar no nível raiz — não aninhar `it` inteiro de novo aqui,
+        // senão `payload.cap` vira `payload.payload.cap` e o polígono fica inacessível para quem consome.
+        payload: {
+          ...(it.payload && typeof it.payload === 'object' ? it.payload : {}),
+          cities: cities.map((x) => String(x).trim()).filter(Boolean)
+        }
       };
     })
     .filter(Boolean);

@@ -68,37 +68,51 @@ function avg(arr) {
   return arr.reduce((a, x) => a + x, 0) / arr.length;
 }
 
+// Cada padrão cobre o nome completo do estado e o gentílico usado nos nomes oficiais de mesorregião do
+// IBGE (confirmado nas descrições reais já armazenadas: ex. "mato-grossense" em 211 avisos, "paranaense"
+// em 236, "rio-grandense" em 214, "catarinense" em 229 — ver levantamento). Estados com baixíssima
+// frequência de aviso (AC, AP, RR, DF, TO) tiveram 0 ocorrências até agora, mas os gentílicos são
+// mantidos por precaução — são termos específicos o bastante para não gerar falso positivo.
 const UF_NAME_PATTERNS = [
-  { uf: 'AC', pattern: /\bacre\b/i },
-  { uf: 'AL', pattern: /\balagoas\b/i },
-  { uf: 'AP', pattern: /\bamapa\b/i },
-  { uf: 'AM', pattern: /\bamazonas\b/i },
-  { uf: 'BA', pattern: /\bbahia\b/i },
-  { uf: 'CE', pattern: /\bceara\b/i },
-  { uf: 'DF', pattern: /\bdistrito federal\b/i },
-  { uf: 'ES', pattern: /\bespirito santo\b/i },
-  { uf: 'GO', pattern: /\bgoias\b/i },
-  { uf: 'MA', pattern: /\bmaranhao\b/i },
-  { uf: 'MT', pattern: /\bmato-grosso\b|\bmato grosso\b/i },
-  { uf: 'MS', pattern: /\bmato-grosso do sul\b|\bmato grosso do sul\b/i },
-  { uf: 'MG', pattern: /\bminas gerais\b/i },
+  { uf: 'AC', pattern: /\bacre\b|\bacreanos?\b|\bacreana\b/i },
+  { uf: 'AL', pattern: /\balagoas\b|\balagoanos?\b|\balagoana\b/i },
+  { uf: 'AP', pattern: /\bamapa\b|\bamapaenses?\b/i },
+  { uf: 'AM', pattern: /\bamazonas\b|\bamazonenses?\b/i },
+  { uf: 'BA', pattern: /\bbahia\b|\bbaianos?\b|\bbaiana\b/i },
+  { uf: 'CE', pattern: /\bceara\b|\bcearenses?\b/i },
+  { uf: 'DF', pattern: /\bdistrito federal\b|\bbrasilienses?\b/i },
+  // Mesorregiões ES usam o gentílico formal "Espírito-santense", não o popular "capixaba".
+  { uf: 'ES', pattern: /\bespirito santo\b|\bespirito[\s-]santenses?\b/i },
+  { uf: 'GO', pattern: /\bgoias\b|\bgoianos?\b|\bgoiana\b/i },
+  { uf: 'MA', pattern: /\bmaranhao\b|\bmaranhenses?\b/i },
+  // Negative lookahead/lookbehind evita casar "MT" dentro de "Mato Grosso do Sul" ou "Sul Mato-grossense"
+  // (mesorregiões de MS, ex.: "Pantanais Sul Mato-grossense", usam o adjetivo sem repetir o nome do estado).
+  { uf: 'MT', pattern: /\bmato[\s-]grosso\b(?!\s+do\s+sul)|(?<!sul[\s-])\bmato[\s-]grossenses?\b/i },
+  { uf: 'MS', pattern: /\bmato[\s-]grosso do sul\b|\bsul[\s-]?mato[\s-]grossenses?\b/i },
+  // Várias mesorregiões dizem só "de Minas" (ex.: "Norte de Minas"), sem "Gerais".
+  { uf: 'MG', pattern: /\bminas gerais\b|\bde minas\b|\bmineiros?\b|\bmineira\b/i },
   // "PA" não pode casar a preposição "para" em frases genéricas (ex.: "alerta para...").
-  // Mantemos apenas contextos explícitos de estado.
-  { uf: 'PA', pattern: /\bestado do para\b|\bpara\s*\(pa\)\b|\bpa\s*-\s*para\b/i },
-  { uf: 'PB', pattern: /\bparaiba\b/i },
-  { uf: 'PR', pattern: /\bparana\b/i },
-  { uf: 'PE', pattern: /\bpernambuco\b/i },
-  { uf: 'PI', pattern: /\bpiaui\b/i },
-  { uf: 'RJ', pattern: /\brio de janeiro\b/i },
-  { uf: 'RN', pattern: /\brio grande do norte\b/i },
+  // Mantemos apenas contextos explícitos de estado. "Paraense" já é específico o bastante.
+  { uf: 'PA', pattern: /\bestado do para\b|\bpara\s*\(pa\)\b|\bpa\s*-\s*para\b|\bparaenses?\b/i },
+  { uf: 'PB', pattern: /\bparaiba\b|\bparaibanos?\b|\bparaibana\b/i },
+  { uf: 'PE', pattern: /\bpernambuco\b|\bpernambucanos?\b|\bpernambucana\b/i },
+  { uf: 'PI', pattern: /\bpiaui\b|\bpiauienses?\b/i },
+  // Mesorregiões RJ costumam usar "Fluminense" sem citar o nome completo do estado.
+  { uf: 'RJ', pattern: /\brio de janeiro\b|\bfluminenses?\b/i },
+  // "Potiguar" é o gentílico popular de RN; "norte-rio-grandense" é a forma formal (distinta do "rio-grandense" de RS).
+  { uf: 'RN', pattern: /\brio grande do norte\b|\bpotiguares?\b|\bnorte[\s-]rio[\s-]grandenses?\b/i },
   // Mesorregiões RS costumam usar "Rio-grandense" sem citar o nome completo do estado.
-  { uf: 'RS', pattern: /\brio grande do sul\b|\brio-?grandenses?\b/i },
-  { uf: 'RO', pattern: /\brondonia\b/i },
-  { uf: 'RR', pattern: /\broraima\b/i },
-  { uf: 'SC', pattern: /\bsanta catarina\b/i },
-  { uf: 'SP', pattern: /\bsao paulo\b/i },
-  { uf: 'SE', pattern: /\bsergipe\b/i },
-  { uf: 'TO', pattern: /\btocantins\b/i }
+  { uf: 'RS', pattern: /\brio grande do sul\b|\brio-?grandenses?\b|\bgauchos?\b|\bgaucha\b/i },
+  { uf: 'RO', pattern: /\brondonia\b|\brondonienses?\b/i },
+  { uf: 'RR', pattern: /\broraima\b|\broraimenses?\b/i },
+  // Mesorregiões SC costumam usar "Catarinense" sem citar o nome completo do estado.
+  { uf: 'SC', pattern: /\bsanta catarina\b|\bcatarinenses?\b/i },
+  // Mesorregiões SP costumam usar "Paulista" sem citar o nome completo do estado.
+  { uf: 'SP', pattern: /\bsao paulo\b|\bpaulistas?\b/i },
+  { uf: 'SE', pattern: /\bsergipe\b|\bsergipanos?\b|\bsergipana\b/i },
+  // Mesorregiões PR costumam usar "Paranaense" sem citar o nome completo do estado.
+  { uf: 'PR', pattern: /\bparana\b|\bparanaenses?\b/i },
+  { uf: 'TO', pattern: /\btocantins\b|\btocantinenses?\b/i }
 ];
 
 const TO_REGION_HINTS = [
@@ -531,5 +545,6 @@ module.exports = {
   buildFeatureCollectionFromApitempo,
   fetchAndNormalizeInmetAlerts,
   extractUfList,
-  reconcileAlertStates
+  reconcileAlertStates,
+  normalizeStateCodes
 };

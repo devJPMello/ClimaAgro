@@ -75,10 +75,10 @@ function valorAtualComRisco(alerta: ClimateAlertDto): string {
   return alerta.valorAtual;
 }
 
-/** Tenta extrair sigla UF do campo local (ex: "Palmas - TO" → "TO"). */
-function extractUf(local: string): string {
-  const match = local.match(/[-–]\s*([A-Z]{2})\s*$/) ?? local.match(/\b([A-Z]{2})$/);
-  return match ? match[1] : local;
+/** Formata a lista estruturada de UFs do alerta para exibição na coluna (ex: ["TO","RS"] → "TO, RS"). */
+function formatEstadosBadge(estados: string[]): string {
+  if (!estados.length) return 'Nacional';
+  return estados.join(', ');
 }
 
 function formatUpdatedAt(iso: string): string {
@@ -391,7 +391,7 @@ export function Alertas() {
                                 </td>
                                 <td className="pl-1 pr-4 py-5">
                                   <span className="font-mono text-xs font-bold tracking-widest bg-muted border border-border/60 px-2 py-1 rounded-md">
-                                    {extractUf(alerta.local)}
+                                    {formatEstadosBadge(alerta.estados)}
                                   </span>
                                 </td>
                                 <td className="px-4 py-5 text-muted-foreground whitespace-nowrap tabular-nums text-xs">

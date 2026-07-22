@@ -10,6 +10,8 @@ export interface ClimateAlertDto {
   id: string;
   tipo: string;
   local: string;
+  /** Siglas UF (2 letras) cobertas pelo alerta; vazio quando o alerta é nacional/sem UF definida. */
+  estados: string[];
   valorAtual: string;
   limiar: string;
   recomendacao: string;
