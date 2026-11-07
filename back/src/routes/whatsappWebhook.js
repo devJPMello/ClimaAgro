@@ -15,7 +15,8 @@ router.get('/', (_req, res) => {
   });
 });
 
-router.post('/', express.json(), async (req, res) => {
+// Limite igual ao do app: lotes de sincronização da Evolution passam dos 100 KB padrão.
+router.post('/', express.json({ limit: '10mb' }), async (req, res) => {
   const event = req.body?.event;
 
   // Ignorar eventos que não sejam de mensagens recebidas
