@@ -114,6 +114,37 @@ export async function listProductivityRecords(params: {
 
 const PRODUCTIVITY_PAGE_MAX = 500;
 
+export interface ProductivityByUfResponse {
+  success: boolean;
+  data: {
+    byUf: Partial<Record<string, { avg: number; count: number }>>;
+    totals: {
+      count: number;
+      avg: number | null;
+      max: number | null;
+      minAboveZero: number | null;
+      zeroCount: number;
+    };
+  };
+}
+
+/** Média de produtividade por UF + totais, numa única requisição (agregado no banco). */
+export async function getProductivityByUf(params: {
+  years: number[];
+  /** Mês `MM`; aplicado a cada ano como `YYYY-MM`. */
+  month?: string;
+  productLabel?: string;
+  state?: string;
+}): Promise<ProductivityByUfResponse['data']> {
+  const sp = new URLSearchParams();
+  sp.set('years', params.years.join(','));
+  if (params.month) sp.set('month', params.month);
+  if (params.productLabel?.trim()) sp.set('productLabel', params.productLabel.trim());
+  if (params.state) sp.set('state', params.state);
+  const res = await httpClient.get<ProductivityByUfResponse>(`productivity/by-uf?${sp.toString()}`);
+  return res.data;
+}
+
 /**
  * Pagina todos os registros que casam com os filtros **sem** ano/safra obrigatórios
  * (série histórica por município/cultura).

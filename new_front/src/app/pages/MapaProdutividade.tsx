@@ -4,10 +4,9 @@ import { Select } from '../components/ui/Select';
 import { MapPin } from 'lucide-react';
 import { BrazilMap } from '../components/maps/BrazilMap';
 import { MapMetricLegend } from '../components/maps/MapMetricLegend';
-import { buildValuesByUfFromProductivityRows } from '../components/maps/brazilMapConfig';
 import { listClimateUfs } from '../../lib/api/climateApi';
 import {
-  listAllProductivityForYear,
+  getProductivityByUf,
   listProductivityProductLabels,
 } from '../../lib/api/productivityApi';
 import { buildProductivityCropSelectOptions } from '../../lib/filters/appFilters';
@@ -110,43 +109,32 @@ export function MapaProdutividade() {
           itemsCount: 0,
         };
       }
-      const targetUfs = uf === 'ALL' ? TODAS_SIGLAS_UF : [uf];
+      const yearNum = Number(ano);
+      const years = ano === '2023-2026' ? [2023, 2024, 2025, 2026] : Number.isFinite(yearNum) ? [yearNum] : [];
+      if (!years.length) {
+        return {
+          indicators: [] as Indicador[],
+          mapRevision: Date.now(),
+          valuesByUfProdutividade: {} as Partial<Record<string, number>>,
+          itemsCount: 0,
+        };
+      }
 
-      const responses = await Promise.all(
-        targetUfs.map((stateUf) =>
-          (async () => {
-            if (ano === '2023-2026') {
-              const years = [2023, 2024, 2025, 2026];
-              const byYear = await Promise.all(
-                years.map((year) =>
-                  listAllProductivityForYear({
-                    state: stateUf,
-                    year,
-                    mesAno: mes === 'ALL' ? undefined : `${year}-${mes}`,
-                    productLabel: productLabelForApi || undefined,
-                  })
-                )
-              );
-              return byYear.flat();
-            }
-            const yearNum = Number(ano);
-            return listAllProductivityForYear({
-              state: stateUf,
-              year: Number.isFinite(yearNum) ? yearNum : undefined,
-              mesAno: mes === 'ALL' ? undefined : `${ano}-${mes}`,
-              productLabel: productLabelForApi || undefined,
-            });
-          })()
-        )
-      );
-      const items = responses.flat();
-      const valuesByUfProdutividade = buildValuesByUfFromProductivityRows(items);
-      const nums = items.map((x) => Number(x.productivity)).filter((x) => Number.isFinite(x));
-      const numsAboveZero = nums.filter((x) => x > 0);
-      const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
-      const max = nums.length ? Math.max(...nums) : null;
-      const minAboveZero = numsAboveZero.length ? Math.min(...numsAboveZero) : null;
-      const zeroProdCount = items.filter((x) => Number(x.productivity) === 0).length;
+      // Uma única requisição: o backend agrega por UF (antes eram centenas, uma por UF × ano × página).
+      const { byUf, totals } = await getProductivityByUf({
+        years,
+        month: mes === 'ALL' ? undefined : mes,
+        productLabel: productLabelForApi || undefined,
+        state: uf === 'ALL' ? undefined : uf,
+      });
+      const valuesByUfProdutividade: Partial<Record<string, number>> = {};
+      for (const sigla of TODAS_SIGLAS_UF) {
+        const v = byUf[sigla];
+        if (v && v.count > 0) valuesByUfProdutividade[sigla] = v.avg;
+      }
+      const itemsCount = totals.count;
+      const { avg, max, minAboveZero } = totals;
+      const zeroProdCount = totals.zeroCount;
       const indicators: Indicador[] =
         productLabelForApi === ''
           ? []
@@ -161,11 +149,11 @@ export function MapaProdutividade() {
                 label: 'Menor produtividade (> 0)',
                 valor: minAboveZero != null ? `${minAboveZero.toFixed(2)} t/ha` : '—',
                 descricao:
-                  nums.length && !numsAboveZero.length
+                  itemsCount > 0 && minAboveZero == null
                     ? 'Todos os registos são 0 t/ha; não há mínimo estritamente positivo.'
                     : undefined,
               },
-              { label: 'Registros encontrados', valor: String(items.length) },
+              { label: 'Registros encontrados', valor: String(itemsCount) },
               ...(zeroProdCount > 0
                 ? [
                     {
@@ -179,7 +167,7 @@ export function MapaProdutividade() {
         indicators,
         mapRevision: Date.now(),
         valuesByUfProdutividade,
-        itemsCount: items.length,
+        itemsCount,
       };
     },
     [ano, mes, productLabelForApi, uf]

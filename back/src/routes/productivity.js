@@ -536,6 +536,92 @@ router.get('/timeseries', [
   }
 });
 
+// GET /api/productivity/by-uf — média por UF + totais numa única consulta (Mapa de Produtividade).
+// Antes o front paginava a listagem por UF × ano (centenas de requisições).
+router.get('/by-uf', [
+  query('years').matches(/^\d{4}(,\d{4}){0,9}$/),
+  query('month').optional({ checkFalsy: true }).matches(/^(0[1-9]|1[0-2])$/),
+  query('productLabel').optional({ checkFalsy: true }).isString().isLength({ min: 1, max: 300 }),
+  query('state').optional({ checkFalsy: true }).matches(/^[A-Za-z]{2}$/),
+  validateRequest
+], async (req, res) => {
+  try {
+    const years = [...new Set(String(req.query.years).split(',').map(Number))];
+    const month = req.query.month ? String(req.query.month) : null;
+    const productLabel = req.query.productLabel ? String(req.query.productLabel).trim() : null;
+    const state = req.query.state ? String(req.query.state).toUpperCase() : null;
+
+    // Mesma regra da listagem: com mês filtra por period_ref (YYYY-MM), senão por ano.
+    const conditions = [];
+    const replacements = {};
+    if (month) {
+      conditions.push('period_ref IN (:periods)');
+      replacements.periods = years.map((y) => `${y}-${month}`);
+    } else {
+      conditions.push('year IN (:years)');
+      replacements.years = years;
+    }
+    if (productLabel) {
+      conditions.push('product_label = :productLabel');
+      replacements.productLabel = productLabel;
+    }
+    if (state) {
+      conditions.push('state = :state');
+      replacements.state = state;
+    }
+
+    const rows = await sequelize.query(
+      `SELECT state,
+              COUNT(*)::int AS count,
+              SUM(productivity)::float AS sum,
+              MAX(productivity)::float AS max,
+              MIN(productivity) FILTER (WHERE productivity > 0)::float AS min_above_zero,
+              COUNT(*) FILTER (WHERE productivity = 0)::int AS zero_count
+         FROM productivity
+        WHERE ${conditions.join(' AND ')}
+        GROUP BY state`,
+      { replacements, type: QueryTypes.SELECT }
+    );
+
+    res.json({ success: true, data: summarizeProductivityByUf(rows) });
+  } catch (error) {
+    console.error('Erro ao agregar produtividade por UF:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro interno do servidor',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+function summarizeProductivityByUf(rows) {
+  const byUf = {};
+  let count = 0;
+  let sum = 0;
+  let max = null;
+  let minAboveZero = null;
+  let zeroCount = 0;
+  for (const r of rows) {
+    const uf = String(r.state || '').trim().toUpperCase();
+    const n = Number(r.count) || 0;
+    if (!/^[A-Z]{2}$/.test(uf) || n === 0) continue;
+    const s = Number(r.sum) || 0;
+    byUf[uf] = { avg: s / n, count: n };
+    count += n;
+    sum += s;
+    if (r.max != null) max = max == null ? Number(r.max) : Math.max(max, Number(r.max));
+    if (r.min_above_zero != null) {
+      const m = Number(r.min_above_zero);
+      minAboveZero = minAboveZero == null ? m : Math.min(minAboveZero, m);
+    }
+    zeroCount += Number(r.zero_count) || 0;
+  }
+  return {
+    byUf,
+    totals: { count, avg: count ? sum / count : null, max, minAboveZero, zeroCount },
+  };
+}
+
 // GET /api/productivity/stats - Obter estatísticas de produtividade
 router.get('/stats', [
   query('year').isInt({ min: 2000, max: 2030 }),
