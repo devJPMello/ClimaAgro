@@ -797,7 +797,20 @@ async function syncInmetFromConfiguredUrl({ sequelize, ClimateData, GeoData, tra
  * Uma transação longa (CPTEC + Open-Meteo por UF) deixa a conexão idle-in-transaction
  * e provedores como Neon encerram o cliente — rollback falha com "not queryable".
  */
-async function runClimateSync({ sequelize, models }) {
+// Uma sincronização por vez no processo: chamadas simultâneas (boot, agendamento,
+// POST /api/climate/sync) reaproveitam a execução em andamento.
+let syncInFlight = null;
+
+function runClimateSync(args) {
+  if (!syncInFlight) {
+    syncInFlight = runClimateSyncOnce(args).finally(() => {
+      syncInFlight = null;
+    });
+  }
+  return syncInFlight;
+}
+
+async function runClimateSyncOnce({ sequelize, models }) {
   const { ClimateData, GeoData, OfficialAlert } = models;
   try {
     const scope = (process.env.CLIMATE_SYNC_SCOPE || 'brasil').toLowerCase().trim();

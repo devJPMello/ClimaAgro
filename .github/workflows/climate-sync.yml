@@ -1,0 +1,51 @@
+# Atualiza clima e alertas no ar mesmo sem ninguém usando o site.
+# No plano gratuito do Render a API dorme após 15 min sem uso, então o
+# agendamento interno (a cada 12 h) não dispara; este workflow acorda a API
+# e chama POST /api/climate/sync.
+#
+# Requer o segredo do repositório CLIMATE_SYNC_SECRET (Settings → Secrets and
+# variables → Actions), com o mesmo valor configurado na API no Render.
+name: Sincronizar clima
+
+on:
+  schedule:
+    - cron: "0 9 * * *"   # 06:00 em Brasília
+    - cron: "0 21 * * *"  # 18:00 em Brasília
+  workflow_dispatch:
+
+concurrency:
+  group: climate-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      API_URL: https://climaagro-api-jpm.onrender.com
+    steps:
+      - name: Acordar a API
+        run: |
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "$API_URL/api/health" || true)
+            echo "tentativa $i: HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 15
+          done
+          echo "::error::A API não respondeu ao health check."
+          exit 1
+
+      - name: Sincronizar clima e alertas
+        env:
+          SYNC_TOKEN: ${{ secrets.CLIMATE_SYNC_SECRET }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "::error::Segredo CLIMATE_SYNC_SECRET não configurado no GitHub."
+            exit 1
+          fi
+          code=$(curl -s -o resposta.json -w '%{http_code}' --max-time 900 \
+            -X POST -H "X-ClimaAgro-Sync-Token: $SYNC_TOKEN" \
+            "$API_URL/api/climate/sync")
+          echo "HTTP $code"
+          node -e "const r=require('./resposta.json'); console.log(JSON.stringify({ok:r.ok, alertas:r.officialAlerts, erro:r.error||r.message}, null, 2))" || cat resposta.json
+          [ "$code" = "200" ]
