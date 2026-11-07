@@ -20,12 +20,12 @@ services:
       - key: TRUST_PROXY
         value: "1"
       - key: FRONTEND_URL
-        value: https://climaagro-jpm.onrender.com
+        value: https://climaagro.onrender.com,https://climaagro-jpm.onrender.com
       - key: PUBLIC_API_BASE_URL
         value: https://climaagro-api-jpm.onrender.com
 
   - type: web
-    name: climaagro-jpm
+    name: climaagro
     runtime: static
     rootDir: new_front
     buildCommand: npm ci && npm run build
