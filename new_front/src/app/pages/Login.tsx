@@ -3,8 +3,8 @@ import { SignIn } from '@clerk/clerk-react';
 export function Login() {
   return (
     <div className="w-full">
-      <div className="mb-8">
-        <h1 className="text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl sm:text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
           Bem-vindo de volta
         </h1>
         <p className="text-muted-foreground">

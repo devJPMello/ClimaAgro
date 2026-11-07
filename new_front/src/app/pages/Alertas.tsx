@@ -346,7 +346,64 @@ export function Alertas() {
                   </CardBody>
                 ) : (
                   <>
-                    <div className="overflow-x-auto">
+                    {/* Celular: um cartão por alerta (a tabela não cabe em telas estreitas) */}
+                    <ul className="md:hidden divide-y divide-border/60">
+                      {paginados.map((alerta) => {
+                        const fonte = fonteLabel(alerta.fonte);
+                        const podeFalarComEspecialista =
+                          alerta.severidade === 'critical' || alerta.severidade === 'high';
+                        return (
+                          <li key={alerta.id} className={`border-l-[3px] ${SEVERITY_ROW_ACCENT[alerta.severidade]}`}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAlerta(alerta)}
+                              className="w-full text-left px-4 py-4 space-y-2.5 active:bg-muted/50 transition-colors"
+                            >
+                              <div className="flex items-start gap-2.5">
+                                <span className={`p-1.5 rounded-md shrink-0 ${SEVERITY_ICON_BG[alerta.severidade]}`}>
+                                  <AlertTriangle className={`w-3.5 h-3.5 ${SEVERITY_ICON_COLOR[alerta.severidade]}`} />
+                                </span>
+                                <span className="flex-1 min-w-0 font-medium text-foreground leading-snug">{alerta.tipo}</span>
+                                <Badge variant={alerta.severidade} className="shrink-0 justify-center font-semibold">
+                                  {SEVERITY_LABEL[alerta.severidade]}
+                                </Badge>
+                              </div>
+                              <p className="font-mono text-xs font-bold tracking-wider text-muted-foreground break-words">
+                                {formatEstadosBadge(alerta.estados)}
+                              </p>
+                              {valorAtualComRisco(alerta) && (
+                                <p className="text-sm text-foreground line-clamp-2">{valorAtualComRisco(alerta)}</p>
+                              )}
+                              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                <span className="tabular-nums">{alerta.data}</span>
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded-full border font-medium ${FONTE_STYLE[fonte] ?? FONTE_STYLE['Derivado']}`}
+                                >
+                                  {fonte}
+                                </span>
+                              </div>
+                            </button>
+                            {podeFalarComEspecialista && (
+                              <div className="px-4 pb-4 -mt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const esp = tipoToEspecialidade(alerta.tipo);
+                                    void navigate(esp ? `/parceiros?especialidade=${encodeURIComponent(esp)}` : '/parceiros');
+                                  }}
+                                  className="inline-flex items-center gap-1.5 text-xs text-primary"
+                                >
+                                  <Handshake className="w-4 h-4" />
+                                  Falar com especialista
+                                </button>
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+
+                    <div className="hidden md:block overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b-2 border-border bg-muted/40">

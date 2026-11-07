@@ -15,7 +15,8 @@ export default function App() {
           position="top-right"
           richColors
           toastOptions={{
-            style: { width: '420px' },
+            // No celular o aviso não pode passar da largura da tela.
+            style: { width: 'min(420px, calc(100vw - 32px))' },
           }}
         />
       </ThemeProvider>

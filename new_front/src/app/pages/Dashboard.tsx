@@ -120,7 +120,7 @@ export function Dashboard() {
       >
         {(summary) => (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               {summary.kpis.map((kpi) => {
                 const Icon = KPI_ICONS[kpi.metric];
                 const { metric: _m, ...kpiProps } = kpi;
@@ -130,15 +130,15 @@ export function Dashboard() {
 
             <Card>
               <CardHeader>
-                <div className="flex items-start justify-between gap-4">
-                  <div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                  <div className="min-w-0">
                     <CardTitle>Resumo por localidade</CardTitle>
                     <CardDescription>
                       Todos os estados com dados na base — clima agregado (últimos 14 dias) e produtividade média no último ano agrícola
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <span className="text-xs text-muted-foreground mr-2">{summary.regioes.length} estados</span>
+                    <span className="text-xs text-muted-foreground mr-auto sm:mr-2">{summary.regioes.length} estados</span>
                     <button
                       type="button"
                       onClick={scrollLeft}
@@ -169,7 +169,7 @@ export function Dashboard() {
                       key={regiao.uf ?? regiao.estado}
                       type="button"
                       onClick={() => setSelectedRegiao(regiao)}
-                      className="flex-shrink-0 w-64 rounded-xl border border-border bg-card overflow-hidden text-left transition-all duration-150 hover:border-primary/50 hover:shadow-md hover:ring-2 hover:ring-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      className="flex-shrink-0 w-56 sm:w-64 rounded-xl border border-border bg-card overflow-hidden text-left transition-all duration-150 hover:border-primary/50 hover:shadow-md hover:ring-2 hover:ring-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                     >
                       <div className="px-4 py-3 bg-primary/10 border-b border-border">
                         <p className="text-base text-primary">{regiao.uf ?? '—'}</p>
@@ -217,19 +217,19 @@ export function Dashboard() {
         <h2 className="text-xl mb-4" style={{ fontFamily: 'var(--font-serif)' }}>
           Acesso Rápido
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {atalhos.map((atalho) => {
             const Icon = atalho.icon;
             return (
               <Link key={atalho.path} to={atalho.path}>
                 <Card className="hover:shadow-lg transition-all duration-200 hover:-translate-y-1 h-full">
                   <CardBody>
-                    <div className={`w-12 h-12 rounded-lg ${atalho.color} flex items-center justify-center mb-4`}>
-                      <Icon className="w-6 h-6 text-white" />
+                    <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg ${atalho.color} flex items-center justify-center mb-3 sm:mb-4`}>
+                      <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                     </div>
-                    <h3 className="text-base text-foreground mb-2">{atalho.title}</h3>
-                    <p className="text-sm text-muted-foreground mb-4">{atalho.description}</p>
-                    <div className="flex items-center gap-1 text-sm text-primary">
+                    <h3 className="text-sm sm:text-base text-foreground mb-1 sm:mb-2 leading-snug">{atalho.title}</h3>
+                    <p className="hidden sm:block text-sm text-muted-foreground mb-4">{atalho.description}</p>
+                    <div className="hidden sm:flex items-center gap-1 text-sm text-primary">
                       Acessar <ArrowRight className="w-4 h-4" />
                     </div>
                   </CardBody>

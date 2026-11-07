@@ -1,6 +1,7 @@
 
 import { createRoot } from "react-dom/client";
 import { ClerkProvider } from "@clerk/clerk-react";
+import { ptBR } from "@clerk/localizations";
 import App from "./app/App.tsx";
 import "./styles/index.css";
 
@@ -26,7 +27,7 @@ if (!publishableKey) {
   );
 } else {
   root.render(
-    <ClerkProvider publishableKey={publishableKey}>
+    <ClerkProvider publishableKey={publishableKey} localization={ptBR}>
       <App />
     </ClerkProvider>
   );

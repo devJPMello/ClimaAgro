@@ -282,16 +282,16 @@ export function Perfil() {
                   <img
                     src={user.imageUrl}
                     alt={nome || 'Usuário'}
-                    className="w-20 h-20 rounded-full object-cover border border-border"
+                    className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-full object-cover border border-border"
                   />
                 ) : (
-                  <div className="w-20 h-20 rounded-full bg-primary flex items-center justify-center">
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-full bg-primary flex items-center justify-center">
                     <User className="w-10 h-10 text-primary-foreground" />
                   </div>
                 )}
-                <div>
-                  <h3 className="text-lg">{nome}</h3>
-                  <p className="text-sm text-muted-foreground">{email}</p>
+                <div className="min-w-0">
+                  <h3 className="text-lg leading-snug">{nome}</h3>
+                  <p className="text-sm text-muted-foreground truncate" title={email}>{email}</p>
                 </div>
               </div>
 

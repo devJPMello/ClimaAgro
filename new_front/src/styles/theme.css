@@ -62,6 +62,8 @@
 }
 
 .dark {
+  /* Barras de rolagem, selects e campos nativos no tom escuro */
+  color-scheme: dark;
   /* ClimaAgro Dark Theme — identidade visual azul preservada */
   --background: #0A0E1A;
   --foreground: #E8EAED;

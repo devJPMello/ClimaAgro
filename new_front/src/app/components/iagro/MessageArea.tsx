@@ -205,7 +205,7 @@ export function MessageArea({
           <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-xl bg-sidebar-primary">
             <Cloud className="h-8 w-8 text-white" />
           </div>
-          <h2 className="text-center text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
+          <h2 className="text-center text-2xl sm:text-3xl mb-2" style={{ fontFamily: 'var(--font-serif)' }}>
             Olá! Como posso ajudar?
           </h2>
           <p className="mx-auto max-w-3xl text-center text-muted-foreground">
@@ -217,19 +217,19 @@ export function MessageArea({
             <button
               type="button"
               onClick={onApplyPlantAnalysis}
-              className="w-full rounded-2xl border-2 border-dashed border-green-500/40 bg-green-500/5 px-6 py-5 text-left transition-all hover:border-green-500/70 hover:bg-green-500/10 hover:shadow-md hover:-translate-y-0.5"
+              className="w-full rounded-2xl border-2 border-dashed border-green-500/40 bg-green-500/5 px-4 py-4 sm:px-6 sm:py-5 text-left transition-all hover:border-green-500/70 hover:bg-green-500/10 hover:shadow-md hover:-translate-y-0.5"
             >
-              <div className="flex items-center gap-4">
-                <span className="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-green-500/15 text-green-600">
-                  <Camera className="h-7 w-7" />
+              <div className="flex items-center gap-3 sm:gap-4">
+                <span className="inline-flex h-11 w-11 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-xl bg-green-500/15 text-green-600">
+                  <Camera className="h-6 w-6 sm:h-7 sm:w-7" />
                 </span>
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <p className="text-base font-medium text-foreground">Analisar Planta com Foto</p>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-sm text-muted-foreground line-clamp-3 sm:line-clamp-none">
                     Envie uma foto da sua cultura e receba um laudo agronômico completo: deficiências nutricionais, necessidade de calagem, pragas, doenças e recomendações de manejo.
                   </p>
                 </div>
-                <span className="shrink-0 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-medium text-green-700">
+                <span className="hidden sm:inline-flex shrink-0 rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-xs font-medium text-green-700">
                   Enviar foto →
                 </span>
               </div>
@@ -242,13 +242,13 @@ export function MessageArea({
                     key={action.title}
                     type="button"
                     onClick={() => onApplyQuickPrompt(action.prompt)}
-                    className="rounded-xl border border-border bg-card px-5 py-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+                    className="rounded-xl border border-border bg-card px-4 py-3 sm:px-5 sm:py-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <span className="inline-flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                         <Icon className="h-5 w-5" />
                       </span>
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-base text-foreground">{action.title}</p>
                         <p className="text-sm text-muted-foreground">{action.description}</p>
                       </div>

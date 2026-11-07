@@ -38,7 +38,19 @@ export function AuthLayout() {
       </div>
 
       {/* Right side - Auth Form */}
-      <div className="flex-1 flex items-center justify-center p-4 sm:p-8 bg-background">
+      <div className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 bg-background">
+        {/* Marca no celular (o painel azul só aparece em telas grandes) */}
+        <div className="lg:hidden w-full max-w-md mb-8 flex items-center gap-3">
+          <div className="flex items-center justify-center w-11 h-11 bg-gradient-to-br from-primary-dark via-primary to-primary-light text-white rounded-xl shadow-md">
+            <Cloud className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-xl leading-tight tracking-tight" style={{ fontFamily: 'var(--font-serif)' }}>
+              ClimaAgro
+            </p>
+            <p className="text-xs text-muted-foreground">Inteligência Climática Agrícola</p>
+          </div>
+        </div>
         <div className="w-full max-w-md">
           <Outlet />
         </div>

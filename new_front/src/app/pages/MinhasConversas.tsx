@@ -575,9 +575,12 @@ export function MinhasConversas() {
         <Card className="flex min-h-0 flex-1 flex-col overflow-hidden lg:h-full lg:min-h-0">
           <CardBody className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden !px-5 !pb-4 !pt-5 lg:!px-6">
             {!selected ? (
-              <div className="flex flex-1 flex-col items-center justify-center py-16 text-center text-muted-foreground">
-                <MessageCircle className="mb-3 h-14 w-14 opacity-40" />
-                <p className="text-base">Selecione uma conversa à esquerda</p>
+              <div className="flex flex-1 flex-col items-center justify-center py-10 lg:py-16 text-center text-muted-foreground">
+                <MessageCircle className="mb-3 h-12 w-12 lg:h-14 lg:w-14 opacity-40" />
+                <p className="text-base">
+                  <span className="lg:hidden">Selecione uma conversa acima</span>
+                  <span className="hidden lg:inline">Selecione uma conversa à esquerda</span>
+                </p>
               </div>
             ) : (
               <>
