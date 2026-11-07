@@ -1,0 +1,44 @@
+# Deploy no Render (plano gratuito) — crie via Dashboard → New → Blueprint.
+# Segredos (banco, Clerk, Gemini...) NÃO ficam aqui: cole no painel em
+# Environment → "Add from .env" de cada serviço.
+services:
+  - type: web
+    name: climaagro-api-jpm
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: back
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: FRONTEND_URL
+        value: https://climaagro-jpm.onrender.com
+      - key: PUBLIC_API_BASE_URL
+        value: https://climaagro-api-jpm.onrender.com
+
+  - type: web
+    name: climaagro-jpm
+    runtime: static
+    rootDir: new_front
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    autoDeploy: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: VITE_API_URL
+        value: https://climaagro-api-jpm.onrender.com/api
+      - key: VITE_APP_NAME
+        value: ClimaAgro

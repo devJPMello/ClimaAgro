@@ -66,6 +66,12 @@ const aiLimiter = rateLimit({
 
 const app = express();
 
+// Atrás de proxy (Railway etc.): usa o IP real do cliente no rate limit. Ex.: TRUST_PROXY=1
+if (process.env.TRUST_PROXY) {
+  const n = Number(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isFinite(n) ? n : process.env.TRUST_PROXY);
+}
+
 function parseFrontendOrigins() {
   const raw =
     process.env.FRONTEND_URL ||
