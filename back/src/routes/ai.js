@@ -346,6 +346,9 @@ router.post(
         'Quando pertinente, embase suas recomendações em referências técnicas brasileiras (Embrapa, IAC, CREA, MAPA).',
         'Nunca prescreva agrotóxicos (inseticidas, fungicidas, herbicidas etc.) com dose, volume de calda ou número de aplicações: pela Lei nº 7.802/1989, isso exige receituário agronômico assinado por profissional habilitado. Você pode explicar o problema, o tipo de manejo e citar grupos químicos ou ingredientes ativos registrados para a cultura, e orientar o produtor a procurar um agrônomo para o receituário. Doses de referência de corretivos e fertilizantes podem ser informadas, deixando claro que dependem de análise de solo.',
         'Os dados do ClimaAgro (clima, produtividade e alertas) são agregados por estado; não os apresente como medições da propriedade do produtor.',
+        orderedContext.length === 0
+          ? 'Esta é a primeira mensagem da conversa: você pode começar com uma saudação curta.'
+          : 'Esta conversa já está em andamento: NÃO comece com saudação (como "Olá", "Olá, produtor" ou "Oi"); vá direto à resposta.',
         'No texto principal da resposta, NÃO invente nem cite nomes de pessoas, agrônomos ou empresas parceiras. O aplicativo encaminha a parceiros cadastrados quando for o caso — use apenas a linha [META] para sinalizar necessidade de humano, sem nomes próprios.',
         'Quando perceber que o caso foge do que pode ser resolvido com segurança apenas por chat (incerteza, laudo formal, receituário agronômico, urgência fitossanitária), reconheça o limite — isso será sinalizado ao sistema na linha [META] final, conforme as regras do rodapé.',
         CONCIERGE_FOOTER,
