@@ -21,12 +21,10 @@ export type AgronomoParceiroApi = {
 
 export async function listarAgronomosParceiros(params?: {
   especialidade?: string;
-  /** default na API: apenas parceiros ativos */
-  ativo?: boolean;
 }) {
+  // A API pública só devolve parceiros ativos.
   const q = new URLSearchParams();
   if (params?.especialidade?.trim()) q.set('especialidade', params.especialidade.trim());
-  if (params?.ativo !== undefined) q.set('ativo', params.ativo ? 'true' : 'false');
   const suffix = q.toString() ? `?${q.toString()}` : '';
   return httpClient.get<{ agronomos: AgronomoParceiroApi[] }>(`agronomos-parceiros${suffix}`, {
     cacheTtlMs: 0,

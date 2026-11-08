@@ -25,18 +25,13 @@ function isValidCpf11(digits) {
 
 router.get('/', async (req, res) => {
   try {
-    const { uf, especialidade, ativo } = req.query;
+    const { uf, especialidade } = req.query;
+    // Rota pública: só parceiros aprovados. Pendentes e desativados ficam no painel admin.
     const where = {
       tipo: 'agronomo',
       parceiro: true,
+      parceiroAtivo: true,
     };
-
-    const ativoFilter = String(ativo || 'true').toLowerCase();
-    if (ativoFilter === 'true' || ativoFilter === '1' || ativoFilter === 'sim') {
-      where.parceiroAtivo = true;
-    } else if (ativoFilter === 'false' || ativoFilter === '0') {
-      where.parceiroAtivo = false;
-    }
 
     if (String(uf || '').trim()) {
       where.uf = String(uf).trim().toUpperCase();
