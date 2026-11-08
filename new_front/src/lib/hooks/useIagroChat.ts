@@ -402,6 +402,8 @@ export function useIagroChat() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Falha ao enviar mensagem.');
       setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+      // Devolve o texto ao campo para o usuário tentar de novo sem redigitar.
+      setInput((atual) => atual || messageText);
     } finally {
       setLoadingSend(false);
     }

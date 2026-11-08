@@ -519,14 +519,8 @@ router.post(
       if (error.statusCode === 403) {
         return res.status(403).json({ message: error.message || 'Acesso negado a esta conversa.' });
       }
-      const status = error.statusCode || error.response?.status;
-      const messageText =
-        error.code === 'ECONNABORTED' || error.message?.includes('timeout')
-          ? 'Timeout ao chamar Gemini.'
-          : error.message || 'Falha ao processar mensagem do chat.';
-      return res.status(status && status < 500 ? status : 502).json({
-        message: messageText,
-      });
+      const { status, message } = geminiErrorToResponse(error, 'Falha ao processar mensagem do chat.');
+      return res.status(status).json({ message });
     }
   }
 );
@@ -793,17 +787,45 @@ router.post(
         return res.json({ summary: String(raw), highlights: [] });
       }
     } catch (e) {
-      const status = e.response?.status;
-      const msg =
-        e.code === 'ECONNABORTED' || e.message?.includes('timeout')
-          ? 'Timeout ao chamar Gemini.'
-          : 'Falha ao gerar relatório.';
-      return res.status(status && status < 500 ? status : 502).json({
-        message: msg,
+      const { status, message } = geminiErrorToResponse(e, 'Falha ao gerar relatório.');
+      return res.status(status).json({
+        message,
         ...(process.env.NODE_ENV === 'development' && e.response?.data ? { detail: e.response.data } : {})
       });
     }
   }
 );
 
+/**
+ * Traduz falhas da chamada ao Gemini em status e mensagem que o usuário entende.
+ * Erros de cota, crédito ou chave do Gemini viram 503 (serviço indisponível),
+ * para não parecer que o problema é do usuário.
+ */
+function geminiErrorToResponse(error, fallback) {
+  if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+    return { status: 504, message: 'O assistente de IA demorou para responder. Tente novamente.' };
+  }
+  const upstream = error.response?.status;
+  if (upstream === 429) {
+    return {
+      status: 503,
+      message: 'O assistente de IA recebeu muitas consultas agora. Aguarde alguns instantes e tente de novo.',
+    };
+  }
+  if (upstream === 400 || upstream === 401 || upstream === 402 || upstream === 403 || upstream === 404) {
+    return {
+      status: 503,
+      message: 'O assistente de IA está indisponível no momento. Tente novamente mais tarde.',
+    };
+  }
+  if (error.statusCode === 503) {
+    return { status: 503, message: 'O assistente de IA está indisponível no momento. Tente novamente mais tarde.' };
+  }
+  if (error.statusCode && error.statusCode < 500) {
+    return { status: error.statusCode, message: error.message || fallback };
+  }
+  return { status: 502, message: fallback };
+}
+
 module.exports = router;
+module.exports.geminiErrorToResponse = geminiErrorToResponse;

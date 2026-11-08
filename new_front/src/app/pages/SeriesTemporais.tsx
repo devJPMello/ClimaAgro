@@ -39,7 +39,7 @@ type SavedQuery = {
 
 type ProdRow = { mes: string; produtividade: number | null; produtividadeNum?: number | null };
 type ClimaRow = { mes: string; temperatura: number; precipitacao: number; umidade: number };
-type CompRow = { mes: string; clima: number; produtividade: number };
+type CompRow = { mes: string; clima: number; produtividade: number | null };
 
 const MAX_CONCURRENT = 6;
 
@@ -395,8 +395,12 @@ export function SeriesTemporais() {
       const prodByMes = new Map(prodMonthly.map((r) => [r.mes, r.produtividadeNum ?? r.produtividade ?? null]));
       setDadosComparativos(
         climateMonthly
-          .map((row) => ({ mes: row.mes, clima: row.precipitacao, produtividade: Number(prodByMes.get(row.mes) ?? 0) }))
-          .filter((row) => row.clima > 0 || row.produtividade > 0)
+          .map((row) => {
+            // Mês sem estimativa do IBGE fica vazio no gráfico (null), e não zero.
+            const p = Number(prodByMes.get(row.mes));
+            return { mes: row.mes, clima: row.precipitacao, produtividade: p > 0 ? p : null };
+          })
+          .filter((row) => row.clima > 0 || row.produtividade != null)
       );
     } catch (e) {
       setDadosClimaticos([]);
