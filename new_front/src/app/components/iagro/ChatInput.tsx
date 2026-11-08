@@ -85,12 +85,12 @@ export function ChatInput({
             placeholder={
               humanHandoff
                 ? 'Sua mensagem será enviada ao WhatsApp do agrônomo...'
-                : 'Digite sua pergunta para o IAgro...'
+                : 'Pergunte ao IAgro...'
             }
             rows={1}
             className={[
               'w-full h-14 resize-none overflow-hidden rounded-2xl border bg-input-background',
-              'py-4 pr-36 pl-12 text-sm leading-5 focus:outline-none focus:ring-0 transition-colors',
+              'py-4 pr-24 sm:pr-36 pl-12 text-sm leading-5 focus:outline-none focus:ring-0 transition-colors',
               isRecording ? 'border-destructive' : 'border-border',
             ].join(' ')}
           />
@@ -136,6 +136,7 @@ export function ChatInput({
             <button
               type="submit"
               disabled={!canSend}
+              aria-label="Enviar"
               className="inline-flex h-8 items-center gap-1 rounded-full bg-primary px-3 text-xs text-primary-foreground transition-all hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loadingSend ? (
@@ -143,7 +144,7 @@ export function ChatInput({
               ) : (
                 <SendHorizonal className="w-3.5 h-3.5" />
               )}
-              Enviar
+              <span className="hidden sm:inline">Enviar</span>
             </button>
           </div>
         </div>

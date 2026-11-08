@@ -196,7 +196,7 @@ export function MessageArea({
   }, [conciergeSuggestion]);
 
   return (
-    <div className="h-[50vh] sm:h-[60vh] md:h-[68vh] overflow-y-auto rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+    <div className="h-[calc(100dvh-19rem)] min-h-[300px] sm:h-[60vh] md:h-[68vh] overflow-y-auto rounded-lg border border-border bg-muted/20 p-3 space-y-3">
       {loadingHistory && <p className="text-sm text-muted-foreground">Carregando histórico...</p>}
 
       {/* Empty state */}
