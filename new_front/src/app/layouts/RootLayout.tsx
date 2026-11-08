@@ -53,7 +53,7 @@ export function RootLayout() {
     if (toastShownRef.current || alertCount === 0) return;
     toastShownRef.current = true;
     toast.warning(
-      `${alertCount} alerta${alertCount > 1 ? 's' : ''} climático${alertCount > 1 ? 's' : ''} crítico${alertCount > 1 ? 's' : ''} na sua região`,
+      `${alertCount} alerta${alertCount > 1 ? 's' : ''} climático${alertCount > 1 ? 's' : ''} de severidade alta ou crítica na sua região`,
       {
         description: 'Veja os detalhes na página de Alertas.',
         duration: 8000,

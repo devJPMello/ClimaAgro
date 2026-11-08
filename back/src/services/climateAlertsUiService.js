@@ -482,10 +482,20 @@ async function statesByCapPolygon({ GeoData, polygonText, cache }) {
   return out;
 }
 
+// Resultado das interseções polígono CAP x geo_data. O polígono de um alerta não muda e os contornos
+// de UF/município são estáticos, então o cache vale entre requisições (evita ~2 consultas por alerta).
+const POLYGON_LOOKUP_CACHE_MAX = 2000;
+const polygonLookupCache = new Map();
+
+function sharedPolygonCache() {
+  if (polygonLookupCache.size > POLYGON_LOOKUP_CACHE_MAX) polygonLookupCache.clear();
+  return polygonLookupCache;
+}
+
 async function buildOfficialAlertUiItems(rows, stateFilter, cityFilter, GeoData) {
   const uf = stateFilter ? String(stateFilter).toUpperCase() : null;
   const cityNorm = cityFilter ? normalizeCityKey(cityFilter) : null;
-  const cache = new Map();
+  const cache = sharedPolygonCache();
   const out = [];
   for (const r of rows) {
     // O campo `states`/`estados` vindo da fonte configurada (INMET_ALERTS_JSON_URL) já foi observado

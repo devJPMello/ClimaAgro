@@ -142,9 +142,14 @@ async function buildDashboardPrincipalStates({ models }) {
     where: kpiTempPrevWhere,
     raw: true
   });
+  // Média, entre as localidades, da chuva acumulada em 30 dias (somar todas as localidades
+  // daria um total sem sentido físico, ex.: 27 UFs × ~80 mm).
   const [kpiRain] = await ClimateData.findAll({
-    attributes: [[fn('COALESCE', fn('SUM', col('precipitation')), 0), 'v']],
-    where: kpiRainWhere,
+    attributes: [
+      [fn('COALESCE', fn('SUM', col('precipitation')), 0), 'sum'],
+      [fn('COUNT', fn('DISTINCT', col('geo_data_id'))), 'locs']
+    ],
+    where: { ...kpiRainWhere, precipitation: { [Op.ne]: null } },
     raw: true
   });
 
@@ -254,7 +259,8 @@ async function buildDashboardPrincipalStates({ models }) {
   if (tNow != null && tPrev != null && tPrev !== 0) {
     tempChange = n(((tNow - tPrev) / tPrev) * 100, 1);
   }
-  const rainSum = n(kpiRain?.v, 0) ?? 0;
+  const rainLocs = Number(kpiRain?.locs) || 0;
+  const rainSum = rainLocs > 0 ? n(Number(kpiRain.sum) / rainLocs, 0) ?? 0 : 0;
 
   const geoIdsForClimate = stateRows.map((r) => r.id);
   const climateByGeoId = new Map();
@@ -423,9 +429,14 @@ async function buildDashboardSummary({ models, state: stateParam }) {
     raw: true
   });
 
+  // Média, entre as localidades, da chuva acumulada em 30 dias (somar todas as localidades
+  // daria um total sem sentido físico, ex.: 27 UFs × ~80 mm).
   const [kpiRain] = await ClimateData.findAll({
-    attributes: [[fn('COALESCE', fn('SUM', col('precipitation')), 0), 'v']],
-    where: kpiRainWhere,
+    attributes: [
+      [fn('COALESCE', fn('SUM', col('precipitation')), 0), 'sum'],
+      [fn('COUNT', fn('DISTINCT', col('geo_data_id'))), 'locs']
+    ],
+    where: { ...kpiRainWhere, precipitation: { [Op.ne]: null } },
     raw: true
   });
 
@@ -501,7 +512,8 @@ async function buildDashboardSummary({ models, state: stateParam }) {
     tempChange = n(((tNow - tPrev) / tPrev) * 100, 1);
   }
 
-  const rainSum = n(kpiRain?.v, 0) ?? 0;
+  const rainLocs = Number(kpiRain?.locs) || 0;
+  const rainSum = rainLocs > 0 ? n(Number(kpiRain.sum) / rainLocs, 0) ?? 0 : 0;
 
   const since14Str = d14.toISOString().split('T')[0];
   const geoIdsForClimate = regionRows.map((r) => r.id);

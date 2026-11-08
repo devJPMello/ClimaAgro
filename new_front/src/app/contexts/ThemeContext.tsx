@@ -40,3 +40,8 @@ export function useTheme() {
   if (!context) throw new Error('useTheme deve ser usado dentro de ThemeProvider');
   return context;
 }
+
+/** Igual a useTheme, mas devolve null fora do ThemeProvider (ex.: testes de componentes isolados). */
+export function useThemeOptional() {
+  return useContext(ThemeContext) ?? null;
+}

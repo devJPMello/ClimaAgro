@@ -8,6 +8,7 @@ import { Link } from 'react-router';
 import { Modal } from '../ui/Modal';
 import { getClimateSeriesByUf } from '../../../lib/api/climateApi';
 import type { DashboardRegionRowDto } from '../../../lib/api/contracts/climate';
+import { useChartTheme } from '../../../lib/charts/useChartTheme';
 
 type TabKey = 'temperatura' | 'precipitacao' | 'produtividade' | 'alertas';
 
@@ -88,6 +89,7 @@ interface Props {
 }
 
 export function EstadoDrilldownModal({ regiao, onClose }: Props) {
+  const chart = useChartTheme();
   const [activeTab, setActiveTab] = useState<TabKey>('temperatura');
   const uf = regiao.uf ?? '';
   const currYear = new Date().getFullYear();
@@ -166,26 +168,22 @@ export function EstadoDrilldownModal({ regiao, onClose }: Props) {
             <>
               <ResponsiveContainer width="100%" height={260}>
                 <LineChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
                   <XAxis
                     dataKey="label"
-                    stroke="#64748b"
+                    stroke={chart.axis}
                     tick={{ fontSize: 11 }}
                     interval="preserveStartEnd"
                   />
                   <YAxis
-                    stroke="#64748b"
+                    stroke={chart.axis}
                     tick={{ fontSize: 11 }}
                     width={50}
                     unit={unit}
                   />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#ffffff',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                    }}
+                    contentStyle={{ ...chart.tooltipStyle, fontSize: '12px' }}
+                    labelStyle={chart.tooltipLabelStyle}
                     formatter={(value) =>
                       value != null ? `${value}${unit}` : '—'
                     }

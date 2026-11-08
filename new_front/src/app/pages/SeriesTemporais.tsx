@@ -24,6 +24,7 @@ import { buildProductivityCropSelectOptions, getProductivityYearOptions } from '
 import type { ClimateSeriesVariable } from '../../lib/api/contracts/climate';
 import { formatUfLabel, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
 import { useProfileUf } from '../../lib/hooks/useProfileUf';
+import { useChartTheme } from '../../lib/charts/useChartTheme';
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { STORAGE_KEYS } from '../../lib/storage/storageKeys';
 
@@ -59,8 +60,6 @@ async function concurrentMap<T, R>(
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
   return results;
 }
-
-const TOOLTIP_DATE_LABEL_STYLE = { color: '#000000' };
 
 function formatTooltipProdutividade(value: unknown): string {
   const v = Array.isArray(value) ? value[0] : value;
@@ -202,6 +201,7 @@ export function SeriesTemporais() {
   const [uf, setUf] = useState('');
   const [ufOptions, setUfOptions] = useState<Array<{ value: string; label: string }>>([UF_SELECT_PLACEHOLDER_OPTION]);
   const profileUf = useProfileUf();
+  const chart = useChartTheme();
   const { ufs: climateUfs } = useClimateUfs();
 
   useEffect(() => {
@@ -534,10 +534,10 @@ export function SeriesTemporais() {
             <LazyRender height={300}>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={dadosProdutividade}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
-                  <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-                  <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} formatter={formatTooltipProdutividade} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                  <XAxis dataKey="mes" stroke={chart.axis} style={{ fontSize: '12px' }} />
+                  <YAxis stroke={chart.axis} style={{ fontSize: '12px' }} />
+                  <Tooltip contentStyle={chart.tooltipStyle} labelStyle={chart.tooltipLabelStyle} formatter={formatTooltipProdutividade} />
                   <Legend />
                   <Line type="monotone" dataKey="produtividadeNum" stroke="#1976D2" strokeWidth={3} dot={{ fill: '#1976D2', r: 5 }} activeDot={{ r: 7 }} connectNulls name="Produtividade (t/ha)" />
                 </LineChart>
@@ -563,10 +563,10 @@ export function SeriesTemporais() {
             <LazyRender height={300}>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={dadosClimaticos}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
-                  <YAxis stroke="#64748b" style={{ fontSize: '12px' }} />
-                  <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                  <XAxis dataKey="mes" stroke={chart.axis} style={{ fontSize: '12px' }} />
+                  <YAxis stroke={chart.axis} style={{ fontSize: '12px' }} />
+                  <Tooltip contentStyle={chart.tooltipStyle} labelStyle={chart.tooltipLabelStyle} />
                   <Legend />
                   <Bar dataKey="temperatura" fill="#F97316" name="Temperatura (°C)" />
                   <Bar dataKey="precipitacao" fill="#42A5F5" name="Precipitação (mm)" />
@@ -598,11 +598,11 @@ export function SeriesTemporais() {
             <LazyRender height={300}>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={dadosComparativos}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="mes" stroke="#64748b" style={{ fontSize: '12px' }} />
-                  <YAxis yAxisId="left" stroke="#64748b" style={{ fontSize: '12px' }} />
-                  <YAxis yAxisId="right" orientation="right" stroke="#64748b" style={{ fontSize: '12px' }} />
-                  <Tooltip contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }} labelStyle={TOOLTIP_DATE_LABEL_STYLE} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
+                  <XAxis dataKey="mes" stroke={chart.axis} style={{ fontSize: '12px' }} />
+                  <YAxis yAxisId="left" stroke={chart.axis} style={{ fontSize: '12px' }} />
+                  <YAxis yAxisId="right" orientation="right" stroke={chart.axis} style={{ fontSize: '12px' }} />
+                  <Tooltip contentStyle={chart.tooltipStyle} labelStyle={chart.tooltipLabelStyle} />
                   <Legend />
                   <Line yAxisId="left" type="monotone" dataKey="clima" stroke="#F97316" strokeWidth={2} dot={{ fill: '#F97316' }} name="Chuva acumulada (mm)" />
                   <Line yAxisId="right" type="monotone" dataKey="produtividade" stroke="#1976D2" strokeWidth={2} dot={{ fill: '#1976D2' }} name="Produtividade (t/ha)" />
