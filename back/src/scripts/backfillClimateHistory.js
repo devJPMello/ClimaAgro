@@ -6,10 +6,14 @@
  *   BACKFILL_START_DATE  — padrão: 2024-01-01
  *   BACKFILL_END_DATE    — padrão: ontem (America/Sao_Paulo)
  *   OPEN_METEO_SYNC_DELAY_MS — pausa entre UFs (padrão 1200); aumente se receber HTTP 429 da Open-Meteo.
+ *   BACKFILL_UFS          — opcional, lista de siglas separadas por vírgula (ex.: MT,PR); padrão: todas.
+ *
+ * Dias que ainda não existem são inseridos em lote; dias existentes só têm campos nulos preenchidos.
  */
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
+const { Op } = require('sequelize');
 const { connectDB, sequelize, models } = require('../config/database');
 const openMeteo = require('../services/openMeteoClient');
 
@@ -39,8 +43,13 @@ async function run() {
 
   console.log(`\n📅 Backfill histórico: ${startDate} → ${endDate}\n`);
 
+  const onlyUfs = String(process.env.BACKFILL_UFS || '')
+    .split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+
   const states = await GeoData.findAll({
-    where: { category: 'state', isActive: true },
+    where: { category: 'state', isActive: true, ...(onlyUfs.length ? { state: onlyUfs } : {}) },
     attributes: ['id', 'state', 'name'],
     order: [['state', 'ASC']],
   });
@@ -96,6 +105,13 @@ async function run() {
       let ufUpserted = 0;
       let ufSkipped  = 0;
 
+      // Uma consulta para saber quais dias já existem (evita uma ida ao banco por dia).
+      const existing = await ClimateData.findAll({
+        where: { geoDataId: g.id, date: { [Op.between]: [startDate, endDate] } },
+      });
+      const byDate = new Map(existing.map((row) => [String(row.date).slice(0, 10), row]));
+      const toInsert = [];
+
       for (const r of rows) {
         const y = parseInt(String(r.date).slice(0, 4), 10);
         const m = parseInt(String(r.date).slice(5, 7), 10);
@@ -116,9 +132,11 @@ async function run() {
           },
         };
 
-        const [row, created] = await ClimateData.findOrCreate({
-          where: { geoDataId: g.id, date: r.date },
-          defaults: {
+        const row = byDate.get(String(r.date).slice(0, 10));
+        if (!row) {
+          toInsert.push({
+            geoDataId: g.id,
+            date: r.date,
             uf,
             year: y,
             month: m,
@@ -138,31 +156,33 @@ async function run() {
             // ENUM climate_data.status no PostgreSQL: preliminar | confirmado | revisado | final (sem "historico")
             status: 'final',
             metadata: md,
-          },
-        });
+          });
+          continue;
+        }
 
-        if (created) {
+        // Preenche campos que ainda estão nulos (não sobrescreve dados de qualidade superior)
+        const patch = {};
+        if (row.avgTemperature == null && avgT != null) patch.avgTemperature = avgT;
+        if (row.maxTemperature == null && r.maxTemperature != null) patch.maxTemperature = r.maxTemperature;
+        if (row.minTemperature == null && r.minTemperature != null) patch.minTemperature = r.minTemperature;
+        if (row.precipitation  == null && r.precipitation  != null) patch.precipitation  = r.precipitation;
+        if (row.humidity       == null && r.humidity       != null) patch.humidity       = r.humidity;
+        if (row.windSpeed      == null && r.windSpeed      != null) patch.windSpeed      = r.windSpeed;
+        if (row.atmosphericPressure == null && r.atmosphericPressure != null) patch.atmosphericPressure = r.atmosphericPressure;
+
+        if (Object.keys(patch).length > 0) {
+          patch.metadata = mergeMetadata(row.metadata, md);
+          await row.update(patch);
           ufUpserted += 1;
         } else {
-          // Preenche campos que ainda estão nulos (não sobrescreve dados de qualidade superior)
-          const patch = {};
-          if (row.avgTemperature == null && avgT != null) patch.avgTemperature = avgT;
-          if (row.maxTemperature == null && r.maxTemperature != null) patch.maxTemperature = r.maxTemperature;
-          if (row.minTemperature == null && r.minTemperature != null) patch.minTemperature = r.minTemperature;
-          if (row.precipitation  == null && r.precipitation  != null) patch.precipitation  = r.precipitation;
-          if (row.humidity       == null && r.humidity       != null) patch.humidity       = r.humidity;
-          if (row.windSpeed      == null && r.windSpeed      != null) patch.windSpeed      = r.windSpeed;
-          if (row.atmosphericPressure == null && r.atmosphericPressure != null) patch.atmosphericPressure = r.atmosphericPressure;
-
-          if (Object.keys(patch).length > 0) {
-            patch.metadata = mergeMetadata(row.metadata, md);
-            await row.update(patch);
-            ufUpserted += 1;
-          } else {
-            ufSkipped += 1;
-          }
+          ufSkipped += 1;
         }
       }
+
+      for (let i = 0; i < toInsert.length; i += 500) {
+        await ClimateData.bulkCreate(toInsert.slice(i, i + 500), { ignoreDuplicates: true });
+      }
+      ufUpserted += toInsert.length;
 
       totalUpserted += ufUpserted;
       totalSkipped  += ufSkipped;
