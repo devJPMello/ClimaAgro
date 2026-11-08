@@ -138,7 +138,7 @@ export function BrazilMap({ metric, valuesByUf, dataRevision = 0 }: BrazilMapPro
   }
 
   return (
-    <div className="w-full overflow-hidden rounded-xl h-[300px] sm:h-[450px] lg:h-[600px]">
+    <div className="relative isolate z-0 w-full overflow-hidden rounded-xl h-[300px] sm:h-[450px] lg:h-[600px]">
       <MapContainer center={[-14.5, -52.5]} zoom={4} style={{ height: '100%', width: '100%' }}>
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
