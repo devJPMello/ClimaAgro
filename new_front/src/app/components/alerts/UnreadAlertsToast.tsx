@@ -11,13 +11,36 @@ interface Props {
 
 const MAX_LISTADOS = 3;
 
+type Grupo = { tipo: string; total: number; critico: boolean; periodo: string };
+
+/** "dd/mm/aaaa" -> número ordenável; texto fora do formato vai para o fim. */
+function chaveData(d: string): number {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(d || '');
+  return m ? Number(`${m[3]}${m[2]}${m[1]}`) : 0;
+}
+
+/** Junta alertas do mesmo tipo (ex.: um aviso de calor por dia) em uma linha só. */
+function agruparPorTipo(alerts: ClimateAlertDto[]): Grupo[] {
+  const mapa = new Map<string, ClimateAlertDto[]>();
+  alerts.forEach((a) => mapa.set(a.tipo, [...(mapa.get(a.tipo) ?? []), a]));
+  const grupos = [...mapa.entries()].map(([tipo, itens]) => {
+    const datas = itens.map((i) => i.data).filter((d) => chaveData(d) > 0).sort((x, y) => chaveData(x) - chaveData(y));
+    const curta = (d: string) => d.slice(0, 5);
+    const periodo =
+      datas.length === 0 ? '' : datas[0] === datas[datas.length - 1] ? datas[0] : `${curta(datas[0])} a ${curta(datas[datas.length - 1])}`;
+    return { tipo, total: itens.length, critico: itens.some((i) => i.severidade === 'critical'), periodo };
+  });
+  // Críticos primeiro; depois os tipos com mais avisos.
+  return grupos.sort((a, b) => Number(b.critico) - Number(a.critico) || b.total - a.total);
+}
+
 /** Aviso exibido ao abrir o sistema quando há alertas altos ou críticos não vistos na UF do perfil. */
 export function UnreadAlertsToast({ alerts, uf, onVerAlertas, onDispensar }: Props) {
   const criticos = alerts.filter((a) => a.severidade === 'critical');
   const altos = alerts.filter((a) => a.severidade === 'high');
-  // Críticos primeiro, depois altos.
-  const listados = [...criticos, ...altos].slice(0, MAX_LISTADOS);
-  const restantes = alerts.length - listados.length;
+  const grupos = agruparPorTipo(alerts);
+  const listados = grupos.slice(0, MAX_LISTADOS);
+  const restantes = grupos.length - listados.length;
   const local = uf ? `${UF_NOME[uf] ?? uf} (${uf})` : 'sua região';
   const temCritico = criticos.length > 0;
 
@@ -64,21 +87,20 @@ export function UnreadAlertsToast({ alerts, uf, onVerAlertas, onDispensar }: Pro
         </div>
 
         <ul className="mt-3 space-y-1.5">
-          {listados.map((a) => (
-            <li key={a.id} className="flex items-center gap-2 text-xs">
+          {listados.map((g) => (
+            <li key={g.tipo} className="flex items-center gap-2 text-xs">
               <span
-                className={`h-2 w-2 shrink-0 rounded-full ${
-                  a.severidade === 'critical' ? 'bg-destructive' : 'bg-orange-500'
-                }`}
+                className={`h-2 w-2 shrink-0 rounded-full ${g.critico ? 'bg-destructive' : 'bg-orange-500'}`}
               />
-              <span className="truncate font-medium">{a.tipo}</span>
-              {a.data && <span className="ml-auto shrink-0 text-muted-foreground">{a.data}</span>}
+              <span className="truncate font-medium">{g.tipo}</span>
+              {g.total > 1 && <span className="shrink-0 text-muted-foreground">· {g.total} avisos</span>}
+              {g.periodo && <span className="ml-auto shrink-0 text-muted-foreground">{g.periodo}</span>}
             </li>
           ))}
         </ul>
         {restantes > 0 && (
           <p className="mt-1.5 text-xs text-muted-foreground">
-            e mais {restantes} alerta{restantes > 1 ? 's' : ''}
+            e mais {restantes} tipo{restantes > 1 ? 's' : ''} de alerta
           </p>
         )}
 
