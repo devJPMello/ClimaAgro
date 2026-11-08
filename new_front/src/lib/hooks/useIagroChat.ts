@@ -198,6 +198,7 @@ export function useIagroChat() {
 
   async function openThread(nextThreadId: string) {
     setLoadingHistory(true);
+    if (nextThreadId !== threadId) setConciergeSuggestion(null);
     try {
       if (!user?.id) {
         toast.error('Faça login para abrir o histórico de conversas.');
@@ -247,6 +248,7 @@ export function useIagroChat() {
         setThreadId(null);
         setMessages([]);
         setHybridConversation(null);
+        setConciergeSuggestion(null);
       }
       setThreadToDelete(null);
       await refreshThreads();
@@ -383,7 +385,9 @@ export function useIagroChat() {
 
     try {
       const response = await sendIAgroMessage({ message: messageText, threadId, files: filesToSend }, user.id);
-      setConciergeSuggestion(response.concierge?.escalate ? response.concierge : null);
+      // A indicação de agrônomo continua visível nas mensagens seguintes do mesmo tópico;
+      // só é trocada se a IA indicar de novo (ou limpa ao encaminhar, dispensar ou trocar de tópico).
+      if (response.concierge?.escalate) setConciergeSuggestion(response.concierge);
       setMessages((prev) => [
         ...prev,
         {
