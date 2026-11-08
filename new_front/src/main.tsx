@@ -27,7 +27,12 @@ if (!publishableKey) {
   );
 } else {
   root.render(
-    <ClerkProvider publishableKey={publishableKey} localization={ptBR}>
+    <ClerkProvider
+      publishableKey={publishableKey}
+      localization={ptBR}
+      // Esconde o selo "Development mode" (instância de desenvolvimento do Clerk, sem domínio próprio).
+      appearance={{ layout: { unsafe_disableDevelopmentModeWarnings: true } }}
+    >
       <App />
     </ClerkProvider>
   );
