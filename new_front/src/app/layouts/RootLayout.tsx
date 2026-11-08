@@ -22,6 +22,7 @@ import { useClerk, useUser } from '@clerk/clerk-react';
 import { useUnreadAlerts } from '../../lib/hooks/useUnreadAlerts';
 import { useOnboardingStatus } from '../../lib/hooks/useOnboardingStatus';
 import { OnboardingWizard } from '../components/onboarding/OnboardingWizard';
+import { UnreadAlertsToast } from '../components/alerts/UnreadAlertsToast';
 
 const navigationMain = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -45,25 +46,32 @@ export function RootLayout() {
   const navigate = useNavigate();
   const { signOut } = useClerk();
   const { user } = useUser();
-  const { count: alertCount, markAllSeen } = useUnreadAlerts();
+  const { count: alertCount, alerts: unreadAlerts, uf: alertUf, markAllSeen } = useUnreadAlerts();
   const { show: showOnboarding, dismiss: dismissOnboarding, complete: completeOnboarding } = useOnboardingStatus();
   const toastShownRef = useRef(false);
 
   useEffect(() => {
     if (toastShownRef.current || alertCount === 0) return;
     toastShownRef.current = true;
-    toast.warning(
-      `${alertCount} alerta${alertCount > 1 ? 's' : ''} climático${alertCount > 1 ? 's' : ''} de severidade alta ou crítica na sua região`,
-      {
-        description: 'Veja os detalhes na página de Alertas.',
-        duration: 8000,
-        action: {
-          label: 'Ver alertas',
-          onClick: () => void navigate('/alertas'),
-        },
-      },
+    toast.custom(
+      (id) => (
+        <UnreadAlertsToast
+          alerts={unreadAlerts}
+          uf={alertUf}
+          onVerAlertas={() => {
+            toast.dismiss(id);
+            void navigate('/alertas');
+          }}
+          onDispensar={() => {
+            // Marca como vistos para o aviso não voltar a cada acesso.
+            markAllSeen();
+            toast.dismiss(id);
+          }}
+        />
+      ),
+      { duration: 12000 },
     );
-  }, [alertCount, navigate]);
+  }, [alertCount, unreadAlerts, alertUf, navigate, markAllSeen]);
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);

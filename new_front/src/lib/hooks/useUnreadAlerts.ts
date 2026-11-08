@@ -23,6 +23,7 @@ function saveSeenIds(ids: Set<string>) {
 export function useUnreadAlerts() {
   const { user } = useUser();
   const [unread, setUnread] = useState<ClimateAlertDto[]>([]);
+  const [uf, setUf] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!user?.id) return;
@@ -31,8 +32,9 @@ export function useUnreadAlerts() {
       // Se o usuário desativou notificações de alertas, não busca
       if (profile?.notifAlertasCriticos === false) return;
 
-      const uf = profile?.uf && /^[A-Z]{2}$/.test(profile.uf) ? profile.uf : undefined;
-      const { items } = await listClimateAlerts(uf ? { state: uf } : undefined);
+      const perfilUf = profile?.uf && /^[A-Z]{2}$/.test(profile.uf) ? profile.uf : undefined;
+      setUf(perfilUf ?? null);
+      const { items } = await listClimateAlerts(perfilUf ? { state: perfilUf } : undefined);
 
       const critical = items.filter(
         (a) => a.severidade === 'critical' || a.severidade === 'high',
@@ -56,5 +58,5 @@ export function useUnreadAlerts() {
     });
   }, []);
 
-  return { count: unread.length, alerts: unread, markAllSeen };
+  return { count: unread.length, alerts: unread, uf, markAllSeen };
 }
