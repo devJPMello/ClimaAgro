@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { AsyncStatus } from '../../../lib/hooks/useAsyncResource';
 import { Button } from './Button';
+import { GenericPageSkeleton } from './PageSkeletons';
 
 interface AsyncStateViewProps<T> {
   status: AsyncStatus;
@@ -27,11 +28,7 @@ export function AsyncStateView<T>({
   if (status === 'loading') {
     return (
       <>
-        {loading ?? (
-          <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
-            Carregando…
-          </div>
-        )}
+        {loading ?? <GenericPageSkeleton />}
       </>
     );
   }

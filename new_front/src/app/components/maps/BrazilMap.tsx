@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { GeoJSON, MapContainer, TileLayer } from 'react-leaflet';
 import type { Layer } from 'leaflet';
 import { Button } from '../ui/Button';
+import { MapAreaSkeleton } from '../ui/PageSkeletons';
 import 'leaflet/dist/leaflet.css';
 import type { BrazilMapMetric } from './brazilMapConfig';
 import { fillColorForMetric, formatPopupValueForMetric, resolveValueForFeature } from './brazilMapConfig';
@@ -121,9 +122,7 @@ export function BrazilMap({ metric, valuesByUf, dataRevision = 0 }: BrazilMapPro
 
   if (loading) {
     return (
-      <div className="w-full overflow-hidden rounded-xl bg-muted/40 flex items-center justify-center h-[300px] sm:h-[450px] lg:h-[600px]">
-        <p className="text-sm text-muted-foreground">Carregando mapa...</p>
-      </div>
+      <MapAreaSkeleton />
     );
   }
 

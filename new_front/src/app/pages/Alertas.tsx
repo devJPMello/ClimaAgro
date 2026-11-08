@@ -11,6 +11,7 @@ import {
   ChevronLeft, ChevronRight, Eye, Handshake, Search, X,
 } from 'lucide-react';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
+import { AlertasSkeleton } from '../components/ui/PageSkeletons';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { listClimateAlerts } from '../../lib/api/alertsApi';
 import type { ClimateAlertDto, ClimateAlertListDto, ClimateAlertSeverity } from '../../lib/api/contracts/alerts';
@@ -178,6 +179,7 @@ export function Alertas() {
         data={data}
         error={error}
         onRetry={reload}
+        loading={<AlertasSkeleton />}
         isEmpty={() => false}
         empty={<></>}
       >

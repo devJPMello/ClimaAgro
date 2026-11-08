@@ -17,6 +17,7 @@ import { KPICard } from '../components/ui/KPICard';
 import { Card, CardHeader, CardBody, CardTitle, CardDescription } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
+import { DashboardSkeleton } from '../components/ui/PageSkeletons';
 import { EstadoDrilldownModal } from '../components/dashboard/EstadoDrilldownModal';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { getDashboardSummary } from '../../lib/api/climateApi';
@@ -105,6 +106,7 @@ export function Dashboard() {
         data={data}
         error={error}
         onRetry={reload}
+        loading={<DashboardSkeleton />}
         isEmpty={(d) => d.kpis.length === 0 && d.regioes.length === 0}
         empty={
           <Card>

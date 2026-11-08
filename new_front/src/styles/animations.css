@@ -59,3 +59,12 @@
 .slide-down {
   animation: slide-down 0.3s ease-out;
 }
+
+@keyframes climaagro-loading {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}

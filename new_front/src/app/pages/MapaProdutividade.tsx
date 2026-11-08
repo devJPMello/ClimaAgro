@@ -13,6 +13,7 @@ import { buildProductivityCropSelectOptions } from '../../lib/filters/appFilters
 import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
+import { MapPageSkeleton } from '../components/ui/PageSkeletons';
 import { formatUfLabel, UF_NOME } from '../../lib/geo/brazilStatesMalha';
 
 const UF_ALL_OPTION = { value: 'ALL', label: 'Todos os estados' } as const;
@@ -189,6 +190,7 @@ export function MapaProdutividade() {
         data={data}
         error={error}
         onRetry={reload}
+        loading={<MapPageSkeleton filters={4} />}
         isEmpty={() => false}
         empty={<></>}
       >

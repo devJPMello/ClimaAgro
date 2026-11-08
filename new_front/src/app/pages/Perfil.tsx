@@ -17,6 +17,7 @@ import { listClimateAlerts } from '../../lib/api/alertsApi';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
+import { StatsListSkeleton } from '../components/ui/PageSkeletons';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Modal } from '../components/ui/Modal';
 import { STORAGE_KEYS } from '../../lib/storage/storageKeys';
@@ -446,6 +447,7 @@ export function Perfil() {
                 data={statsData}
                 error={statsError}
                 onRetry={reloadStats}
+                loading={<StatsListSkeleton />}
                 isEmpty={() => false}
                 empty={
                   <EmptyState

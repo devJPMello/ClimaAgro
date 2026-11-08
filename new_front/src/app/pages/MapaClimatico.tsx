@@ -12,6 +12,7 @@ import { usePersistedState } from '../../lib/hooks/usePersistedState';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { useProfileUf } from '../../lib/hooks/useProfileUf';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
+import { MapPageSkeleton } from '../components/ui/PageSkeletons';
 import { EmptyState } from '../components/ui/EmptyState';
 import { formatUfLabel } from '../../lib/geo/brazilStatesMalha';
 
@@ -257,6 +258,7 @@ export function MapaClimatico() {
         data={data}
         error={error}
         onRetry={reload}
+        loading={<MapPageSkeleton filters={3} />}
         isEmpty={() => false}
         empty={<></>}
       >

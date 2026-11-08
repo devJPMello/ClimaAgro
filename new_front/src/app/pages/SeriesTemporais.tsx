@@ -9,6 +9,7 @@ import {
 import { Bookmark, Calendar, Trash2 } from 'lucide-react';
 import { EmptyState } from '../components/ui/EmptyState';
 import { LazyRender } from '../components/ui/LazyRender';
+import { ChartSkeleton } from '../components/ui/PageSkeletons';
 import {
   getClimateSeriesByUf,
 } from '../../lib/api/climateApi';
@@ -519,7 +520,9 @@ export function SeriesTemporais() {
           <CardDescription>Média mensal de produtividade na UF/cultura para o intervalo selecionado</CardDescription>
         </CardHeader>
         <CardBody>
-          {!ufValid && !loading ? (
+          {loading ? (
+            <ChartSkeleton />
+          ) : !ufValid ? (
             <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF ou 'Todos os estados' acima para carregar a produtividade e os gráficos." />
           ) : ufIsAll && !loading ? (
             <EmptyState icon={Calendar} title="Produtividade por estado específico" description="Selecione um estado específico para visualizar a produtividade ao longo do tempo." />
@@ -550,7 +553,9 @@ export function SeriesTemporais() {
           <CardDescription>Série mensal de clima no intervalo selecionado</CardDescription>
         </CardHeader>
         <CardBody>
-          {!ufValid && !loading ? (
+          {loading ? (
+            <ChartSkeleton />
+          ) : !ufValid ? (
             <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF ou 'Todos os estados' acima para carregar a série climática." />
           ) : dadosClimaticos.length === 0 && !loading ? (
             <EmptyState icon={Calendar} title="Sem dados climáticos no período" description="Sincronize dados (POST /api/climate/sync) ou importe medições para esta UF." />
@@ -579,7 +584,9 @@ export function SeriesTemporais() {
           <CardDescription>Chuva mensal e produtividade mensal juntas para a UF/cultura/intervalo selecionados</CardDescription>
         </CardHeader>
         <CardBody>
-          {!ufValid && !loading ? (
+          {loading ? (
+            <ChartSkeleton />
+          ) : !ufValid ? (
             <EmptyState icon={Calendar} title="Escolha um estado" description="Selecione uma UF ou 'Todos os estados' acima para comparar clima e produtividade." />
           ) : ufIsAll && !loading ? (
             <EmptyState icon={Calendar} title="Comparativo por estado específico" description="Selecione um estado específico para comparar clima e produtividade." />

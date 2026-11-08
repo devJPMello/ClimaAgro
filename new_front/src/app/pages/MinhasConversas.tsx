@@ -8,6 +8,7 @@ import { useUser, useAuth } from '@clerk/clerk-react';
 import { Cloud, Loader2, MessageCircle, Mic, MicOff, Paperclip, SendHorizonal, Star, Trash2, X } from 'lucide-react';
 import { Card, CardBody } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
+import { ListItemsSkeleton } from '../components/ui/PageSkeletons';
 import { Modal } from '../components/ui/Modal';
 import { HybridMediaAttachment } from '../components/chat/HybridMediaAttachment';
 import { LocalAttachmentThumbnail, type LocalAttachmentKind } from '../components/chat/LocalAttachmentThumbnail';
@@ -498,7 +499,7 @@ export function MinhasConversas() {
           </div>
           <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto overscroll-contain p-3">
             {loadingLista && (
-              <p className="px-2 py-4 text-sm text-muted-foreground">Carregando...</p>
+              <ListItemsSkeleton rows={4} />
             )}
             {!loadingLista && lista.length === 0 && (
               <div className="px-3 py-6 text-center text-base text-muted-foreground">
