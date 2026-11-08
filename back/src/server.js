@@ -116,7 +116,7 @@ app.use(
 );
 app.use(
   ['/api/auth', '/api/users', '/api/dual-profile',
-   '/api/hybrid-chat', '/api/agronomos-parceiros', '/api/agronomist-onboarding',
+   '/api/hybrid-chat', '/api/agronomos-parceiros',
    '/api/admin'],
   userLimiter
 );
@@ -161,7 +161,6 @@ app.use('/api/ai', require('./routes/ai'));
 app.use('/api/dual-profile', require('./routes/dualProfile'));
 app.use('/api/hybrid-chat', require('./routes/hybridChat'));
 app.use('/api/agronomos-parceiros', require('./routes/agronomosParceiros'));
-app.use('/api/agronomist-onboarding', require('./routes/agronomistOnboarding'));
 app.use('/api/admin/agronomos', require('./routes/adminAgronomos'));
 app.use('/api/superset', require('./routes/superset'));
 app.use('/api/inmet-adapter', require('./routes/inmetAdapter'));

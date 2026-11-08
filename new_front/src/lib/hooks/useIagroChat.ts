@@ -434,10 +434,10 @@ export function useIagroChat() {
     setLoadingEscalateList(true);
     try {
       const hint = presetEspecialidade?.trim() || conciergeSuggestion?.specialtyHint?.trim();
-      let r = await listarAgronomosParceiros(hint ? { especialidade: hint, ativo: true } : { ativo: true });
+      let r = await listarAgronomosParceiros(hint ? { especialidade: hint } : undefined);
       let list = r.agronomos || [];
       if (list.length === 0 && hint) {
-        r = await listarAgronomosParceiros({ ativo: true });
+        r = await listarAgronomosParceiros();
         list = r.agronomos || [];
         if (list.length > 0) toast.message('Nenhum parceiro nessa área; mostrando todos os agrônomos ativos.');
       }
@@ -590,7 +590,7 @@ export function useIagroChat() {
     setLoadingIndicatedAgronomo(true);
     void (async () => {
       try {
-        const r = await listarAgronomosParceiros(hint ? { especialidade: hint, ativo: true } : { ativo: true });
+        const r = await listarAgronomosParceiros(hint ? { especialidade: hint } : undefined);
         if (!cancelled) setIndicatedAgronomo(r.agronomos?.[0] ?? null);
       } catch {
         if (!cancelled) setIndicatedAgronomo(null);

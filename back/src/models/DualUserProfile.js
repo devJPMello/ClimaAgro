@@ -69,6 +69,12 @@ const DualUserProfile = sequelize.define(
       type: DataTypes.STRING(32),
       allowNull: true,
     },
+    /** Quando o agrônomo confirmou o WhatsApp com o código enviado pela plataforma. */
+    whatsappVerificadoEm: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: 'whatsapp_verificado_em',
+    },
     /** Soma das notas (1–5) recebidas em atendimentos encerrados com avaliação. */
     parceiroAvaliacaoSoma: {
       type: DataTypes.INTEGER,

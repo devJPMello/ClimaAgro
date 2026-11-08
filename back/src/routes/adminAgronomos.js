@@ -46,6 +46,7 @@ function serializeAgronomo(item) {
     especialidade: item.especialidade,
     cpf: maskCpf(item.cpf),
     parceiroAtivo: Boolean(item.parceiroAtivo),
+    whatsappVerificadoEm: item.whatsappVerificadoEm ?? null,
     avaliacao,
     totalAvaliacoes: qtd,
     createdAt: item.createdAt,

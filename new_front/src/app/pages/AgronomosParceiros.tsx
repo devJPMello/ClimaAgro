@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useUser } from '@clerk/clerk-react';
 import {
@@ -14,7 +14,6 @@ import {
   Phone,
   Search,
   Star,
-  Upload,
   User,
   UserPlus,
   Users,
@@ -28,10 +27,16 @@ import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
-import { cadastrarAgronomoParceiro, listarAgronomosParceiros } from '../../lib/api/agronomosParceirosApi';
+import {
+  cadastrarAgronomoParceiro,
+  confirmarCodigoWhatsapp,
+  enviarCodigoWhatsapp,
+  listarAgronomosParceiros,
+  obterMeuCadastroAgronomo,
+  type StatusMeuCadastro,
+} from '../../lib/api/agronomosParceirosApi';
 import { escalateToSpecialist } from '../../lib/api/hybridChatApi';
 import { notifyWhatsappDelivery } from '../../lib/whatsappNotify';
-import { scanCreaCarteira } from '../../lib/api/agronomistOnboardingApi';
 import { STORAGE_KEYS } from '../../lib/storage/storageKeys';
 import { useIbgeMunicipioSelectOptions } from '../../lib/hooks/useIbgeMunicipioSelectOptions';
 import { formatMunicipioComUf, formatUfLabel, UF_NOME } from '../../lib/geo/brazilStatesMalha';
@@ -120,9 +125,14 @@ export function AgronomosParceiros() {
   const [agronomoSelecionado, setAgronomoSelecionado] = useState<Agronomo | null>(null);
   const [modalPerfilAberto, setModalPerfilAberto] = useState(false);
   const [modalCadastroAberto, setModalCadastroAberto] = useState(false);
-  const [cadastroStep, setCadastroStep] = useState<'upload' | 'form'>('upload');
-  const [scanningCrea, setScanningCrea] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [statusCadastro, setStatusCadastro] = useState<StatusMeuCadastro | null>(null);
+  const [carregandoCadastro, setCarregandoCadastro] = useState(false);
+  // Confirmação do WhatsApp por código
+  const [codigoEnviado, setCodigoEnviado] = useState(false);
+  const [codigoWhatsapp, setCodigoWhatsapp] = useState('');
+  const [enviandoCodigo, setEnviandoCodigo] = useState(false);
+  const [confirmandoCodigo, setConfirmandoCodigo] = useState(false);
+  const [whatsappConfirmado, setWhatsappConfirmado] = useState<string | null>(null);
   const [enviandoEspecialista, setEnviandoEspecialista] = useState(false);
   const [enviandoCadastro, setEnviandoCadastro] = useState(false);
   const [iagroThreadId, setIagroThreadId] = useState<string | null>(null);
@@ -357,11 +367,16 @@ export function AgronomosParceiros() {
     }
   }
 
+  const emailDaConta = user?.primaryEmailAddress?.emailAddress ?? '';
+
   function abrirCadastro() {
-    setCadastroStep('upload');
+    setCodigoEnviado(false);
+    setCodigoWhatsapp('');
+    setWhatsappConfirmado(null);
+    setStatusCadastro(null);
     setCadastro({
-      nome: '',
-      email: '',
+      nome: user?.fullName ?? '',
+      email: emailDaConta,
       cpf: '',
       whatsapp: '',
       municipio: '',
@@ -371,35 +386,86 @@ export function AgronomosParceiros() {
       sobre: '',
     });
     setModalCadastroAberto(true);
+
+    // Se a pessoa já tem cadastro, mostra a situação e preenche os campos.
+    void (async () => {
+      setCarregandoCadastro(true);
+      try {
+        const meu = await obterMeuCadastroAgronomo();
+        setStatusCadastro(meu.status);
+        const c = meu.cadastro;
+        if (c) {
+          setCadastro((prev) => ({
+            ...prev,
+            nome: c.nome || prev.nome,
+            whatsapp: c.whatsapp ?? '',
+            municipio: c.municipio ?? '',
+            uf: c.uf ?? '',
+            crea: c.crea ?? '',
+            especialidade: c.especialidade ?? '',
+          }));
+          if (c.whatsappVerificadoEm && c.whatsapp) setWhatsappConfirmado(c.whatsapp);
+        }
+      } catch {
+        setStatusCadastro('nao_cadastrado');
+      } finally {
+        setCarregandoCadastro(false);
+      }
+    })();
   }
 
-  async function handleCreaFile(file: File) {
-    setScanningCrea(true);
-    try {
-      const res = await scanCreaCarteira(file);
-      const { extracted } = res.data;
-      setCadastro((prev) => ({
-        ...prev,
-        nome: extracted.fullName ?? prev.nome,
-        crea: extracted.creaRegistrationNumber ?? prev.crea,
-        uf: extracted.creaUf ?? prev.uf,
-        cpf: extracted.cpf ? onlyCpfDigits(extracted.cpf) : prev.cpf,
-      }));
-      if (res.data.warnings?.length) toast.info(res.data.warnings[0]);
-      setCadastroStep('form');
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao ler a carteira. Preencha manualmente.');
-      setCadastroStep('form');
-    } finally {
-      setScanningCrea(false);
+  function trocarWhatsapp(valor: string) {
+    const digitos = valor.replace(/\D/g, '');
+    setCadastro((prev) => ({ ...prev, whatsapp: digitos }));
+    // Mudou o número: precisa confirmar de novo.
+    if (digitos !== whatsappConfirmado) {
+      setCodigoEnviado(false);
+      setCodigoWhatsapp('');
     }
   }
+
+  async function pedirCodigo() {
+    if (!/^\d{10,11}$/.test(cadastro.whatsapp)) {
+      toast.error('Informe o WhatsApp com DDD, só números (ex.: 63999999999).');
+      return;
+    }
+    setEnviandoCodigo(true);
+    try {
+      await enviarCodigoWhatsapp(cadastro.whatsapp);
+      setCodigoEnviado(true);
+      setCodigoWhatsapp('');
+      toast.success('Enviamos um código de 6 dígitos para o seu WhatsApp.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Não foi possível enviar o código.');
+    } finally {
+      setEnviandoCodigo(false);
+    }
+  }
+
+  async function confirmarCodigo() {
+    if (!/^\d{6}$/.test(codigoWhatsapp)) {
+      toast.error('Digite os 6 dígitos do código.');
+      return;
+    }
+    setConfirmandoCodigo(true);
+    try {
+      const r = await confirmarCodigoWhatsapp(codigoWhatsapp);
+      setWhatsappConfirmado(r.whatsapp);
+      setCodigoEnviado(false);
+      toast.success('WhatsApp confirmado.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Código inválido.');
+    } finally {
+      setConfirmandoCodigo(false);
+    }
+  }
+
+  const whatsappEstaConfirmado = Boolean(cadastro.whatsapp) && whatsappConfirmado === cadastro.whatsapp;
 
   function cadastrarAgronomo(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
       !cadastro.nome.trim() ||
-      !cadastro.email.trim() ||
       !cadastro.cpf.trim() ||
       !cadastro.whatsapp.trim() ||
       !cadastro.crea.trim() ||
@@ -412,14 +478,14 @@ export function AgronomosParceiros() {
       toast.error('CPF inválido. Verifique os 11 dígitos.');
       return;
     }
-    if (!/^\d{10,13}$/.test(cadastro.whatsapp.trim())) {
-      toast.error('WhatsApp inválido. Use somente dígitos com DDD (ex: 63999999999).');
+    if (!whatsappEstaConfirmado) {
+      toast.error('Confirme o seu WhatsApp com o código antes de salvar.');
       return;
     }
     void (async () => {
       setEnviandoCadastro(true);
       try {
-        await cadastrarAgronomoParceiro({
+        const resposta = await cadastrarAgronomoParceiro({
           nome: cadastro.nome.trim(),
           email: cadastro.email.trim(),
           cpf: onlyCpfDigits(cadastro.cpf),
@@ -431,7 +497,8 @@ export function AgronomosParceiros() {
           sobre: cadastro.sobre.trim(),
         });
         toast.success(
-          'Cadastro recebido! Em breve entraremos em contato. Após aprovação da equipe, o perfil poderá aparecer nesta lista.'
+          resposta.message ||
+            'Cadastro recebido! Após a aprovação da equipe, o seu perfil vai aparecer nesta lista.'
         );
         setModalCadastroAberto(false);
         setCadastro({
@@ -1001,66 +1068,38 @@ export function AgronomosParceiros() {
         title="Cadastro de Agrônomo Parceiro"
         size="xl"
       >
-        {cadastroStep === 'upload' ? (
-          <div className="flex flex-col items-center gap-6 py-6">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-              <Upload className="h-8 w-8 text-primary" />
-            </div>
-            <div className="text-center space-y-1">
-              <p className="font-medium text-foreground">Envie a foto da sua carteira do CREA</p>
-              <p className="text-sm text-muted-foreground">
-                Extraímos seus dados automaticamente. Você poderá revisar antes de salvar.
-              </p>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*,application/pdf"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void handleCreaFile(file);
-              }}
-            />
-            <div className="flex flex-col gap-3 w-full max-w-xs">
-              <Button
-                type="button"
-                loading={scanningCrea}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Upload className="h-4 w-4" />
-                {scanningCrea ? 'Lendo carteira...' : 'Selecionar imagem'}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setCadastroStep('form')}
-              >
-                Preencher manualmente
-              </Button>
-            </div>
-            <p className="max-w-md text-center text-xs leading-relaxed text-muted-foreground">
-              Ao enviar foto ou PDF da carteira CREA, você autoriza o processamento automático só para extração dos
-              dados de cadastro.{' '}
-              {PRIVACY_POLICY_URL ? (
-                <a
-                  href={PRIVACY_POLICY_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary underline hover:no-underline"
-                >
-                  Política de Privacidade
-                </a>
-              ) : (
-                <span>
-                  Os dados são tratados em conformidade com a LGPD, exclusivamente para validação e contato da equipe
-                  ClimaAgro.
-                </span>
-              )}
-            </p>
-          </div>
+        {carregandoCadastro ? (
+          <p className="py-10 text-center text-sm text-muted-foreground">Carregando o seu cadastro...</p>
         ) : (
           <form className="space-y-4" onSubmit={cadastrarAgronomo}>
+            {statusCadastro === 'em_analise' && (
+              <div className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm">
+                Seu cadastro está <strong>em análise</strong> pela equipe ClimaAgro. Você pode atualizar os dados abaixo.
+              </div>
+            )}
+            {statusCadastro === 'aprovado' && (
+              <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-sm">
+                Seu cadastro está <strong>aprovado</strong> e aparece na lista de parceiros. Trocar o CREA faz o cadastro
+                voltar para análise.
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              O cadastro fica ligado à sua conta ClimaAgro. Os dados são tratados conforme a LGPD, só para validação e
+              contato da equipe.
+              {PRIVACY_POLICY_URL && (
+                <>
+                  {' '}
+                  <a
+                    href={PRIVACY_POLICY_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary underline hover:no-underline"
+                  >
+                    Política de Privacidade
+                  </a>
+                </>
+              )}
+            </p>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Input
                 label="Nome"
@@ -1072,8 +1111,9 @@ export function AgronomosParceiros() {
                 label="Email"
                 type="email"
                 value={cadastro.email}
-                onChange={(e) => setCadastro((prev) => ({ ...prev, email: e.target.value }))}
-                required
+                readOnly
+                disabled
+                helperText="E-mail da sua conta (não pode ser alterado aqui)."
               />
               <Input
                 label="CPF"
@@ -1084,21 +1124,60 @@ export function AgronomosParceiros() {
                 onChange={(e) =>
                   setCadastro((prev) => ({ ...prev, cpf: onlyCpfDigits(e.target.value) }))
                 }
-                helperText="11 dígitos. Pode ser preenchido automaticamente ao enviar a foto da carteira CREA."
+                helperText="11 dígitos."
                 required
               />
-              <Input
-                label="WhatsApp (somente dígitos, com DDD)"
-                placeholder="Ex: 63999999999"
-                inputMode="numeric"
-                maxLength={13}
-                value={cadastro.whatsapp}
-                onChange={(e) =>
-                  setCadastro((prev) => ({ ...prev, whatsapp: e.target.value.replace(/\D/g, '') }))
-                }
-                helperText="DDD + número, sem espaços ou traços (ex: 63999999999)"
-                required
-              />
+              <div className="space-y-2">
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <Input
+                      label="WhatsApp (com DDD)"
+                      placeholder="Ex: 63999999999"
+                      inputMode="numeric"
+                      maxLength={11}
+                      value={cadastro.whatsapp}
+                      onChange={(e) => trocarWhatsapp(e.target.value)}
+                      required
+                    />
+                  </div>
+                  {!whatsappEstaConfirmado && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      loading={enviandoCodigo}
+                      onClick={() => void pedirCodigo()}
+                    >
+                      {codigoEnviado ? 'Reenviar' : 'Enviar código'}
+                    </Button>
+                  )}
+                </div>
+                {whatsappEstaConfirmado ? (
+                  <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle className="h-3.5 w-3.5" /> WhatsApp confirmado
+                  </p>
+                ) : codigoEnviado ? (
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <Input
+                        label="Código recebido no WhatsApp"
+                        placeholder="6 dígitos"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        value={codigoWhatsapp}
+                        onChange={(e) => setCodigoWhatsapp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      />
+                    </div>
+                    <Button type="button" loading={confirmandoCodigo} onClick={() => void confirmarCodigo()}>
+                      Confirmar
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Vamos enviar um código para confirmar que o número é seu.
+                  </p>
+                )}
+              </div>
               <Select
                 label="UF"
                 value={cadastro.uf}
@@ -1151,15 +1230,12 @@ export function AgronomosParceiros() {
                 className="w-full rounded-lg border border-border bg-input-background px-4 py-2.5"
               />
             </div>
-            <div className="flex justify-between gap-3 pt-2">
-              <Button type="button" variant="ghost" onClick={() => setCadastroStep('upload')}>
-                ← Voltar
-              </Button>
+            <div className="flex justify-end gap-3 pt-2">
               <div className="flex gap-3">
                 <Button type="button" variant="ghost" onClick={() => setModalCadastroAberto(false)}>
                   Cancelar
                 </Button>
-                <Button type="submit" loading={enviandoCadastro}>
+                <Button type="submit" loading={enviandoCadastro} disabled={!whatsappEstaConfirmado}>
                   Salvar cadastro
                 </Button>
               </div>

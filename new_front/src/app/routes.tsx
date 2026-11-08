@@ -1,8 +1,7 @@
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, Navigate } from "react-router";
 import { RootLayout } from "./layouts/RootLayout";
 import { AuthLayout } from "./layouts/AuthLayout";
 import { Login } from "./pages/Login";
-import { Cadastro } from "./pages/Cadastro";
 import { Dashboard } from "./pages/Dashboard";
 import { MapaClimatico } from "./pages/MapaClimatico";
 import { MapaProdutividade } from "./pages/MapaProdutividade";
@@ -39,7 +38,8 @@ export const router = createBrowserRouter([
     Component: GuestLayout,
     children: [
       { path: "/login", Component: Login },
-      { path: "/cadastro", Component: Cadastro },
+      // A criação de conta é feita pelo Clerk na tela de login.
+      { path: "/cadastro", element: <Navigate to="/login" replace /> },
     ],
   },
   {

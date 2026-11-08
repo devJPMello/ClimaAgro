@@ -62,6 +62,13 @@ async function ensureExternalMessageIdColumn() {
   console.log('✅ Coluna external_message_id criada com sucesso.');
 }
 
+/** Migração: coluna com a data em que o agrônomo confirmou o WhatsApp por código. */
+async function ensureWhatsappVerificadoColumn() {
+  await sequelize.query(
+    'ALTER TABLE IF EXISTS dual_user_profiles ADD COLUMN IF NOT EXISTS whatsapp_verificado_em TIMESTAMPTZ;'
+  );
+}
+
 async function ensureIndexes() {
   const indexDefs = [
     { name: 'idx_climate_data_uf_date', table: 'climate_data', cols: '(uf, date)' },
@@ -104,6 +111,7 @@ const connectDB = async () => {
 
     // Migração: garante coluna external_message_id em hybrid_messages (todos os ambientes)
     await ensureExternalMessageIdColumn();
+    await ensureWhatsappVerificadoColumn();
 
     // Garante índices críticos (CREATE INDEX IF NOT EXISTS — não bloqueia se já existirem)
     await ensureIndexes();
