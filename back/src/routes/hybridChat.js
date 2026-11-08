@@ -373,6 +373,12 @@ router.get('/timeline', async (req, res) => {
         kind: 'ia',
         text: row.message,
         createdAt: row.createdAt,
+        attachments: (Array.isArray(row.attachments) ? row.attachments : []).map((a, index) => ({
+          chatId: row.id,
+          index,
+          name: a.name || null,
+          mimeType: a.mime || null,
+        })),
       });
       iaTimeline.push({
         id: `${row.id}-a`,
@@ -657,6 +663,44 @@ router.get('/media/:messageId', async (req, res) => {
   } catch (e) {
     console.error('hybridChat media:', e);
     return res.status(500).json({ message: 'Falha ao ler mídia.' });
+  }
+});
+
+/**
+ * GET /api/hybrid-chat/ia-media/:chatId/:index
+ * Imagem/PDF enviado ao IAgro — apenas o dono da mensagem.
+ */
+router.get('/ia-media/:chatId/:index', async (req, res) => {
+  const produtorClerkId = headerProdutorId(req);
+  if (!produtorClerkId) {
+    return res.status(401).json({ message: 'Faça login para ver o anexo.' });
+  }
+  const index = Number.parseInt(String(req.params.index), 10);
+  try {
+    const row = await ChatHistory.findOne({
+      where: { id: String(req.params.chatId), clerkUserId: produtorClerkId, isActive: true },
+      attributes: ['id', 'attachments'],
+    });
+    const anexo = row && Array.isArray(row.attachments) ? row.attachments[index] : null;
+    if (!anexo?.key) {
+      return res.status(404).json({ message: 'Anexo não encontrado.' });
+    }
+    let buf;
+    try {
+      buf = await readStoredFile(anexo.key);
+    } catch (err) {
+      if (err.code === 'ENOENT') return res.status(404).json({ message: 'Este anexo não está mais disponível.' });
+      throw err;
+    }
+    res.setHeader('Content-Type', anexo.mime || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    return res.send(buf);
+  } catch (e) {
+    if (e?.name === 'SequelizeDatabaseError') {
+      return res.status(404).json({ message: 'Anexo não encontrado.' });
+    }
+    console.error('hybridChat ia-media:', e);
+    return res.status(500).json({ message: 'Falha ao ler anexo.' });
   }
 });
 

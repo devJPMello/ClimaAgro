@@ -10,6 +10,7 @@ const ChatHistory = require('../models/ChatHistory');
 const { buildIagroDataContext } = require('../services/iagroDataContextService');
 const { clerkAuth } = require('../middleware/clerkAuth');
 const { sequelize } = require('../config/database');
+const { saveBuffer, deleteStoredFile } = require('../services/hybridMediaStorage');
 
 const MAX_ATTACHMENT_TEXT_CHARS = 12000;
 
@@ -267,6 +268,28 @@ function extractNonPdfTextAttachment(file) {
   return `--- Arquivo anexado: ${name} (${mime || 'desconhecido'}) ---\n${plain}`;
 }
 
+/**
+ * Guarda imagens e PDFs no banco para a conversa mostrar a pré-visualização em qualquer aparelho.
+ * Falha ao guardar não impede a resposta (a mensagem fica só com os nomes dos ficheiros).
+ */
+async function guardarAnexos(files) {
+  const out = [];
+  for (const file of files) {
+    const mime = String(file.mimetype || '').toLowerCase();
+    const isImage = mime.startsWith('image/');
+    const isPdf = isPdfFile(file);
+    if (!isImage && !isPdf) continue;
+    try {
+      const tipo = isPdf ? 'application/pdf' : mime;
+      const key = await saveBuffer(file.buffer, tipo);
+      out.push({ key, mime: tipo, name: String(file.originalname || (isPdf ? 'documento.pdf' : 'imagem')) });
+    } catch (e) {
+      console.error('IAgro: falha ao guardar anexo:', e.message);
+    }
+  }
+  return out;
+}
+
 function buildPrompt(payload) {
   const history = (payload.historicoRelatorios || [])
     .slice(0, 6)
@@ -505,6 +528,8 @@ router.post(
           ? `${message || 'Arquivos enviados'}\n\n[Anexos: ${fileNames.join(', ')}]`
           : message;
 
+      const attachments = await guardarAnexos(files);
+
       await ChatHistory.create({
         threadId,
         clerkUserId,
@@ -513,6 +538,7 @@ router.post(
         status: 'completed',
         isActive: true,
         isFavorite: threadIsFavorite,
+        attachments: attachments.length ? attachments : null,
       });
 
       return res.json({
@@ -706,6 +732,10 @@ router.delete('/chat/threads/:threadId', async (req, res) => {
   }
 
   try {
+    const comAnexos = await ChatHistory.findAll({
+      where: { threadId, isActive: true, clerkUserId, attachments: { [Op.ne]: null } },
+      attributes: ['id', 'attachments'],
+    });
     const [updated] = await ChatHistory.update(
       { isActive: false },
       {
@@ -718,6 +748,12 @@ router.delete('/chat/threads/:threadId', async (req, res) => {
     );
     if (!updated) {
       return res.status(404).json({ message: 'Conversa não encontrada.' });
+    }
+    // A conversa some da lista; os ficheiros enviados nela são apagados de vez.
+    const chaves = comAnexos.flatMap((r) => (Array.isArray(r.attachments) ? r.attachments : []).map((a) => a.key));
+    await Promise.all(chaves.map((k) => deleteStoredFile(k)));
+    if (comAnexos.length) {
+      await ChatHistory.update({ attachments: null }, { where: { id: comAnexos.map((r) => r.id) } });
     }
     return res.json({ success: true, threadId });
   } catch (error) {

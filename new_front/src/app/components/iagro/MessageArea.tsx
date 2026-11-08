@@ -7,6 +7,7 @@ import { Button } from '../ui/Button';
 import { HybridMediaAttachment } from '../chat/HybridMediaAttachment';
 import { MessageAttachments } from '../chat/MessageAttachments';
 import { AttachmentNames } from '../chat/AttachmentNames';
+import { ServerAttachments } from '../chat/ServerAttachments';
 import type { UnifiedChatMessage } from '../../../lib/api/hybridChatApi';
 import type { ConciergeMeta } from '../../../lib/api/iagroChatApi';
 import type { AgronomoParceiroApi } from '../../../lib/api/agronomosParceirosApi';
@@ -307,6 +308,8 @@ export function MessageArea({
                     items={messageMediaPreviews.get(message.id) ?? []}
                     names={attachmentNamesFromText(message.text)}
                   />
+                ) : message.attachments?.length && userId ? (
+                  <ServerAttachments attachments={message.attachments} clerkUserId={userId} />
                 ) : (
                   <AttachmentNames names={attachmentNamesFromText(message.text)} />
                 )}

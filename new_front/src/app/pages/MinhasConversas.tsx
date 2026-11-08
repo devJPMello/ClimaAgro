@@ -13,6 +13,7 @@ import { Modal } from '../components/ui/Modal';
 import { HybridMediaAttachment } from '../components/chat/HybridMediaAttachment';
 import { LocalAttachmentThumbnail, type LocalAttachmentKind } from '../components/chat/LocalAttachmentThumbnail';
 import { AttachmentNames } from '../components/chat/AttachmentNames';
+import { ServerAttachments } from '../components/chat/ServerAttachments';
 import { MessageAttachments } from '../components/chat/MessageAttachments';
 import { attachmentNamesFromText } from '../../lib/hooks/useIagroChat';
 import { EncerrarAtendimentoModal } from '../components/chat/EncerrarAtendimentoModal';
@@ -718,6 +719,8 @@ export function MinhasConversas() {
                                   items={messageMediaPreviews.get(message.id) ?? []}
                                   names={attachmentNamesFromText(message.text)}
                                 />
+                              ) : message.attachments?.length && user?.id ? (
+                                <ServerAttachments attachments={message.attachments} clerkUserId={user.id} />
                               ) : (
                                 <AttachmentNames names={attachmentNamesFromText(message.text)} />
                               )}

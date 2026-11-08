@@ -2,6 +2,14 @@ import { ApiError } from './errors';
 import { httpClient, resolveApiUrl } from './httpClient';
 import { getCachedClerkToken } from './authTokenStore';
 
+/** Imagem/PDF enviado ao IAgro e guardado no servidor. */
+export type IaAttachmentDto = {
+  chatId: string;
+  index: number;
+  name: string | null;
+  mimeType: string | null;
+};
+
 export type UnifiedChatMessage = {
   id: string;
   sender: 'user' | 'assistant' | 'agronomo';
@@ -12,6 +20,7 @@ export type UnifiedChatMessage = {
   origem?: string;
   hasMidia?: boolean;
   midiaMimeType?: string | null;
+  attachments?: IaAttachmentDto[];
 };
 
 export type HybridConversationDto = {
@@ -244,6 +253,18 @@ export async function fetchHybridMediaBlob(messageId: string, clerkUserId: strin
   const response = await fetch(url, {
     headers: clerkHeaders(clerkUserId),
   });
+  if (!response.ok) return null;
+  return await response.blob();
+}
+
+export async function fetchIaAttachmentBlob(
+  chatId: string,
+  index: number,
+  clerkUserId: string
+): Promise<Blob | null> {
+  const base = getApiBasePath();
+  const url = `${base}/hybrid-chat/ia-media/${encodeURIComponent(chatId)}/${index}`;
+  const response = await fetch(url, { headers: clerkHeaders(clerkUserId) });
   if (!response.ok) return null;
   return await response.blob();
 }

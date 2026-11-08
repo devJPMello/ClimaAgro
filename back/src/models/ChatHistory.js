@@ -49,6 +49,11 @@ const ChatHistory = sequelize.define(
       defaultValue: false,
       field: 'is_favorite',
     },
+    /** Imagens/PDFs enviados nesta mensagem: [{ key, mime, name }] (ficheiros em hybrid_media_files). */
+    attachments: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+    },
   },
   {
     tableName: 'chat_history',

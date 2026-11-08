@@ -81,6 +81,11 @@ async function ensureHybridMediaTable() {
   `);
 }
 
+/** Migração: lista de anexos (imagem/PDF) de cada mensagem do IAgro. */
+async function ensureChatAttachmentsColumn() {
+  await sequelize.query('ALTER TABLE IF EXISTS chat_history ADD COLUMN IF NOT EXISTS attachments JSONB;');
+}
+
 async function ensureIndexes() {
   const indexDefs = [
     { name: 'idx_climate_data_uf_date', table: 'climate_data', cols: '(uf, date)' },
@@ -125,6 +130,7 @@ const connectDB = async () => {
     await ensureExternalMessageIdColumn();
     await ensureWhatsappVerificadoColumn();
     await ensureHybridMediaTable();
+    await ensureChatAttachmentsColumn();
 
     // Garante índices críticos (CREATE INDEX IF NOT EXISTS — não bloqueia se já existirem)
     await ensureIndexes();
