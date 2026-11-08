@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Paperclip } from 'lucide-react';
 import { fetchHybridMediaBlob } from '../../../lib/api/hybridChatApi';
+import { ImageTile, PdfCard } from './MessageAttachments';
 
 type Props = {
   messageId: string;
   mimeType?: string | null;
   clerkUserId: string;
+  align?: 'start' | 'end';
 };
 
-export function HybridMediaAttachment({ messageId, mimeType, clerkUserId }: Props) {
+/** Ficheiro do atendimento com agrônomo (guardado no servidor), no mesmo visual dos anexos do IAgro. */
+export function HybridMediaAttachment({ messageId, mimeType, clerkUserId, align = 'end' }: Props) {
   const [url, setUrl] = useState<string | null>(null);
   const [falhou, setFalhou] = useState(false);
   useEffect(() => {
@@ -31,34 +34,36 @@ export function HybridMediaAttachment({ messageId, mimeType, clerkUserId }: Prop
     };
   }, [messageId, clerkUserId]);
 
+  const wrap = align === 'end' ? 'self-end' : 'self-start';
+
   if (falhou) {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span className={`${wrap} inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground`}>
         <Paperclip className="h-3.5 w-3.5" />
         Anexo indisponível
       </span>
     );
   }
   if (!url) {
-    return <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" aria-label="Carregando mídia" />;
+    return (
+      <span className={`${wrap} flex h-[124px] w-[124px] items-center justify-center rounded-xl border border-border bg-muted/30`}>
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-label="Carregando anexo" />
+      </span>
+    );
   }
   if (mimeType?.startsWith('audio')) {
-    return <audio controls src={url} className="max-w-[min(100%,280px)] rounded-md" />;
+    return <audio controls src={url} className={`${wrap} max-w-[min(100%,280px)] rounded-md`} />;
   }
-  if (mimeType === 'application/pdf' || mimeType?.includes('pdf')) {
+  if (mimeType?.includes('pdf')) {
     return (
-      <iframe
-        title="PDF"
-        src={`${url}#toolbar=0&navpanes=0`}
-        className="h-52 min-h-[12rem] w-full max-w-[min(100%,280px)] rounded-lg border border-green-700/35 bg-muted/20"
-      />
+      <div className={wrap}>
+        <PdfCard url={url} />
+      </div>
     );
   }
   return (
-    <img
-      src={url}
-      alt=""
-      className="max-h-52 max-w-full rounded-lg border border-green-700/35 object-contain"
-    />
+    <div className={wrap}>
+      <ImageTile url={url} single />
+    </div>
   );
 }

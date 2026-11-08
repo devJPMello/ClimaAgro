@@ -1,3 +1,5 @@
+import { FileText } from 'lucide-react';
+
 type LocalAttachmentKind = 'image' | 'pdf';
 
 type Props = {
@@ -27,13 +29,9 @@ export function LocalAttachmentThumbnail({ url, kind, name, size = 'compact' }: 
 
   const inner =
     size === 'compact' ? (
-      <iframe
-        title={name}
-        src={`${url}#view=FitH&toolbar=0&navpanes=0`}
-        className="pointer-events-none h-full w-full border-0 bg-muted/40"
-        loading="lazy"
-        aria-hidden
-      />
+      <span className="flex h-full w-full items-center justify-center bg-red-500/15 text-red-500" aria-hidden>
+        <FileText className="h-5 w-5" />
+      </span>
     ) : (
       <iframe
         title={name}

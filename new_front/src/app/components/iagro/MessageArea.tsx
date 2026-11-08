@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { Camera, Cloud, Handshake, Loader2, MessageCircle } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { HybridMediaAttachment } from '../chat/HybridMediaAttachment';
-import { LocalAttachmentThumbnail } from '../chat/LocalAttachmentThumbnail';
+import { MessageAttachments } from '../chat/MessageAttachments';
 import { AttachmentNames } from '../chat/AttachmentNames';
 import type { UnifiedChatMessage } from '../../../lib/api/hybridChatApi';
 import type { ConciergeMeta } from '../../../lib/api/iagroChatApi';
@@ -288,13 +288,12 @@ export function MessageArea({
                 </div>
                 <div className="flex min-w-0 max-w-full flex-col gap-2">
                   {message.hasMidia && userId ? (
-                    <div className="rounded-lg border border-green-700/35 bg-green-600/5 p-2">
-                      <HybridMediaAttachment
-                        messageId={message.id}
-                        mimeType={message.midiaMimeType}
-                        clerkUserId={userId}
-                      />
-                    </div>
+                    <HybridMediaAttachment
+                      messageId={message.id}
+                      mimeType={message.midiaMimeType}
+                      clerkUserId={userId}
+                      align="start"
+                    />
                   ) : null}
                   <div className="w-fit max-w-full break-words rounded-lg border border-green-700/35 bg-green-600/10 px-3 py-2 text-sm text-foreground whitespace-pre-wrap">
                     {message.text}
@@ -303,26 +302,20 @@ export function MessageArea({
               </div>
             ) : (
               <div className="w-fit max-w-[78%] ml-auto flex flex-col items-end gap-1">
-                {(messageMediaPreviews.get(message.id) ?? []).map((item) => (
-                  <LocalAttachmentThumbnail
-                    key={item.url}
-                    url={item.url}
-                    kind={item.kind}
-                    name="Anexo enviado"
-                    size="relaxed"
+                {messageMediaPreviews.get(message.id)?.length ? (
+                  <MessageAttachments
+                    items={messageMediaPreviews.get(message.id) ?? []}
+                    names={attachmentNamesFromText(message.text)}
                   />
-                ))}
-                {!messageMediaPreviews.get(message.id)?.length && (
+                ) : (
                   <AttachmentNames names={attachmentNamesFromText(message.text)} />
                 )}
                 {message.hasMidia && userId ? (
-                  <div className="w-full max-w-[min(100%,280px)] rounded-lg border border-primary/30 bg-primary/15 p-2">
-                    <HybridMediaAttachment
-                      messageId={message.id}
-                      mimeType={message.midiaMimeType}
-                      clerkUserId={userId}
-                    />
-                  </div>
+                  <HybridMediaAttachment
+                    messageId={message.id}
+                    mimeType={message.midiaMimeType}
+                    clerkUserId={userId}
+                  />
                 ) : null}
                 {userDisplayText && (
                   <div className="whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm bg-primary text-primary-foreground">

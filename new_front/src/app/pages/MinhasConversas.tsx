@@ -13,6 +13,7 @@ import { Modal } from '../components/ui/Modal';
 import { HybridMediaAttachment } from '../components/chat/HybridMediaAttachment';
 import { LocalAttachmentThumbnail, type LocalAttachmentKind } from '../components/chat/LocalAttachmentThumbnail';
 import { AttachmentNames } from '../components/chat/AttachmentNames';
+import { MessageAttachments } from '../components/chat/MessageAttachments';
 import { attachmentNamesFromText } from '../../lib/hooks/useIagroChat';
 import { EncerrarAtendimentoModal } from '../components/chat/EncerrarAtendimentoModal';
 import { FileAttachmentPickerModal } from '../components/chat/FileAttachmentPickerModal';
@@ -698,13 +699,12 @@ export function MinhasConversas() {
                               </div>
                               <div className="flex min-w-0 max-w-full flex-col gap-2">
                                 {message.hasMidia && user?.id ? (
-                                  <div className="rounded-lg border border-green-700/35 bg-green-600/5 p-2.5">
-                                    <HybridMediaAttachment
-                                      messageId={message.id}
-                                      mimeType={message.midiaMimeType}
-                                      clerkUserId={user.id}
-                                    />
-                                  </div>
+                                  <HybridMediaAttachment
+                                    messageId={message.id}
+                                    mimeType={message.midiaMimeType}
+                                    clerkUserId={user.id}
+                                    align="start"
+                                  />
                                 ) : null}
                                 <div className="w-fit max-w-full break-words rounded-lg border border-green-700/35 bg-green-600/10 px-3.5 py-2.5 text-[0.9375rem] leading-snug text-foreground md:text-base [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
                                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{message.text}</ReactMarkdown>
@@ -713,26 +713,20 @@ export function MinhasConversas() {
                             </div>
                           ) : (
                             <div className="ml-auto flex w-fit max-w-[90%] flex-col items-end gap-1 md:max-w-[85%]">
-                              {(messageMediaPreviews.get(message.id) ?? []).map((item) => (
-                                <LocalAttachmentThumbnail
-                                  key={item.url}
-                                  url={item.url}
-                                  kind={item.kind}
-                                  name="Anexo enviado"
-                                  size="relaxed"
+                              {messageMediaPreviews.get(message.id)?.length ? (
+                                <MessageAttachments
+                                  items={messageMediaPreviews.get(message.id) ?? []}
+                                  names={attachmentNamesFromText(message.text)}
                                 />
-                              ))}
-                              {!messageMediaPreviews.get(message.id)?.length && (
+                              ) : (
                                 <AttachmentNames names={attachmentNamesFromText(message.text)} />
                               )}
                               {message.hasMidia && user?.id ? (
-                                <div className="w-full max-w-[min(100%,280px)] rounded-lg border border-primary/30 bg-primary/15 p-2">
-                                  <HybridMediaAttachment
-                                    messageId={message.id}
-                                    mimeType={message.midiaMimeType}
-                                    clerkUserId={user.id}
-                                  />
-                                </div>
+                                <HybridMediaAttachment
+                                  messageId={message.id}
+                                  mimeType={message.midiaMimeType}
+                                  clerkUserId={user.id}
+                                />
                               ) : null}
                               {userDisplayText ? (
                                 <div className="whitespace-pre-wrap break-words rounded-xl bg-primary px-3.5 py-2.5 text-[0.9375rem] leading-snug text-primary-foreground md:text-base">
