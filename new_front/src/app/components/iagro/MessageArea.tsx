@@ -6,10 +6,11 @@ import { Camera, Cloud, Handshake, Loader2, MessageCircle } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { HybridMediaAttachment } from '../chat/HybridMediaAttachment';
 import { LocalAttachmentThumbnail } from '../chat/LocalAttachmentThumbnail';
+import { AttachmentNames } from '../chat/AttachmentNames';
 import type { UnifiedChatMessage } from '../../../lib/api/hybridChatApi';
 import type { ConciergeMeta } from '../../../lib/api/iagroChatApi';
 import type { AgronomoParceiroApi } from '../../../lib/api/agronomosParceirosApi';
-import { displayUserMessageText, type LocalMediaItem, type QuickAction } from '../../../lib/hooks/useIagroChat';
+import { attachmentNamesFromText, displayUserMessageText, type LocalMediaItem, type QuickAction } from '../../../lib/hooks/useIagroChat';
 
 const MD_COMPONENTS = {
   h1: ({ children }: { children?: ReactNode }) => (
@@ -311,6 +312,18 @@ export function MessageArea({
                     size="relaxed"
                   />
                 ))}
+                {!messageMediaPreviews.get(message.id)?.length && (
+                  <AttachmentNames names={attachmentNamesFromText(message.text)} />
+                )}
+                {message.hasMidia && userId ? (
+                  <div className="w-full max-w-[min(100%,280px)] rounded-lg border border-primary/30 bg-primary/15 p-2">
+                    <HybridMediaAttachment
+                      messageId={message.id}
+                      mimeType={message.midiaMimeType}
+                      clerkUserId={userId}
+                    />
+                  </div>
+                ) : null}
                 {userDisplayText && (
                   <div className="whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm bg-primary text-primary-foreground">
                     {userDisplayText}

@@ -7,6 +7,17 @@ const UPLOAD_SUBDIR = 'hybrid-media';
 const projectRoot = path.join(__dirname, '../..');
 const uploadAbsRoot = path.join(projectRoot, 'uploads');
 
+/*
+ * Os ficheiros ficam no Postgres (tabela hybrid_media_files), não no disco:
+ * no Render gratuito o disco é apagado a cada reinício/deploy e a mídia sumiria.
+ * A chave continua no formato "hybrid-media/<uuid>.<ext>" (compatível com registros antigos).
+ */
+
+function db() {
+  // require tardio: evita ciclo database.js → modelos → serviços.
+  return require('../config/database').sequelize;
+}
+
 function extFromMime(mime) {
   const m = String(mime || '').toLowerCase();
   if (m.includes('jpeg') || m === 'image/jpg') return 'jpg';
@@ -20,35 +31,47 @@ function extFromMime(mime) {
   return 'bin';
 }
 
+function chaveSegura(storageKey) {
+  const safe = String(storageKey || '').replace(/\.\./g, '').replace(/^\/+/, '');
+  return safe.startsWith(`${UPLOAD_SUBDIR}/`) ? safe : null;
+}
+
 /**
  * @returns {Promise<string>} storage key relativo (ex.: hybrid-media/uuid.jpg)
  */
 async function saveBuffer(buffer, mimeType) {
-  await fs.mkdir(path.join(uploadAbsRoot, UPLOAD_SUBDIR), { recursive: true });
-  const id = crypto.randomUUID();
-  const ext = extFromMime(mimeType);
-  const fname = `${id}.${ext}`;
-  const relativeKey = `${UPLOAD_SUBDIR}/${fname}`;
-  await fs.writeFile(path.join(uploadAbsRoot, UPLOAD_SUBDIR, fname), buffer);
-  return relativeKey;
+  const key = `${UPLOAD_SUBDIR}/${crypto.randomUUID()}.${extFromMime(mimeType)}`;
+  await db().query(
+    'INSERT INTO hybrid_media_files (storage_key, mime_type, data) VALUES (:key, :mime, :data)',
+    { replacements: { key, mime: String(mimeType || 'application/octet-stream'), data: buffer } }
+  );
+  return key;
 }
 
 async function readStoredFile(storageKey) {
-  const safe = String(storageKey || '').replace(/\.\./g, '').replace(/^\/+/, '');
-  if (!safe.startsWith(`${UPLOAD_SUBDIR}/`)) {
-    throw new Error('invalid_storage_key');
-  }
-  const full = path.join(uploadAbsRoot, safe);
-  return fs.readFile(full);
+  const safe = chaveSegura(storageKey);
+  if (!safe) throw new Error('invalid_storage_key');
+
+  const [rows] = await db().query('SELECT data FROM hybrid_media_files WHERE storage_key = :key LIMIT 1', {
+    replacements: { key: safe },
+  });
+  if (rows.length && rows[0].data) return Buffer.from(rows[0].data);
+
+  // Registros antigos, gravados em disco antes da mudança.
+  return fs.readFile(path.join(uploadAbsRoot, safe));
 }
 
-/** Remove ficheiro guardado (ex.: rollback após falha Twilio). */
+/** Remove ficheiro guardado (ex.: rollback após falha no envio). */
 async function deleteStoredFile(storageKey) {
-  const safe = String(storageKey || '').replace(/\.\./g, '').replace(/^\/+/, '');
-  if (!safe.startsWith(`${UPLOAD_SUBDIR}/`)) return;
-  const full = path.join(uploadAbsRoot, safe);
+  const safe = chaveSegura(storageKey);
+  if (!safe) return;
   try {
-    await fs.unlink(full);
+    await db().query('DELETE FROM hybrid_media_files WHERE storage_key = :key', { replacements: { key: safe } });
+  } catch {
+    /* ignore */
+  }
+  try {
+    await fs.unlink(path.join(uploadAbsRoot, safe));
   } catch {
     /* ignore */
   }

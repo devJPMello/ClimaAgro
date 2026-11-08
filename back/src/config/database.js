@@ -69,6 +69,18 @@ async function ensureWhatsappVerificadoColumn() {
   );
 }
 
+/** Migração: tabela com os ficheiros do chat com o agrônomo (o disco do Render é apagado a cada reinício). */
+async function ensureHybridMediaTable() {
+  await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS hybrid_media_files (
+      storage_key VARCHAR(255) PRIMARY KEY,
+      mime_type VARCHAR(120) NOT NULL,
+      data BYTEA NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+}
+
 async function ensureIndexes() {
   const indexDefs = [
     { name: 'idx_climate_data_uf_date', table: 'climate_data', cols: '(uf, date)' },
@@ -112,6 +124,7 @@ const connectDB = async () => {
     // Migração: garante coluna external_message_id em hybrid_messages (todos os ambientes)
     await ensureExternalMessageIdColumn();
     await ensureWhatsappVerificadoColumn();
+    await ensureHybridMediaTable();
 
     // Garante índices críticos (CREATE INDEX IF NOT EXISTS — não bloqueia se já existirem)
     await ensureIndexes();

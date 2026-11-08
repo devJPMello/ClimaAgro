@@ -6,7 +6,7 @@ const ChatHistory = require('../models/ChatHistory');
 const HybridConversation = require('../models/HybridConversation');
 const HybridMessage = require('../models/HybridMessage');
 const DualUserProfile = require('../models/DualUserProfile');
-const { readStoredFile, saveBuffer } = require('../services/hybridMediaStorage');
+const { readStoredFile, saveBuffer, deleteStoredFile } = require('../services/hybridMediaStorage');
 
 const router = express.Router();
 
@@ -641,7 +641,16 @@ router.get('/media/:messageId', async (req, res) => {
     if (!conv || conv.produtorClerkId !== produtorClerkId) {
       return res.status(403).json({ message: 'Acesso negado.' });
     }
-    const buf = await readStoredFile(msg.midiaStorageKey);
+    let buf;
+    try {
+      buf = await readStoredFile(msg.midiaStorageKey);
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        // Ficheiro antigo gravado no disco do servidor, já apagado num reinício.
+        return res.status(404).json({ message: 'Este anexo não está mais disponível.' });
+      }
+      throw err;
+    }
     res.setHeader('Content-Type', msg.midiaMimeType || 'application/octet-stream');
     res.setHeader('Cache-Control', 'private, max-age=3600');
     return res.send(buf);
@@ -666,8 +675,13 @@ router.delete('/conversations/:id', async (req, res) => {
     if (!conv || conv.produtorClerkId !== produtorClerkId) {
       return res.status(404).json({ message: 'Conversa não encontrada.' });
     }
+    const comMidia = await HybridMessage.findAll({
+      where: { conversationId: conv.id, midiaStorageKey: { [Op.ne]: null } },
+      attributes: ['midiaStorageKey'],
+    });
     await HybridMessage.destroy({ where: { conversationId: conv.id } });
     await conv.destroy();
+    await Promise.all(comMidia.map((m) => deleteStoredFile(m.midiaStorageKey)));
     return res.json({ success: true });
   } catch (e) {
     console.error('hybridChat delete:', e);

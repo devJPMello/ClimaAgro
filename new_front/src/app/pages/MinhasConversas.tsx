@@ -12,6 +12,8 @@ import { ListItemsSkeleton } from '../components/ui/PageSkeletons';
 import { Modal } from '../components/ui/Modal';
 import { HybridMediaAttachment } from '../components/chat/HybridMediaAttachment';
 import { LocalAttachmentThumbnail, type LocalAttachmentKind } from '../components/chat/LocalAttachmentThumbnail';
+import { AttachmentNames } from '../components/chat/AttachmentNames';
+import { attachmentNamesFromText } from '../../lib/hooks/useIagroChat';
 import { EncerrarAtendimentoModal } from '../components/chat/EncerrarAtendimentoModal';
 import { FileAttachmentPickerModal } from '../components/chat/FileAttachmentPickerModal';
 import {
@@ -720,6 +722,9 @@ export function MinhasConversas() {
                                   size="relaxed"
                                 />
                               ))}
+                              {!messageMediaPreviews.get(message.id)?.length && (
+                                <AttachmentNames names={attachmentNamesFromText(message.text)} />
+                              )}
                               {message.hasMidia && user?.id ? (
                                 <div className="w-full max-w-[min(100%,280px)] rounded-lg border border-primary/30 bg-primary/15 p-2">
                                   <HybridMediaAttachment

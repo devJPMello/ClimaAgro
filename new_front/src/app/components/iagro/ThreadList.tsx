@@ -3,6 +3,12 @@ import { History, Search, Star, Trash2, X } from 'lucide-react';
 import type { IAgroSearchResult, IAgroThread } from '../../../lib/api/iagroChatApi';
 import { searchIAgroThreads } from '../../../lib/api/iagroChatApi';
 
+/** Título sem a lista de anexos ("[Anexos: ...]"), que pode vir cortada. */
+function threadTitle(title: string): string {
+  const limpo = String(title || '').replace(/\s*\[Anexos:.*$/is, '').trim();
+  return limpo || 'Arquivos enviados';
+}
+
 interface ThreadListProps {
   threads: IAgroThread[];
   threadId: string | null;
@@ -119,7 +125,7 @@ export function ThreadList({
                       : 'border-border hover:bg-muted'
                   }`}
                 >
-                  <p className="text-sm text-foreground truncate">{item.title}</p>
+                  <p className="text-sm text-foreground truncate">{threadTitle(item.title)}</p>
                   {item.snippet && (
                     <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{item.snippet}</p>
                   )}
@@ -148,9 +154,9 @@ export function ThreadList({
                     onClick={() => onOpenThread(item.threadId)}
                     className="w-full text-left"
                   >
-                    <p className="text-sm text-foreground truncate">{item.title}</p>
+                    <p className="text-sm text-foreground truncate">{threadTitle(item.title)}</p>
                     <div className="mt-1 flex items-center justify-between gap-2">
-                      <p className="text-xs text-muted-foreground">{item.totalMessages} mensagens</p>
+                      <p className="text-xs text-muted-foreground">{item.totalMessages} {item.totalMessages === 1 ? 'mensagem' : 'mensagens'}</p>
                       <div className="flex items-center gap-1">
                         <button
                           type="button"

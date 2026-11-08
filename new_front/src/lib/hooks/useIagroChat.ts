@@ -93,6 +93,12 @@ export function displayUserMessageText(raw: string): string {
   return String(raw || '').replace(/\n*\[Anexos:[^\]]+\]\s*$/i, '').trimEnd();
 }
 
+/** Nomes dos ficheiros guardados no fim da mensagem ("[Anexos: a.jpg, b.pdf]"). */
+export function attachmentNamesFromText(raw: string): string[] {
+  const m = /\[Anexos:\s*([^\]]+)\]\s*$/i.exec(String(raw || ''));
+  return m ? m[1].split(',').map((s) => s.trim()).filter(Boolean) : [];
+}
+
 export function useIagroChat() {
   const navigate = useNavigate();
   const { user } = useUser();
