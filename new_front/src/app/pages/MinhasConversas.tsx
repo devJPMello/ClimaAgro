@@ -30,7 +30,7 @@ import {
   type UnifiedChatMessage,
 } from '../../lib/api/hybridChatApi';
 import { notifyWhatsappDelivery } from '../../lib/whatsappNotify';
-import { STORAGE_KEYS, iagroThreadImagesKey } from '../../lib/storage/storageKeys';
+import { iagroThreadImagesKey } from '../../lib/storage/storageKeys';
 
 function maskWhatsapp(digits: string) {
   const d = String(digits || '').replace(/\D/g, '');

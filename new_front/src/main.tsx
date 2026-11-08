@@ -2,7 +2,7 @@
 import { createRoot } from "react-dom/client";
 import { ClerkProvider } from "@clerk/clerk-react";
 import { ptBR } from "@clerk/localizations";
-import App from "./app/App.tsx";
+import App from "./app/App";
 import "./styles/index.css";
 
 const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;

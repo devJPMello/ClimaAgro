@@ -11,7 +11,7 @@ interface ChatInputProps {
   isRecording: boolean;
   pendingFiles: File[];
   pendingPreviews: Map<File, string>;
-  inputRef: RefObject<HTMLTextAreaElement | null>;
+  inputRef: RefObject<HTMLTextAreaElement>;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
   onPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
   onToggleRecording: () => void;

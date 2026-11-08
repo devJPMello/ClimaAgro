@@ -179,14 +179,6 @@ function aggregateProductivityByMonthYear(
   });
 }
 
-/** Converte rótulo "Jan/20" → "2020". */
-function yearFromMesLabel(mes: string): string {
-  const yy = mes.split('/')[1]?.trim();
-  if (!yy) return mes;
-  const n = parseInt(yy, 10);
-  return String(n < 50 ? 2000 + n : 1900 + n);
-}
-
 const UF_ALL_OPTION = { value: 'ALL', label: 'Todos os estados' };
 
 const CULTURA_FALLBACK_OPTIONS = [

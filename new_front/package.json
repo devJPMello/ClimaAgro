@@ -6,7 +6,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.35.0",
@@ -77,9 +78,12 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "4.7.0",
     "jsdom": "^26.1.0",
     "tailwindcss": "4.1.12",
+    "typescript": "^5.6.3",
     "vite": "6.3.5",
     "vitest": "^2.1.9"
   },

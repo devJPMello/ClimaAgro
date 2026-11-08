@@ -72,7 +72,7 @@ function drawCoverBand(doc: jsPDF, margin: number, maxW: number, tituloRelatorio
   doc.setFontSize(20);
   const titleLines = doc.splitTextToSize(tituloRelatorio, maxW);
   let ty = 64;
-  titleLines.forEach((line) => {
+  titleLines.forEach((line: string) => {
     doc.text(line, margin, ty);
     ty += 24;
   });

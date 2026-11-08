@@ -130,7 +130,7 @@ export function BrazilMap({ metric, valuesByUf, dataRevision = 0 }: BrazilMapPro
     return (
       <div className="w-full overflow-hidden rounded-xl border border-destructive/20 bg-destructive/5 flex flex-col items-center justify-center gap-3 p-6 h-[300px] sm:h-[450px] lg:h-[600px]">
         <p className="text-sm text-destructive text-center">{error}</p>
-        <Button variant="secondary" onClick={loadGeojson}>
+        <Button variant="secondary" onClick={() => void loadGeojson()}>
           Tentar novamente
         </Button>
       </div>
