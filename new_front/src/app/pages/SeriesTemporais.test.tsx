@@ -49,6 +49,11 @@ vi.mock('../../lib/api/productivityApi', () => ({
   listProductivityRecords: vi.fn(async () => ({ success: true, data: [] })),
 }));
 
+// O componente lê a UF do perfil via Clerk; no teste não há usuário logado.
+vi.mock('../../lib/hooks/useProfileUf', () => ({
+  useProfileUf: () => null,
+}));
+
 vi.mock('../../lib/hooks/useIbgeMunicipioSelectOptions', () => ({
   useIbgeMunicipioSelectOptions: () => ({
     options: [{ value: 'Palmas', label: 'Palmas' }],
