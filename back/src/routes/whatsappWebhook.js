@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const HybridConversation = require('../models/HybridConversation');
 const HybridMessage = require('../models/HybridMessage');
@@ -15,8 +16,25 @@ router.get('/', (_req, res) => {
   });
 });
 
+/**
+ * Senha compartilhada com a Evolution API (cabeçalho x-webhook-secret).
+ * Só é exigida quando WHATSAPP_WEBHOOK_SECRET está configurada; sem ela
+ * (ambiente local), o webhook continua aberto como antes.
+ */
+function webhookAutorizado(req) {
+  const esperado = String(process.env.WHATSAPP_WEBHOOK_SECRET || '');
+  if (!esperado) return true;
+  const recebido = String(req.headers['x-webhook-secret'] || '');
+  const a = crypto.createHash('sha256').update(recebido).digest();
+  const b = crypto.createHash('sha256').update(esperado).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
 // Limite igual ao do app: lotes de sincronização da Evolution passam dos 100 KB padrão.
 router.post('/', express.json({ limit: '10mb' }), async (req, res) => {
+  if (!webhookAutorizado(req)) {
+    return res.status(401).json({ received: false, message: 'Não autorizado.' });
+  }
   const event = req.body?.event;
 
   // Ignorar eventos que não sejam de mensagens recebidas

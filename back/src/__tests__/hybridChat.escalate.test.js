@@ -51,6 +51,11 @@ jest.mock('../middleware/clerkAuth', () => ({
 const PROD_ID = 'user_produtor_test_abc123';
 const THREAD_ID = 'thread_soja_praga_001';
 const WHATSAPP = '5562999991234';
+const AGR_ID = 'agr-uuid-123';
+
+// Agrônomo parceiro ativo cadastrado na base e perfil do produtor (para o "Local").
+const agronomoAtivo = { id: AGR_ID, nome: 'Dr. Teste', especialidade: 'Soja e Milho', whatsapp: WHATSAPP };
+const perfilProdutor = { clerkUserId: PROD_ID, municipio: 'Palmas', uf: 'TO' };
 
 const fakeMensagemIA = {
   threadId: THREAD_ID,
@@ -87,6 +92,12 @@ describe('POST /api/hybrid-chat/escalate', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockDualProfileFindOne.mockReset();
+    mockDualProfileFindOne.mockImplementation(async ({ where }) => {
+      if (where.id === AGR_ID) return agronomoAtivo;
+      if (where.clerkUserId) return perfilProdutor;
+      return null;
+    });
     app = express();
     app.use(express.json());
     app.use('/api/hybrid-chat', require('../routes/hybridChat'));
@@ -155,7 +166,7 @@ describe('POST /api/hybrid-chat/escalate', () => {
       .set('X-Clerk-User-Id', PROD_ID)
       .send({
         threadId: THREAD_ID,
-        whatsappAgronomo: WHATSAPP,
+        agronomoParceiroId: AGR_ID,
         produtorNome: 'João da Silva',
         casoDestaque: 'Lagarta do cartucho na soja — 3º instar larval',
       });
@@ -184,7 +195,7 @@ describe('POST /api/hybrid-chat/escalate', () => {
       .set('X-Clerk-User-Id', PROD_ID)
       .send({
         threadId: THREAD_ID,
-        whatsappAgronomo: WHATSAPP,
+        agronomoParceiroId: AGR_ID,
         produtorNome: 'Maria Produtora',
       });
 
@@ -207,7 +218,7 @@ describe('POST /api/hybrid-chat/escalate', () => {
       .set('X-Clerk-User-Id', PROD_ID)
       .send({
         threadId: THREAD_ID,
-        whatsappAgronomo: WHATSAPP,
+        agronomoParceiroId: AGR_ID,
         produtorNome: 'Carlos Fazendeiro',
       });
 
@@ -287,7 +298,66 @@ describe('POST /api/hybrid-chat/escalate', () => {
     expect(mockEvolutionSendMessage).not.toHaveBeenCalled();
   });
 
-  test('retorna 400 quando whatsapp não é informado e auto-pick está desativado', async () => {
+  // ── Segurança do destino e local do produtor ─────────────────────────────
+
+  test('ignora número enviado pelo navegador e usa o WhatsApp do agrônomo cadastrado', async () => {
+    mockChatHistoryFindOne.mockResolvedValueOnce(null);
+    mockChatHistoryFindAll.mockResolvedValueOnce([fakeMensagemIA]);
+    mockConversationFindOrCreate.mockResolvedValueOnce([makeMockConversation(), true]);
+    mockEvolutionSendMessage.mockResolvedValueOnce({ sent: true });
+
+    const res = await request(app)
+      .post('/api/hybrid-chat/escalate')
+      .set('X-Clerk-User-Id', PROD_ID)
+      .send({ threadId: THREAD_ID, agronomoParceiroId: AGR_ID, whatsappAgronomo: '5511900000000' });
+
+    expect(res.status).toBe(200);
+    expect(mockEvolutionSendMessage).toHaveBeenCalledWith(WHATSAPP, expect.any(String));
+    expect(mockEvolutionSendMessage).not.toHaveBeenCalledWith('5511900000000', expect.anything());
+  });
+
+  test('só com um número qualquer (sem agrônomo da base) não envia nada', async () => {
+    mockChatHistoryFindOne.mockResolvedValueOnce(null);
+    mockChatHistoryFindAll.mockResolvedValueOnce([fakeMensagemIA]);
+
+    const res = await request(app)
+      .post('/api/hybrid-chat/escalate')
+      .set('X-Clerk-User-Id', PROD_ID)
+      .send({ threadId: THREAD_ID, whatsappAgronomo: '5511900000000' });
+
+    expect(res.status).toBe(400);
+    expect(mockEvolutionSendMessage).not.toHaveBeenCalled();
+  });
+
+  test('agrônomo inexistente ou inativo retorna 404 e não envia', async () => {
+    mockChatHistoryFindOne.mockResolvedValueOnce(null);
+    mockChatHistoryFindAll.mockResolvedValueOnce([fakeMensagemIA]);
+
+    const res = await request(app)
+      .post('/api/hybrid-chat/escalate')
+      .set('X-Clerk-User-Id', PROD_ID)
+      .send({ threadId: THREAD_ID, agronomoParceiroId: 'agr-inativo' });
+
+    expect(res.status).toBe(404);
+    expect(mockEvolutionSendMessage).not.toHaveBeenCalled();
+  });
+
+  test('resumo enviado ao agrônomo traz o município e o estado do produtor', async () => {
+    mockChatHistoryFindOne.mockResolvedValueOnce(null);
+    mockChatHistoryFindAll.mockResolvedValueOnce([fakeMensagemIA]);
+    mockConversationFindOrCreate.mockResolvedValueOnce([makeMockConversation(), true]);
+    mockEvolutionSendMessage.mockResolvedValueOnce({ sent: true });
+
+    const res = await request(app)
+      .post('/api/hybrid-chat/escalate')
+      .set('X-Clerk-User-Id', PROD_ID)
+      .send({ threadId: THREAD_ID, agronomoParceiroId: AGR_ID, produtorNome: 'Ana' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.summary).toContain('📍 Local: Palmas — TO');
+  });
+
+  test('retorna 400 quando nenhum agrônomo é escolhido e auto-pick está desativado', async () => {
     mockChatHistoryFindOne.mockResolvedValueOnce(null);
     mockChatHistoryFindAll.mockResolvedValueOnce([fakeMensagemIA]);
 
@@ -301,7 +371,7 @@ describe('POST /api/hybrid-chat/escalate', () => {
       });
 
     expect(res.status).toBe(400);
-    expect(res.body.message).toMatch(/whatsapp/i);
+    expect(res.body.message).toMatch(/agrônomo/i);
   });
 
   // ── Erro no serviço de WhatsApp ──────────────────────────────────────────
@@ -319,7 +389,7 @@ describe('POST /api/hybrid-chat/escalate', () => {
       .set('X-Clerk-User-Id', PROD_ID)
       .send({
         threadId: THREAD_ID,
-        whatsappAgronomo: WHATSAPP,
+        agronomoParceiroId: AGR_ID,
         produtorNome: 'João Produtor',
       });
 

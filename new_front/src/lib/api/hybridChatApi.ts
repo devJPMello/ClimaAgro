@@ -171,7 +171,8 @@ export async function sendProducerToWhatsapp(
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'X-Clerk-User-Id': clerkUserId },
+      // Sem o token, a API publicada recusa (só aceita login confirmado pelo Clerk).
+      headers: clerkHeaders(clerkUserId),
       body: fd,
       signal: controller.signal,
     });
@@ -241,7 +242,7 @@ export async function fetchHybridMediaBlob(messageId: string, clerkUserId: strin
   const base = getApiBasePath();
   const url = `${base}/hybrid-chat/media/${encodeURIComponent(messageId)}`;
   const response = await fetch(url, {
-    headers: { 'X-Clerk-User-Id': clerkUserId },
+    headers: clerkHeaders(clerkUserId),
   });
   if (!response.ok) return null;
   return await response.blob();

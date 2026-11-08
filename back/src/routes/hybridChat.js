@@ -47,8 +47,28 @@ const { clerkAuth } = require('../middleware/clerkAuth');
 
 router.use(clerkAuth);
 
+/** Produtor logado: sempre o usuário confirmado pelo clerkAuth (nunca um valor enviado pelo navegador). */
 function headerProdutorId(req) {
-  return String(req.clerkUserId || req.headers['x-clerk-user-id'] || req.query.produtorClerkId || '').trim();
+  return String(req.clerkUserId || '').trim();
+}
+
+/** Agrônomo parceiro ativo com WhatsApp válido, ou null. */
+async function findAgronomoAtivo(id) {
+  if (!id) return null;
+  const row = await DualUserProfile.findOne({
+    where: { id, tipo: 'agronomo', parceiro: true, parceiroAtivo: true },
+  });
+  if (!row || normalizeDigits(row.whatsapp).length < 10) return null;
+  return row;
+}
+
+/** "Palmas — TO", "TO" ou '' a partir do perfil do produtor. */
+async function localDoProdutor(produtorClerkId) {
+  const p = await DualUserProfile.findOne({ where: { clerkUserId: produtorClerkId } });
+  const municipio = String(p?.municipio || '').trim();
+  const uf = String(p?.uf || '').trim().toUpperCase();
+  if (municipio && uf) return `${municipio} — ${uf}`;
+  return municipio || uf;
 }
 
 /** Bloqueia acesso se o thread já estiver associado a outro Clerk ID. */
@@ -129,7 +149,7 @@ async function findAgronomoBySpecialty(hint) {
   return null;
 }
 
-function buildRichWhatsappBody({ produtorNome, casoDestaque, iaLines }) {
+function buildRichWhatsappBody({ produtorNome, casoDestaque, iaLines, local = '' }) {
   const nome = (produtorNome || 'Produtor(a)').trim() || 'Produtor(a)';
   const lastUser = [...iaLines].filter((l) => l.role === 'produtor').pop();
   const lastIa = [...iaLines].filter((l) => l.role === 'iagro').pop();
@@ -146,6 +166,7 @@ function buildRichWhatsappBody({ produtorNome, casoDestaque, iaLines }) {
 
   return [
     `Olá! O produtor *${nome}* precisa de apoio técnico via ClimaAgro / IAgro.`,
+    ...(local ? [`📍 Local: ${local}`] : []),
     '',
     `📋 Contexto do caso: ${caso || 'Conversa em andamento — veja o histórico abaixo.'}${anexosMencao}`,
     '',
@@ -193,8 +214,16 @@ router.post('/escalate', async (req, res) => {
       return res.status(400).json({ message: 'Não há mensagens da IA neste tópico para enviar.' });
     }
 
+    // O destino é sempre um agrônomo parceiro ATIVO da base. O número enviado pelo
+    // navegador (whatsappAgronomo) é ignorado, para o WhatsApp da plataforma não
+    // poder ser usado para mandar mensagens a números quaisquer.
     let picked = null;
-    if (autoPick || (!whatsappRaw && specialtyFilter)) {
+    if (agronomoParceiroId) {
+      picked = await findAgronomoAtivo(agronomoParceiroId);
+      if (!picked) {
+        return res.status(404).json({ message: 'Agrônomo não encontrado ou não está ativo na rede de parceiros.' });
+      }
+    } else if (autoPick || specialtyFilter) {
       const hint = specialtyFilter || 'Pragas';
       picked = await findAgronomoBySpecialty(hint);
       if (!picked) {
@@ -202,9 +231,11 @@ router.post('/escalate', async (req, res) => {
           message: `Nenhum agrônomo parceiro ativo encontrado para a especialidade "${hint}".`,
         });
       }
-      whatsappRaw = picked.whatsapp;
-      agronomoParceiroId = agronomoParceiroId || picked.id;
+      agronomoParceiroId = picked.id;
+    } else {
+      return res.status(400).json({ message: 'Escolha um agrônomo parceiro para encaminhar a conversa.' });
     }
+    whatsappRaw = picked.whatsapp;
 
     const whatsappAgronomo = normalizeDigits(whatsappRaw);
     if (!whatsappAgronomo || whatsappAgronomo.length < 10) {
@@ -215,7 +246,10 @@ router.post('/escalate', async (req, res) => {
       casoDestaque ||
       (req.body?.conciergeReason ? String(req.body.conciergeReason).slice(0, 600) : '');
 
+    const local = await localDoProdutor(produtorClerkId);
+
     const summary = buildRichWhatsappBody({
+      local,
       produtorNome,
       casoDestaque: casoFinal,
       iaLines,
