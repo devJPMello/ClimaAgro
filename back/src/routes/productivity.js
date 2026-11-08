@@ -333,14 +333,15 @@ router.get('/product-labels', [
     const raw = req.query.state != null ? String(req.query.state).trim().toUpperCase().slice(0, 2) : '';
     const uf = /^[A-Z]{2}$/.test(raw) ? raw : null;
     // A tabela 6588 do IBGE tem uma linha por estado×cultura mesmo quando a cultura não é
-    // cultivada ali (produção/área zeradas — ver observations). Ao filtrar por UF, exclui essas
-    // linhas "vazias" para não listar culturas sem dado real naquele estado.
+    // cultivada ali (produção/área zeradas — ver observations), e alguns produtos (abacaxi, alho,
+    // cebola etc.) saíram da divulgação em 2018 e vêm sempre zerados. Exclui essas linhas "vazias"
+    // para não listar culturas sem dado real (na UF escolhida ou no país).
     const rows = await sequelize.query(
       `
       SELECT DISTINCT p.product_label AS "productLabel"
       FROM productivity p
       WHERE (:uf::text IS NULL OR p.state = :uf)
-        AND (:uf::text IS NULL OR p.total_production > 0 OR p.planted_area > 0 OR p.productivity > 0)
+        AND (p.total_production > 0 OR p.planted_area > 0 OR p.productivity > 0)
       ORDER BY p.product_label ASC
       `,
       {
