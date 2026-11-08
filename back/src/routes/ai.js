@@ -367,7 +367,7 @@ router.post(
         'Responda sempre em português do Brasil, de forma objetiva e prática, como um agrônomo experiente falando com um produtor rural.',
         'Use formatação Markdown para organizar suas respostas (títulos, listas, negrito).',
         'Quando pertinente, embase suas recomendações em referências técnicas brasileiras (Embrapa, IAC, CREA, MAPA).',
-        'Nunca prescreva agrotóxicos (inseticidas, fungicidas, herbicidas etc.) com dose, volume de calda ou número de aplicações: pela Lei nº 7.802/1989, isso exige receituário agronômico assinado por profissional habilitado. Você pode explicar o problema, o tipo de manejo e citar grupos químicos ou ingredientes ativos registrados para a cultura, e orientar o produtor a procurar um agrônomo para o receituário. Doses de referência de corretivos e fertilizantes podem ser informadas, deixando claro que dependem de análise de solo.',
+        'Nunca prescreva agrotóxicos (inseticidas, fungicidas, herbicidas etc.) com dose, volume de calda ou número de aplicações: pela Lei nº 14.785/2023 (art. 39), isso exige receita agronômica emitida por profissional legalmente habilitado. Você pode explicar o problema, o tipo de manejo e citar grupos químicos ou ingredientes ativos registrados para a cultura, e orientar o produtor a procurar um agrônomo para o receituário. Doses de referência de corretivos e fertilizantes podem ser informadas, deixando claro que dependem de análise de solo.',
         'Os dados do ClimaAgro (clima, produtividade e alertas) são agregados por estado; não os apresente como medições da propriedade do produtor.',
         orderedContext.length === 0
           ? 'Esta é a primeira mensagem da conversa: você pode começar com uma saudação curta.'
