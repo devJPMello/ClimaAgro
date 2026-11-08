@@ -1,12 +1,98 @@
 const { Op, fn, col } = require('sequelize');
-const { models } = require('../config/database');
+const { models, sequelize } = require('../config/database');
 const { normalizeUf } = require('../utils/brazilUfs');
-const { normalizeMunicipalityKey } = require('../utils/municipalityNameMatch');
 const alertSvc = require('./climateAlertsUiService');
 
 const MAX_CHARS = 4000;
 const OFFICIAL_DAYS = () => Number(process.env.IAGRO_OFFICIAL_ALERTS_DAYS || 7);
 const MAX_OFFICIAL_LINES = () => Number(process.env.IAGRO_OFFICIAL_ALERTS_MAX || 8);
+
+const MAX_CULTURAS = () => Number(process.env.IAGRO_MAX_CULTURAS || 6);
+const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+/** "2026-09" -> "set/2026". */
+function mesAno(periodo) {
+  const m = /^(\d{4})-(\d{2})/.exec(String(periodo || ''));
+  return m ? `${MESES[Number(m[2]) - 1]}/${m[1]}` : String(periodo || '—');
+}
+
+/** "1.17 soja" -> "Soja"; "12 castanha-de-caju" -> "Castanha-de-caju". */
+function nomeCultura(rotulo) {
+  const s = String(rotulo || '').replace(/^[\d.]+\s*/, '').trim();
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : '—';
+}
+
+/**
+ * Principais culturas da UF: para cada produto, a estimativa mais recente com
+ * produtividade > 0; ordena pela área plantada nessa estimativa.
+ */
+async function principaisCulturasDoEstado(uf) {
+  const rows = await sequelize.query(
+    `WITH ultima AS (
+       SELECT DISTINCT ON (product_label)
+              product_label, period_ref, productivity, planted_area
+         FROM productivity
+        WHERE state = :uf AND productivity > 0 AND period_ref IS NOT NULL
+          -- Totais do IBGE (não são culturas): "1 cereais, leguminosas e oleaginosas" e "9/10 café total".
+          AND product_label NOT ILIKE '%cereais, leguminosas%'
+          AND product_label NOT ILIKE '%total%'
+        ORDER BY product_label, period_ref DESC
+     )
+     SELECT product_label, period_ref, productivity, planted_area
+       FROM ultima
+      ORDER BY planted_area DESC NULLS LAST, product_label
+      LIMIT :limite`,
+    { replacements: { uf, limite: MAX_CULTURAS() }, type: sequelize.QueryTypes.SELECT }
+  );
+  return rows.map((r) => ({
+    nome: nomeCultura(r.product_label),
+    produtividade: Number(r.productivity),
+    periodo: r.period_ref,
+  }));
+}
+
+const ORDEM_SEVERIDADE = { critical: 4, high: 3, medium: 2, low: 1 };
+const NOME_SEVERIDADE = { critical: 'crítica', high: 'alta', medium: 'média', low: 'baixa' };
+
+/** "08/11/2026" -> 20261108 (para ordenar). */
+function chaveData(d) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(String(d || ''));
+  return m ? Number(`${m[3]}${m[2]}${m[1]}`) : 0;
+}
+
+/** Junta alertas do mesmo tipo em uma linha: quantidade, período e severidade máxima. */
+function agruparAlertas(itens) {
+  const grupos = new Map();
+  for (const it of itens) {
+    const tipo = String(it.tipo || 'Alerta');
+    const g = grupos.get(tipo) || { tipo, total: 0, datas: [], severidade: 'low', exemplo: it };
+    g.total += 1;
+    if (it.data) g.datas.push(it.data);
+    if ((ORDEM_SEVERIDADE[it.severidade] || 0) > (ORDEM_SEVERIDADE[g.severidade] || 0)) {
+      g.severidade = it.severidade;
+      g.exemplo = it;
+    }
+    grupos.set(tipo, g);
+  }
+  return [...grupos.values()]
+    .sort((a, b) => (ORDEM_SEVERIDADE[b.severidade] || 0) - (ORDEM_SEVERIDADE[a.severidade] || 0) || b.total - a.total)
+    .map((g) => {
+      const datas = g.datas.filter((d) => chaveData(d) > 0).sort((x, y) => chaveData(x) - chaveData(y));
+      const periodo =
+        datas.length === 0
+          ? ''
+          : datas[0] === datas[datas.length - 1]
+            ? datas[0]
+            : `${datas[0].slice(0, 5)} a ${datas[datas.length - 1].slice(0, 5)}`;
+      const resumo = String(g.exemplo.valorAtual || g.exemplo.recomendacao || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 180);
+      const qtd = g.total > 1 ? `${g.total} avisos` : '1 aviso';
+      const sev = NOME_SEVERIDADE[g.severidade] ? `, severidade máxima ${NOME_SEVERIDADE[g.severidade]}` : '';
+      return `- ${g.tipo} (${qtd}${periodo ? `, ${periodo}` : ''}${sev}): ${resumo}`;
+    });
+}
 
 function fmtNum(v, digits = 1) {
   if (v == null || Number.isNaN(Number(v))) return '—';
@@ -18,7 +104,7 @@ function fmtNum(v, digits = 1) {
  * para injetar no prompt do IAgro. Falhas de BD retornam string vazia (chat segue sem bloquear).
  */
 async function buildIagroDataContext(clerkUserId) {
-  const { DualUserProfile, ClimateData, GeoData, Productivity, OfficialAlert } = models;
+  const { DualUserProfile, ClimateData, GeoData, OfficialAlert } = models;
   const cid = String(clerkUserId || '').trim();
   if (!cid) return '';
 
@@ -43,7 +129,6 @@ async function buildIagroDataContext(clerkUserId) {
 
     const ufRaw = normalizeUf(profile.uf);
     const munLabel = String(profile.municipio || '').trim();
-    const munKey = munLabel ? normalizeMunicipalityKey(munLabel) : null;
 
     if (!ufRaw) {
       lines.push(
@@ -99,48 +184,16 @@ async function buildIagroDataContext(clerkUserId) {
       }
     }
 
-    let latestYear = munKey
-      ? await Productivity.max('year', {
-          where: { state: ufRaw, municipalityKey: munKey },
-        })
-      : null;
-    if (latestYear == null) {
-      latestYear = await Productivity.max('year', { where: { state: ufRaw } });
-    }
-
-    if (latestYear != null) {
-      const y = Number(latestYear);
-      let picks = munKey
-        ? await Productivity.findAll({
-            where: { state: ufRaw, municipalityKey: munKey, year: y },
-            attributes: ['cropType', 'productivity', 'productLabel', 'season'],
-            order: [['cropType', 'ASC']],
-            limit: 6,
-            raw: true,
-          })
-        : [];
-      if (!picks.length) {
-        picks = await Productivity.findAll({
-          where: { state: ufRaw, year: y },
-          attributes: ['cropType', 'productivity', 'productLabel', 'season'],
-          order: [['cropType', 'ASC']],
-          limit: 6,
-          raw: true,
-        });
-      }
-      if (picks.length) {
-        const bits = picks.map(
-          (r) =>
-            `${r.cropType}: ${fmtNum(r.productivity, 2)} t/ha (${String(r.productLabel || '').slice(0, 80)}${r.season ? `, ${r.season}` : ''})`
-        );
-        lines.push(
-          `Produtividade de referência (ano ${y}${munKey ? '; sem dado municipal usa médias estaduais' : ''}): ${bits.join('; ')}.`
-        );
-      } else {
-        lines.push(`Sem linhas de produtividade no banco para o recorte (ano ${y}).`);
-      }
+    const culturas = await principaisCulturasDoEstado(ufRaw);
+    if (culturas.length) {
+      const bits = culturas.map(
+        (c) => `${c.nome}: ${fmtNum(c.produtividade, 2)} t/ha (estimativa de ${mesAno(c.periodo)})`
+      );
+      lines.push(
+        `Produtividade das principais culturas da UF ${ufRaw} (maior área plantada; estimativas do LSPA/IBGE para a safra do ano, não colheita do mês; dado estadual): ${bits.join('; ')}.`
+      );
     } else {
-      lines.push('Sem dados de produtividade municipal/estadual no banco para esta UF.');
+      lines.push(`Sem dados de produtividade no banco para a UF ${ufRaw}.`);
     }
 
     const days = OFFICIAL_DAYS();
@@ -174,16 +227,12 @@ async function buildIagroDataContext(clerkUserId) {
         lines.push(
           `Alertas meteorológicos oficiais (últimos ${days} dias, UF ${ufRaw}; mesmo recorte da área de alertas do app):`
         );
-        for (const it of unique.slice(0, maxAlertLines)) {
-          const summary = String(it.valorAtual || it.recomendacao || '—')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .slice(0, 200);
-          lines.push(`- ${it.data || '—'} · ${it.tipo}: ${summary} (${it.local})`);
+        const agrupados = agruparAlertas(unique);
+        agrupados.slice(0, maxAlertLines).forEach((linha) => lines.push(linha));
+        if (agrupados.length > maxAlertLines) {
+          lines.push(`… e mais ${agrupados.length - maxAlertLines} tipo(s) de alerta (lista completa no app).`);
         }
-        if (unique.length > maxAlertLines) {
-          lines.push(`… e mais ${unique.length - maxAlertLines} alerta(s) no período (lista completa no app).`);
-        }
+        lines.push(`Total: ${unique.length} alerta(s) oficial(is) no período.`);
       } else {
         lines.push(
           `Alertas meteorológicos oficiais (UF ${ufRaw}, últimos ${days} dias): nenhum vigente no recorte ou sem ingestão recente.`
@@ -202,4 +251,4 @@ async function buildIagroDataContext(clerkUserId) {
   }
 }
 
-module.exports = { buildIagroDataContext };
+module.exports = { buildIagroDataContext, _internos: { agruparAlertas, nomeCultura, mesAno } };
