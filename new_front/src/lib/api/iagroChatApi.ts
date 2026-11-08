@@ -54,10 +54,33 @@ function clerkHeaders(clerkUserId: string): Record<string, string> {
   return headers;
 }
 
+let servidorAcordadoEm = 0;
+
+/**
+ * No Render gratuito a API dorme sem uso e leva até ~1 min para voltar. Antes de enviar
+ * ao IAgro, espera o /health responder para a mensagem não falhar no meio do despertar.
+ */
+export async function acordarServidor(): Promise<void> {
+  if (Date.now() - servidorAcordadoEm < 5 * 60 * 1000) return;
+  for (let tentativa = 0; tentativa < 6; tentativa += 1) {
+    try {
+      const r = await fetch(`${getApiBase()}/health`, { cache: 'no-store' });
+      if (r.ok) {
+        servidorAcordadoEm = Date.now();
+        return;
+      }
+    } catch {
+      /* servidor ainda subindo */
+    }
+    await new Promise((ok) => setTimeout(ok, 5000));
+  }
+}
+
 export async function sendIAgroMessage(
   payload: { message: string; threadId?: string | null; files?: File[] },
   clerkUserId: string
 ) {
+  await acordarServidor();
   const files = payload.files ?? [];
   if (files.length === 0) {
     return httpClient.post<{ threadId: string; response: string; concierge?: ConciergeMeta }>(

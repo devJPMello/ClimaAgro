@@ -86,6 +86,19 @@ async function ensureChatAttachmentsColumn() {
   await sequelize.query('ALTER TABLE IF EXISTS chat_history ADD COLUMN IF NOT EXISTS attachments JSONB;');
 }
 
+/** Migração: códigos de confirmação do WhatsApp (sobrevivem ao servidor dormir/reiniciar). */
+async function ensureWhatsappVerificacoesTable() {
+  await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_verificacoes (
+      user_id VARCHAR(128) NOT NULL,
+      tipo VARCHAR(16) NOT NULL,
+      dados JSONB NOT NULL,
+      expira_em TIMESTAMPTZ NOT NULL,
+      PRIMARY KEY (user_id, tipo)
+    );
+  `);
+}
+
 async function ensureIndexes() {
   const indexDefs = [
     { name: 'idx_climate_data_uf_date', table: 'climate_data', cols: '(uf, date)' },
@@ -131,6 +144,7 @@ const connectDB = async () => {
     await ensureWhatsappVerificadoColumn();
     await ensureHybridMediaTable();
     await ensureChatAttachmentsColumn();
+    await ensureWhatsappVerificacoesTable();
 
     // Garante índices críticos (CREATE INDEX IF NOT EXISTS — não bloqueia se já existirem)
     await ensureIndexes();

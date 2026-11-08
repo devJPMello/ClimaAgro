@@ -3,8 +3,9 @@ const crypto = require('crypto');
 /**
  * Confirmação de número de WhatsApp por código de 6 dígitos.
  *
- * Os códigos ficam em memória (o servidor roda em uma instância só). Se o
- * servidor reiniciar, o usuário só precisa pedir um código novo.
+ * Os códigos ficam no Postgres (tabela whatsapp_verificacoes): no Render gratuito o
+ * servidor dorme/reinicia e um código guardado só em memória se perderia no meio do
+ * cadastro. Nos testes automáticos usa-se memória.
  */
 
 const VALIDADE_CODIGO_MS = 10 * 60 * 1000;
@@ -12,8 +13,63 @@ const VALIDADE_CONFIRMACAO_MS = 30 * 60 * 1000;
 const INTERVALO_REENVIO_MS = 60 * 1000;
 const MAX_TENTATIVAS = 5;
 
-const pendentes = new Map(); // userId -> { numero, hash, expiraEm, tentativas, enviadoEm }
-const confirmados = new Map(); // userId -> { numero, expiraEm }
+// ── Armazenamento ──────────────────────────────────────────────────────────
+// Cada usuário tem até dois registros: 'pendente' { numero, hash, expiraEm, tentativas, enviadoEm }
+// e 'confirmado' { numero, expiraEm }.
+
+function criarMemoria() {
+  const dados = new Map();
+  const k = (userId, tipo) => `${userId}|${tipo}`;
+  return {
+    async get(userId, tipo) {
+      return dados.get(k(userId, tipo)) || null;
+    },
+    async set(userId, tipo, valor) {
+      dados.set(k(userId, tipo), { ...valor });
+    },
+    async del(userId, tipo) {
+      dados.delete(k(userId, tipo));
+    },
+    async limpar() {
+      dados.clear();
+    },
+  };
+}
+
+function criarBanco() {
+  const db = () => require('../config/database').sequelize; // require tardio (evita ciclo)
+  return {
+    async get(userId, tipo) {
+      const [rows] = await db().query(
+        'SELECT dados FROM whatsapp_verificacoes WHERE user_id = :userId AND tipo = :tipo LIMIT 1',
+        { replacements: { userId, tipo } }
+      );
+      return rows.length ? rows[0].dados : null;
+    },
+    async set(userId, tipo, valor) {
+      await db().query(
+        `INSERT INTO whatsapp_verificacoes (user_id, tipo, dados, expira_em)
+         VALUES (:userId, :tipo, CAST(:dados AS JSONB), to_timestamp(:expiraEm / 1000.0))
+         ON CONFLICT (user_id, tipo) DO UPDATE SET dados = EXCLUDED.dados, expira_em = EXCLUDED.expira_em`,
+        { replacements: { userId, tipo, dados: JSON.stringify(valor), expiraEm: valor.expiraEm } }
+      );
+      // Faxina dos registros vencidos (tabela pequena).
+      await db().query('DELETE FROM whatsapp_verificacoes WHERE expira_em < NOW()');
+    },
+    async del(userId, tipo) {
+      await db().query('DELETE FROM whatsapp_verificacoes WHERE user_id = :userId AND tipo = :tipo', {
+        replacements: { userId, tipo },
+      });
+    },
+    async limpar() {
+      await db().query('DELETE FROM whatsapp_verificacoes');
+    },
+  };
+}
+
+let store = process.env.NODE_ENV === 'test' ? criarMemoria() : criarBanco();
+
+// ── Regras ─────────────────────────────────────────────────────────────────
 
 function hashCodigo(userId, codigo) {
   return crypto.createHash('sha256').update(`${userId}:${codigo}`).digest('hex');
@@ -30,15 +86,15 @@ function numeroValido(numero) {
 
 /**
  * Gera um código novo para o usuário.
- * @returns {{ ok: true, codigo: string } | { ok: false, motivo: 'aguarde', segundos: number }}
+ * @returns {Promise<{ ok: true, codigo: string } | { ok: false, motivo: 'aguarde', segundos: number }>}
  */
-function gerarCodigo(userId, numero, agora = Date.now()) {
-  const atual = pendentes.get(userId);
+async function gerarCodigo(userId, numero, agora = Date.now()) {
+  const atual = await store.get(userId, 'pendente');
   if (atual && agora - atual.enviadoEm < INTERVALO_REENVIO_MS) {
     return { ok: false, motivo: 'aguarde', segundos: Math.ceil((INTERVALO_REENVIO_MS - (agora - atual.enviadoEm)) / 1000) };
   }
   const codigo = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
-  pendentes.set(userId, {
+  await store.set(userId, 'pendente', {
     numero,
     hash: hashCodigo(userId, codigo),
     expiraEm: agora + VALIDADE_CODIGO_MS,
@@ -49,53 +105,58 @@ function gerarCodigo(userId, numero, agora = Date.now()) {
 }
 
 /** Descarta o código pendente (ex.: quando o envio pelo WhatsApp falhou). */
-function cancelarCodigo(userId) {
-  pendentes.delete(userId);
+async function cancelarCodigo(userId) {
+  await store.del(userId, 'pendente');
 }
 
 /**
  * Confere o código digitado.
- * @returns {{ ok: true, numero: string } | { ok: false, motivo: 'sem_codigo' | 'expirado' | 'tentativas' | 'invalido', restantes?: number }}
+ * @returns {Promise<{ ok: true, numero: string } | { ok: false, motivo: 'sem_codigo' | 'expirado' | 'tentativas' | 'invalido', restantes?: number }>}
  */
-function confirmarCodigo(userId, codigo, agora = Date.now()) {
-  const atual = pendentes.get(userId);
+async function confirmarCodigo(userId, codigo, agora = Date.now()) {
+  const atual = await store.get(userId, 'pendente');
   if (!atual) return { ok: false, motivo: 'sem_codigo' };
   if (agora > atual.expiraEm) {
-    pendentes.delete(userId);
+    await store.del(userId, 'pendente');
     return { ok: false, motivo: 'expirado' };
   }
   if (atual.tentativas >= MAX_TENTATIVAS) {
-    pendentes.delete(userId);
+    await store.del(userId, 'pendente');
     return { ok: false, motivo: 'tentativas' };
   }
   const digitado = String(codigo || '').replace(/\D/g, '');
   if (hashCodigo(userId, digitado) !== atual.hash) {
-    atual.tentativas += 1;
-    return { ok: false, motivo: 'invalido', restantes: MAX_TENTATIVAS - atual.tentativas };
+    const tentativas = atual.tentativas + 1;
+    await store.set(userId, 'pendente', { ...atual, tentativas });
+    return { ok: false, motivo: 'invalido', restantes: MAX_TENTATIVAS - tentativas };
   }
-  pendentes.delete(userId);
-  confirmados.set(userId, { numero: atual.numero, expiraEm: agora + VALIDADE_CONFIRMACAO_MS });
+  await store.del(userId, 'pendente');
+  await store.set(userId, 'confirmado', { numero: atual.numero, expiraEm: agora + VALIDADE_CONFIRMACAO_MS });
   return { ok: true, numero: atual.numero };
 }
 
 /** Número confirmado recentemente pelo usuário (ou null). */
-function numeroConfirmado(userId, agora = Date.now()) {
-  const c = confirmados.get(userId);
+async function numeroConfirmado(userId, agora = Date.now()) {
+  const c = await store.get(userId, 'confirmado');
   if (!c) return null;
   if (agora > c.expiraEm) {
-    confirmados.delete(userId);
+    await store.del(userId, 'confirmado');
     return null;
   }
   return c.numero;
 }
 
-function consumirConfirmacao(userId) {
-  confirmados.delete(userId);
+async function consumirConfirmacao(userId) {
+  await store.del(userId, 'confirmado');
 }
 
-function _limparTudo() {
-  pendentes.clear();
-  confirmados.clear();
+async function _limparTudo() {
+  await store.limpar();
+}
+
+/** Só para testes: troca o armazenamento. */
+function _usarArmazenamento(tipo) {
+  store = tipo === 'banco' ? criarBanco() : criarMemoria();
 }
 
 module.exports = {
@@ -107,5 +168,6 @@ module.exports = {
   numeroConfirmado,
   consumirConfirmacao,
   _limparTudo,
+  _usarArmazenamento,
   MAX_TENTATIVAS,
 };

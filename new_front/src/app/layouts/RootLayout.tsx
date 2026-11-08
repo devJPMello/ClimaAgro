@@ -23,6 +23,7 @@ import { useUnreadAlerts } from '../../lib/hooks/useUnreadAlerts';
 import { useOnboardingStatus } from '../../lib/hooks/useOnboardingStatus';
 import { OnboardingWizard } from '../components/onboarding/OnboardingWizard';
 import { UnreadAlertsToast } from '../components/alerts/UnreadAlertsToast';
+import { acordarServidor } from '../../lib/api/iagroChatApi';
 
 const navigationMain = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -49,6 +50,11 @@ export function RootLayout() {
   const { count: alertCount, alerts: unreadAlerts, uf: alertUf, markAllSeen } = useUnreadAlerts();
   const { show: showOnboarding, dismiss: dismissOnboarding, complete: completeOnboarding } = useOnboardingStatus();
   const toastShownRef = useRef(false);
+
+  // Acorda a API (Render gratuito) logo que o app abre, enquanto a pessoa navega.
+  useEffect(() => {
+    void acordarServidor();
+  }, []);
 
   useEffect(() => {
     if (toastShownRef.current || alertCount === 0) return;

@@ -40,9 +40,9 @@ describe('cadastro de agrônomo ligado à conta e WhatsApp confirmado', () => {
   let app;
   let codigoEnviado;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
-    whatsappVerification._limparTudo();
+    await whatsappVerification._limparTudo();
     delete process.env.CLERK_SECRET_KEY;
     codigoEnviado = null;
     mockSend.mockImplementation(async (numero, texto) => {
@@ -122,8 +122,8 @@ describe('cadastro de agrônomo ligado à conta e WhatsApp confirmado', () => {
 
   test('não deixa usar o e-mail de outra pessoa', async () => {
     // Confirma o número direto pelo serviço.
-    const { codigo } = whatsappVerification.gerarCodigo('user_a', '63999990000');
-    whatsappVerification.confirmarCodigo('user_a', codigo);
+    const { codigo } = await whatsappVerification.gerarCodigo('user_a', '63999990000');
+    await whatsappVerification.confirmarCodigo('user_a', codigo);
 
     mockFindOne
       .mockResolvedValueOnce(null) // perfil do usuário logado

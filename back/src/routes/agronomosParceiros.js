@@ -135,34 +135,44 @@ router.post('/whatsapp/codigo', clerkAuth, codigoLimiter, async (req, res) => {
   if (!whatsappVerification.numeroValido(numero)) {
     return res.status(400).json({ message: 'WhatsApp inválido. Use DDD + número (ex.: 63999999999).' });
   }
-  const gerado = whatsappVerification.gerarCodigo(req.clerkUserId, numero);
-  if (!gerado.ok) {
-    return res.status(429).json({ message: `Aguarde ${gerado.segundos} segundos para pedir outro código.` });
+  try {
+    const gerado = await whatsappVerification.gerarCodigo(req.clerkUserId, numero);
+    if (!gerado.ok) {
+      return res.status(429).json({ message: `Aguarde ${gerado.segundos} segundos para pedir outro código.` });
+    }
+    const envio = await evolutionService.sendMessage(
+      numero,
+      `ClimaAgro: seu código de confirmação é ${gerado.codigo}. Ele vale por 10 minutos. Se não foi você, ignore esta mensagem.`
+    );
+    if (!envio.sent) {
+      await whatsappVerification.cancelarCodigo(req.clerkUserId);
+      return res.status(503).json({
+        message: 'Não foi possível enviar o código pelo WhatsApp agora. Tente novamente mais tarde.',
+      });
+    }
+    return res.json({ success: true, message: 'Código enviado para o seu WhatsApp.' });
+  } catch (error) {
+    console.error('whatsapp/codigo:', error.message);
+    return res.status(500).json({ message: 'Falha ao gerar o código. Tente novamente.' });
   }
-  const envio = await evolutionService.sendMessage(
-    numero,
-    `ClimaAgro: seu código de confirmação é ${gerado.codigo}. Ele vale por 10 minutos. Se não foi você, ignore esta mensagem.`
-  );
-  if (!envio.sent) {
-    whatsappVerification.cancelarCodigo(req.clerkUserId);
-    return res.status(503).json({
-      message: 'Não foi possível enviar o código pelo WhatsApp agora. Tente novamente mais tarde.',
-    });
-  }
-  return res.json({ success: true, message: 'Código enviado para o seu WhatsApp.' });
 });
 
 // POST /api/agronomos-parceiros/whatsapp/confirmar — confere o código digitado
 router.post('/whatsapp/confirmar', clerkAuth, async (req, res) => {
-  const r = whatsappVerification.confirmarCodigo(req.clerkUserId, req.body?.codigo);
-  if (r.ok) return res.json({ success: true, whatsapp: r.numero });
-  const mensagens = {
-    sem_codigo: 'Peça um código primeiro.',
-    expirado: 'O código expirou. Peça um novo.',
-    tentativas: 'Muitas tentativas erradas. Peça um novo código.',
-    invalido: `Código incorreto. Restam ${r.restantes} tentativa${r.restantes === 1 ? '' : 's'}.`,
-  };
-  return res.status(400).json({ message: mensagens[r.motivo] });
+  try {
+    const r = await whatsappVerification.confirmarCodigo(req.clerkUserId, req.body?.codigo);
+    if (r.ok) return res.json({ success: true, whatsapp: r.numero });
+    const mensagens = {
+      sem_codigo: 'Peça um código primeiro.',
+      expirado: 'O código expirou. Peça um novo.',
+      tentativas: 'Muitas tentativas erradas. Peça um novo código.',
+      invalido: `Código incorreto. Restam ${r.restantes} tentativa${r.restantes === 1 ? '' : 's'}.`,
+    };
+    return res.status(400).json({ message: mensagens[r.motivo] });
+  } catch (error) {
+    console.error('whatsapp/confirmar:', error.message);
+    return res.status(500).json({ message: 'Falha ao conferir o código. Tente novamente.' });
+  }
 });
 
 // POST /api/agronomos-parceiros/cadastro — cria ou atualiza o cadastro de quem está logado
@@ -190,7 +200,7 @@ router.post('/cadastro', clerkAuth, async (req, res) => {
     const atual = await DualUserProfile.findOne({ where: { clerkUserId } });
 
     // O WhatsApp precisa ter sido confirmado por código (agora ou em um cadastro anterior).
-    const confirmadoAgora = whatsappVerification.numeroConfirmado(clerkUserId) === whatsapp;
+    const confirmadoAgora = (await whatsappVerification.numeroConfirmado(clerkUserId)) === whatsapp;
     const confirmadoAntes = Boolean(atual?.whatsappVerificadoEm) && onlyDigits(atual?.whatsapp) === whatsapp;
     if (!confirmadoAgora && !confirmadoAntes) {
       return res.status(400).json({ message: 'Confirme o seu WhatsApp com o código antes de salvar.' });
@@ -232,7 +242,7 @@ router.post('/cadastro', clerkAuth, async (req, res) => {
       await atual.update({ ...dados, ...(precisaAnalise ? { parceiroAtivo: false } : {}) });
       created = !atual.parceiro;
     }
-    if (confirmadoAgora) whatsappVerification.consumirConfirmacao(clerkUserId);
+    if (confirmadoAgora) await whatsappVerification.consumirConfirmacao(clerkUserId);
 
     return res.status(created ? 201 : 200).json({
       success: true,
