@@ -1,30 +1,18 @@
 import { type ClipboardEvent, type FormEvent, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { io, type Socket } from 'socket.io-client';
-import { useUser, useAuth } from '@clerk/clerk-react';
+import { useUser } from '@clerk/clerk-react';
 import { Cloud, Sprout, TriangleAlert, TrendingUp } from 'lucide-react';
 import type { ComponentType } from 'react';
 import {
   deleteIAgroThread,
+  getIAgroHistory,
   listIAgroThreads,
   sendIAgroMessage,
   toggleIAgroThreadFavorite,
-  type ConciergeMeta,
+  type IAgroMessage,
   type IAgroThread,
 } from '../api/iagroChatApi';
-import {
-  escalateToSpecialist,
-  getHybridTimeline,
-  patchHybridConversationStatus,
-  resolveSocketBaseUrl,
-  sendProducerToWhatsapp,
-  type HybridConversationDto,
-  type UnifiedChatMessage,
-} from '../api/hybridChatApi';
-import { listarAgronomosParceiros, type AgronomoParceiroApi } from '../api/agronomosParceirosApi';
-import { notifyWhatsappDelivery } from '../whatsappNotify';
-import { useNavigate } from 'react-router';
-import { STORAGE_KEYS, iagroThreadImagesKey } from '../storage/storageKeys';
+import { iagroThreadImagesKey } from '../storage/storageKeys';
 
 export type LocalMediaItem = { url: string; kind: 'image' | 'pdf' };
 
@@ -100,13 +88,10 @@ export function attachmentNamesFromText(raw: string): string[] {
 }
 
 export function useIagroChat() {
-  const navigate = useNavigate();
   const { user } = useUser();
-  const { getToken } = useAuth();
 
   const [threads, setThreads] = useState<IAgroThread[]>([]);
-  const [messages, setMessages] = useState<UnifiedChatMessage[]>([]);
-  const [hybridConversation, setHybridConversation] = useState<HybridConversationDto | null>(null);
+  const [messages, setMessages] = useState<IAgroMessage[]>([]);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [input, setInput] = useState('');
   const [loadingSend, setLoadingSend] = useState(false);
@@ -118,26 +103,12 @@ export function useIagroChat() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [threadToDelete, setThreadToDelete] = useState<IAgroThread | null>(null);
   const [deletingThread, setDeletingThread] = useState(false);
-  const [escalateOpen, setEscalateOpen] = useState(false);
-  const [loadingEscalateList, setLoadingEscalateList] = useState(false);
-  const [agronomosPick, setAgronomosPick] = useState<AgronomoParceiroApi[]>([]);
-  const [escalateAgronomoId, setEscalateAgronomoId] = useState('');
-  const [escalating, setEscalating] = useState(false);
-  const [conciergeSuggestion, setConciergeSuggestion] = useState<ConciergeMeta | null>(null);
-  const [indicatedAgronomo, setIndicatedAgronomo] = useState<AgronomoParceiroApi | null>(null);
-  const [loadingIndicatedAgronomo, setLoadingIndicatedAgronomo] = useState(false);
-  const [encerrarModalOpen, setEncerrarModalOpen] = useState(false);
-  const [encerrando, setEncerrando] = useState(false);
   const [iagroAttachmentModalOpen, setIagroAttachmentModalOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
 
-  const socketRef = useRef<Socket | null>(null);
-  const threadIdRef = useRef<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
 
-  const humanHandoff = Boolean(hybridConversation?.intervencaoHumana && hybridConversation?.atendimentoAtivo);
-  const canUseHumanInput = humanHandoff && hybridConversation?.id && user?.id;
   const canSend = (input.trim().length > 0 || pendingFiles.length > 0) && !loadingSend;
 
   // ─── private helpers ────────────────────────────────────────────────────────
@@ -204,18 +175,15 @@ export function useIagroChat() {
 
   async function openThread(nextThreadId: string) {
     setLoadingHistory(true);
-    if (nextThreadId !== threadId) setConciergeSuggestion(null);
     try {
       if (!user?.id) {
         toast.error('Faça login para abrir o histórico de conversas.');
-        setHybridConversation(null);
         setMessages([]);
         setThreadId(null);
         return;
       }
-      const hybrid = await getHybridTimeline(nextThreadId, user.id);
-      setHybridConversation(hybrid.conversation);
-      const list = hybrid.messages || [];
+      const history = await getIAgroHistory(nextThreadId, user.id);
+      const list = history.messages || [];
       setThreadId(nextThreadId);
       setMessages(list);
       const cachedImages = loadCachedThreadImages(nextThreadId);
@@ -253,8 +221,6 @@ export function useIagroChat() {
       if (threadId === threadToDelete.threadId) {
         setThreadId(null);
         setMessages([]);
-        setHybridConversation(null);
-        setConciergeSuggestion(null);
       }
       setThreadToDelete(null);
       await refreshThreads();
@@ -320,32 +286,6 @@ export function useIagroChat() {
     const messageText = input.trim();
     if (!messageText && pendingFiles.length === 0) return;
 
-    if (canUseHumanInput && pendingFiles.length > 0) {
-      toast.error('No atendimento humano, envie apenas texto. Use o IAgro sem intervenção para anexos.');
-      return;
-    }
-
-    if (canUseHumanInput && messageText) {
-      const optimisticId = `tmp-${Date.now()}`;
-      setMessages((prev) => [
-        ...prev,
-        { id: optimisticId, sender: 'user', kind: 'hybrid', text: messageText, createdAt: new Date().toISOString() },
-      ]);
-      setInput('');
-      setLoadingSend(true);
-      try {
-        const response = await sendProducerToWhatsapp(hybridConversation!.id, messageText, user!.id);
-        setMessages((prev) => prev.map((m) => (m.id === optimisticId ? { ...m, id: response.message.id } : m)));
-        notifyWhatsappDelivery(response.whatsapp);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Falha ao enviar mensagem.');
-        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-      } finally {
-        setLoadingSend(false);
-      }
-      return;
-    }
-
     if (!user?.id) {
       toast.error('Faça login para conversar com o IAgro.');
       return;
@@ -381,7 +321,7 @@ export function useIagroChat() {
     const keepBlobUrls = new Set(localItems.map((x) => x.url));
     setMessages((prev) => [
       ...prev,
-      { id: optimisticId, sender: 'user', kind: 'ia', text: messageText || attachHint, createdAt: new Date().toISOString() },
+      { id: optimisticId, sender: 'user', text: messageText || attachHint, createdAt: new Date().toISOString() },
     ]);
     setInput('');
     pendingPreviews.forEach((url) => { if (!keepBlobUrls.has(url)) URL.revokeObjectURL(url); });
@@ -391,15 +331,11 @@ export function useIagroChat() {
 
     try {
       const response = await sendIAgroMessage({ message: messageText, threadId, files: filesToSend }, user.id);
-      // A indicação de agrônomo continua visível nas mensagens seguintes do mesmo tópico;
-      // só é trocada se a IA indicar de novo (ou limpa ao encaminhar, dispensar ou trocar de tópico).
-      if (response.concierge?.escalate) setConciergeSuggestion(response.concierge);
       setMessages((prev) => [
         ...prev,
         {
           id: `tmp-assistant-${Date.now()}`,
           sender: 'assistant',
-          kind: 'ia',
           text: response.response,
           createdAt: new Date().toISOString(),
         },
@@ -433,138 +369,6 @@ export function useIagroChat() {
     setIagroAttachmentModalOpen(true);
   }
 
-  // ─── escalation ─────────────────────────────────────────────────────────────
-
-  async function openEscalateModal(presetEspecialidade?: string) {
-    if (!user?.id) { toast.error('Faça login para acionar um especialista.'); return; }
-    if (!threadId) { toast.error('Inicie ou abra uma conversa com o IAgro antes.'); return; }
-    setEscalateOpen(true);
-    setAgronomosPick([]);
-    setEscalateAgronomoId('');
-    setLoadingEscalateList(true);
-    try {
-      const hint = presetEspecialidade?.trim() || conciergeSuggestion?.specialtyHint?.trim();
-      let r = await listarAgronomosParceiros(hint ? { especialidade: hint } : undefined);
-      let list = r.agronomos || [];
-      if (list.length === 0 && hint) {
-        r = await listarAgronomosParceiros();
-        list = r.agronomos || [];
-        if (list.length > 0) toast.message('Nenhum parceiro nessa área; mostrando todos os agrônomos ativos.');
-      }
-      setAgronomosPick(list);
-      setEscalateAgronomoId(list[0]?.id != null ? String(list[0].id) : '');
-    } catch {
-      toast.error('Não foi possível carregar agrônomos.');
-      setAgronomosPick([]);
-    } finally {
-      setLoadingEscalateList(false);
-    }
-  }
-
-  async function autoEscalateSpecialist() {
-    if (!user?.id || !threadId) return;
-    const nome = user.fullName || user.firstName || 'Produtor(a)';
-    const filter = conciergeSuggestion?.specialtyHint?.trim() || 'Pragas';
-    setEscalating(true);
-    try {
-      const out = await escalateToSpecialist(
-        {
-          threadId,
-          autoPickBySpecialty: true,
-          specialtyFilter: filter,
-          produtorNome: nome,
-          casoDestaque: conciergeSuggestion?.reason,
-          conciergeReason: conciergeSuggestion?.reason,
-        },
-        user.id,
-      );
-      setConciergeSuggestion(null);
-      notifyWhatsappDelivery(out.whatsapp);
-      toast.success(
-        out.agronomoNome
-          ? `Conversa com ${out.agronomoNome} disponível em Minhas conversas.`
-          : 'Atendimento humano ativado. Abrindo Minhas conversas.',
-      );
-      navigate(`/minhas-conversas?thread=${encodeURIComponent(threadId)}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha no encaminhamento automático.');
-    } finally {
-      setEscalating(false);
-    }
-  }
-
-  async function confirmEscalate() {
-    if (!user?.id || !threadId) return;
-    const sel = agronomosPick.find((a) => String(a.id) === escalateAgronomoId);
-    if (!sel?.whatsapp?.trim()) { toast.error('Selecione um agrônomo com WhatsApp cadastrado.'); return; }
-    const nome = user.fullName || user.firstName || 'Produtor(a)';
-    setEscalating(true);
-    try {
-      const out = await escalateToSpecialist(
-        {
-          threadId,
-          whatsappAgronomo: sel.whatsapp.trim(),
-          agronomoParceiroId: String(sel.id),
-          produtorNome: nome,
-          casoDestaque: conciergeSuggestion?.reason,
-          conciergeReason: conciergeSuggestion?.reason,
-          specialtyFilter: conciergeSuggestion?.specialtyHint,
-        },
-        user.id,
-      );
-      setHybridConversation({
-        id: out.conversationId,
-        intervencaoHumana: out.intervencaoHumana,
-        atendimentoAtivo: out.atendimentoAtivo,
-        whatsappAgronomo: String(sel.whatsapp).replace(/\D/g, ''),
-      });
-      setEscalateOpen(false);
-      setConciergeSuggestion(null);
-      notifyWhatsappDelivery(out.whatsapp);
-      toast.success('Abrindo Minhas conversas para continuar com o especialista.');
-      navigate(`/minhas-conversas?thread=${encodeURIComponent(threadId)}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao preparar envio.');
-    } finally {
-      setEscalating(false);
-    }
-  }
-
-  // ─── close conversation ──────────────────────────────────────────────────────
-
-  async function encerrarSemAvaliacaoIAgro() {
-    if (!user?.id || !hybridConversation?.id) return;
-    setEncerrando(true);
-    try {
-      await patchHybridConversationStatus(hybridConversation.id, false, user.id);
-      setHybridConversation((prev) => (prev ? { ...prev, atendimentoAtivo: false } : null));
-      toast.success('Atendimento encerrado. O agrônomo não roteia mais mensagens para este painel.');
-      setEncerrarModalOpen(false);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao encerrar.');
-    } finally {
-      setEncerrando(false);
-    }
-  }
-
-  async function encerrarComAvaliacaoIAgro(a: { estrelas: number; comentario: string }) {
-    if (!user?.id || !hybridConversation?.id) return;
-    setEncerrando(true);
-    try {
-      await patchHybridConversationStatus(hybridConversation.id, false, user.id, {
-        estrelas: a.estrelas,
-        comentario: a.comentario || undefined,
-      });
-      setHybridConversation((prev) => (prev ? { ...prev, atendimentoAtivo: false } : null));
-      toast.success('Obrigado pela avaliação. A média do especialista na rede foi atualizada.');
-      setEncerrarModalOpen(false);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao encerrar.');
-    } finally {
-      setEncerrando(false);
-    }
-  }
-
   // ─── voice recording ─────────────────────────────────────────────────────────
 
   function toggleRecording() {
@@ -593,77 +397,18 @@ export function useIagroChat() {
 
   useEffect(() => { void refreshThreads(); }, [user?.id]);
 
-  useEffect(() => {
-    if (!conciergeSuggestion?.escalate) { setIndicatedAgronomo(null); return; }
-    const hint = conciergeSuggestion.specialtyHint?.trim();
-    let cancelled = false;
-    setLoadingIndicatedAgronomo(true);
-    void (async () => {
-      try {
-        const r = await listarAgronomosParceiros(hint ? { especialidade: hint } : undefined);
-        if (!cancelled) setIndicatedAgronomo(r.agronomos?.[0] ?? null);
-      } catch {
-        if (!cancelled) setIndicatedAgronomo(null);
-      } finally {
-        if (!cancelled) setLoadingIndicatedAgronomo(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [conciergeSuggestion]);
-
-  useEffect(() => {
-    threadIdRef.current = threadId;
-    if (threadId) {
-      try { sessionStorage.setItem(STORAGE_KEYS.IAGRO_ACTIVE_THREAD_ID, threadId); } catch { /* ignore */ }
-    }
-  }, [threadId]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    let mounted = true;
-    let socket: Socket;
-    const base = resolveSocketBaseUrl();
-    void getToken().then((token) => {
-      if (!mounted) return;
-      socket = io(base, { path: '/socket.io', transports: ['websocket', 'polling'], auth: { token: token || '' } });
-      socketRef.current = socket;
-      socket.on('connect', () => { socket.emit('join:produtor', user.id); });
-      socket.on('hybrid:message', (payload: { threadId?: string; message?: UnifiedChatMessage }) => {
-        if (!payload?.message) return;
-        const active = threadIdRef.current;
-        if (payload.threadId && active && payload.threadId !== active) return;
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === payload.message!.id)) return prev;
-          return [...prev, { ...payload.message!, kind: 'hybrid' }];
-        });
-      });
-    });
-    return () => {
-      mounted = false;
-      socket?.disconnect();
-      socketRef.current = null;
-    };
-  }, [user?.id, getToken]);
-
   return {
     // state
-    threads, messages, hybridConversation, threadId,
+    threads, messages, threadId,
     input, setInput,
     loadingSend, loadingThreads, loadingHistory,
     pendingFiles, pendingPreviews, messageMediaPreviews,
     historyOpen, setHistoryOpen,
     threadToDelete, setThreadToDelete, deletingThread,
-    escalateOpen, setEscalateOpen,
-    loadingEscalateList, agronomosPick,
-    escalateAgronomoId, setEscalateAgronomoId,
-    escalating,
-    conciergeSuggestion, setConciergeSuggestion,
-    indicatedAgronomo, loadingIndicatedAgronomo,
-    encerrarModalOpen, setEncerrarModalOpen, encerrando,
     iagroAttachmentModalOpen, setIagroAttachmentModalOpen,
     isRecording,
     // computed
-    canSend, humanHandoff,
+    canSend,
     // refs
     inputRef,
     // handlers
@@ -677,11 +422,6 @@ export function useIagroChat() {
     handleToggleFavorite,
     handleDeleteThread,
     confirmDeleteThread,
-    openEscalateModal,
-    autoEscalateSpecialist,
-    encerrarSemAvaliacaoIAgro,
-    encerrarComAvaliacaoIAgro,
-    confirmEscalate,
     toggleRecording,
     // user
     user,

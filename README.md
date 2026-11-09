@@ -14,7 +14,6 @@ Plataforma full-stack para monitoramento climático e produtividade agrícola no
 - **Comparativo clima × produtividade** por safra.
 - **Alertas oficiais** do INMET, atualizados automaticamente.
 - **IAgro**: assistente com IA (Google Gemini) que responde com base nos dados da plataforma e analisa fotos.
-- **Agrônomos parceiros**: encaminhamento para especialistas.
 - **Exportação de relatórios** (inclusive gerados por IA).
 
 ## Arquitetura

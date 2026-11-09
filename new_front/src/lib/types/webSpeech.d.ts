@@ -1,5 +1,5 @@
 /**
- * Tipos mínimos da Web Speech API (ditado por voz no IAgro e em Minhas conversas).
+ * Tipos mínimos da Web Speech API (ditado por voz no IAgro).
  * O TypeScript ainda não traz SpeechRecognition na biblioteca DOM padrão.
  */
 

@@ -2,15 +2,11 @@ import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Camera, Cloud, Handshake, Loader2, MessageCircle } from 'lucide-react';
-import { Button } from '../ui/Button';
-import { HybridMediaAttachment } from '../chat/HybridMediaAttachment';
+import { Camera, Cloud, Loader2 } from 'lucide-react';
 import { MessageAttachments } from '../chat/MessageAttachments';
 import { AttachmentNames } from '../chat/AttachmentNames';
 import { ServerAttachments } from '../chat/ServerAttachments';
-import type { UnifiedChatMessage } from '../../../lib/api/hybridChatApi';
-import type { ConciergeMeta } from '../../../lib/api/iagroChatApi';
-import type { AgronomoParceiroApi } from '../../../lib/api/agronomosParceirosApi';
+import type { IAgroMessage } from '../../../lib/api/iagroChatApi';
 import { attachmentNamesFromText, displayUserMessageText, type LocalMediaItem, type QuickAction } from '../../../lib/hooks/useIagroChat';
 
 const MD_COMPONENTS = {
@@ -76,126 +72,32 @@ const MD_COMPONENTS = {
   ),
 };
 
-interface ConciergeCardProps {
-  suggestion: ConciergeMeta;
-  indicatedAgronomo: AgronomoParceiroApi | null;
-  loadingIndicatedAgronomo: boolean;
-  escalating: boolean;
-  onAutoEscalate: () => void;
-  onOpenEscalateModal: (specialty?: string) => void;
-  onDismiss: () => void;
-}
-
-function ConciergeCard({
-  suggestion,
-  indicatedAgronomo,
-  loadingIndicatedAgronomo,
-  escalating,
-  onAutoEscalate,
-  onOpenEscalateModal,
-  onDismiss,
-}: ConciergeCardProps) {
-  return (
-    <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm">
-      <div className="flex items-start gap-2">
-        <Handshake className="h-5 w-5 shrink-0 text-amber-800 dark:text-amber-300 mt-0.5" />
-        <div className="min-w-0 flex-1">
-          <p className="font-medium text-amber-900 dark:text-amber-200">Especialista indicado nesta conversa</p>
-          {loadingIndicatedAgronomo ? (
-            <p className="text-muted-foreground text-xs mt-1 inline-flex items-center gap-2">
-              <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
-              Buscando agrônomo parceiro alinhado ao tema deste chat…
-            </p>
-          ) : indicatedAgronomo ? (
-            <p className="text-foreground text-sm mt-1">
-              Para este caso, indicamos <strong>{indicatedAgronomo.nome}</strong>
-              {indicatedAgronomo.especialidade ? (
-                <span className="text-muted-foreground"> — {indicatedAgronomo.especialidade}</span>
-              ) : null}.
-            </p>
-          ) : (
-            <p className="text-muted-foreground text-xs mt-1">
-              Não há parceiro cadastrado para esta área ainda. Você ainda pode escolher outro agrônomo na lista.
-            </p>
-          )}
-          <p className="text-muted-foreground text-xs mt-2">
-            {suggestion.reason || 'O IAgro entendeu que falar com um agrônomo ajuda neste ponto.'}
-            {suggestion.specialtyHint && (
-              <span className="block mt-1 text-foreground/90">
-                Área: <strong>{suggestion.specialtyHint}</strong>
-              </span>
-            )}
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button type="button" className="text-xs" onClick={onAutoEscalate} loading={escalating}>
-              Encaminhar para {indicatedAgronomo?.nome ?? 'especialista'}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              className="text-xs"
-              onClick={() => onOpenEscalateModal(suggestion.specialtyHint)}
-            >
-              Escolher outro agrônomo
-            </Button>
-            <Button type="button" variant="ghost" className="text-xs" onClick={onDismiss}>
-              Dispensar
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 interface MessageAreaProps {
-  messages: UnifiedChatMessage[];
+  messages: IAgroMessage[];
   loadingHistory: boolean;
   loadingSend: boolean;
-  humanHandoff: boolean;
   messageMediaPreviews: Map<string, LocalMediaItem[]>;
-  conciergeSuggestion: ConciergeMeta | null;
-  indicatedAgronomo: AgronomoParceiroApi | null;
-  loadingIndicatedAgronomo: boolean;
-  escalating: boolean;
   userId: string | undefined;
   quickActions: QuickAction[];
   onApplyQuickPrompt: (prompt: string) => void;
   onApplyPlantAnalysis: () => void;
-  onAutoEscalateSpecialist: () => void;
-  onOpenEscalateModal: (specialty?: string) => void;
-  onDismissConcierge: () => void;
 }
 
 export function MessageArea({
   messages,
   loadingHistory,
   loadingSend,
-  humanHandoff,
   messageMediaPreviews,
-  conciergeSuggestion,
-  indicatedAgronomo,
-  loadingIndicatedAgronomo,
-  escalating,
   userId,
   quickActions,
   onApplyQuickPrompt,
   onApplyPlantAnalysis,
-  onAutoEscalateSpecialist,
-  onOpenEscalateModal,
-  onDismissConcierge,
 }: MessageAreaProps) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loadingSend]);
-
-  useEffect(() => {
-    if (conciergeSuggestion?.escalate) {
-      requestAnimationFrame(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }));
-    }
-  }, [conciergeSuggestion]);
 
   return (
     <div className="h-[calc(100dvh-19rem)] min-h-[300px] sm:h-[60vh] md:h-[68vh] overflow-y-auto rounded-lg border border-border bg-muted/20 p-3 space-y-3">
@@ -282,25 +184,6 @@ export function MessageArea({
                   </ReactMarkdown>
                 </div>
               </div>
-            ) : message.sender === 'agronomo' ? (
-              <div className="flex items-end gap-2 max-w-[78%]">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-green-600">
-                  <MessageCircle className="h-4 w-4 text-white" />
-                </div>
-                <div className="flex min-w-0 max-w-full flex-col gap-2">
-                  {message.hasMidia && userId ? (
-                    <HybridMediaAttachment
-                      messageId={message.id}
-                      mimeType={message.midiaMimeType}
-                      clerkUserId={userId}
-                      align="start"
-                    />
-                  ) : null}
-                  <div className="w-fit max-w-full break-words rounded-lg border border-green-700/35 bg-green-600/10 px-3 py-2 text-sm text-foreground whitespace-pre-wrap">
-                    {message.text}
-                  </div>
-                </div>
-              </div>
             ) : (
               <div className="w-fit max-w-[78%] ml-auto flex flex-col items-end gap-1">
                 {messageMediaPreviews.get(message.id)?.length ? (
@@ -313,13 +196,6 @@ export function MessageArea({
                 ) : (
                   <AttachmentNames names={attachmentNamesFromText(message.text)} />
                 )}
-                {message.hasMidia && userId ? (
-                  <HybridMediaAttachment
-                    messageId={message.id}
-                    mimeType={message.midiaMimeType}
-                    clerkUserId={userId}
-                  />
-                ) : null}
                 {userDisplayText && (
                   <div className="whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm bg-primary text-primary-foreground">
                     {userDisplayText}
@@ -331,21 +207,8 @@ export function MessageArea({
         );
       })}
 
-      {/* Concierge suggestion */}
-      {conciergeSuggestion?.escalate && !loadingHistory && messages.length > 0 && (
-        <ConciergeCard
-          suggestion={conciergeSuggestion}
-          indicatedAgronomo={indicatedAgronomo}
-          loadingIndicatedAgronomo={loadingIndicatedAgronomo}
-          escalating={escalating}
-          onAutoEscalate={onAutoEscalateSpecialist}
-          onOpenEscalateModal={onOpenEscalateModal}
-          onDismiss={onDismissConcierge}
-        />
-      )}
-
       {/* Typing indicators */}
-      {loadingSend && !humanHandoff && (
+      {loadingSend && (
         <div className="flex justify-start">
           <div className="flex items-end gap-2 max-w-[78%]">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary animate-pulse">
@@ -358,15 +221,6 @@ export function MessageArea({
           </div>
         </div>
       )}
-      {loadingSend && humanHandoff && (
-        <div className="flex justify-end">
-          <div className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground inline-flex items-center gap-2">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            Enviando ao especialista...
-          </div>
-        </div>
-      )}
-
       <div ref={messagesEndRef} />
     </div>
   );

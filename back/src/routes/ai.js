@@ -10,7 +10,7 @@ const ChatHistory = require('../models/ChatHistory');
 const { buildIagroDataContext } = require('../services/iagroDataContextService');
 const { clerkAuth } = require('../middleware/clerkAuth');
 const { sequelize } = require('../config/database');
-const { saveBuffer, deleteStoredFile } = require('../services/hybridMediaStorage');
+const { saveBuffer, readStoredFile, deleteStoredFile } = require('../services/iagroMediaStorage');
 
 const MAX_ATTACHMENT_TEXT_CHARS = 12000;
 
@@ -72,100 +72,6 @@ function buildThreadContext(records = []) {
         `Usuário: ${record.message}\nIAgro: ${record.response || 'Sem resposta registrada.'}`
     )
     .join('\n\n');
-}
-
-const CONCIERGE_FOOTER = [
-  '---',
-  'Ao final da sua resposta ao produtor, acrescente OBRIGATORIAMENTE uma linha adicional, sozinha, exatamente neste formato (JSON minificado, sem crases ou markdown):',
-  '[META]{"escalate":false,"reason":"","specialtyHint":""}',
-  'Regras para "escalate": true (somente se aplicável):',
-  '(A) Nesta mensagem o produtor enviou imagem ou PDF E há incerteza relevante, risco à lavoura, necessidade de laudo CREA/receituário/ofício, ou confirmação em laboratório ou visita; OU',
-  '(B) Nesta mensagem o produtor pediu explicitamente falar com agrônomo, especialista, visita técnica ou atendimento humano.',
-  'Para conversa apenas em texto, sem anexo nesta mensagem e sem pedido explícito de humano, use em geral "escalate": false (orientações gerais e monitoramento não disparam triagem).',
-  'Em "reason" resuma em uma frase o motivo. Em "specialtyHint" indique a área (ex.: "Pragas", "Fitossanidade", "Solos", "Irrigação").',
-  'Exemplo: [META]{"escalate":true,"reason":"Imagem ambígua; possível ferrugem asiática.","specialtyHint":"Fitossanidade"}',
-].join('\n');
-
-function normalizeConcierge(parsed) {
-  return {
-    escalate: Boolean(parsed && parsed.escalate),
-    reason: String((parsed && parsed.reason) || '').slice(0, 800),
-    specialtyHint: String((parsed && parsed.specialtyHint) || '').slice(0, 160),
-  };
-}
-
-/**
- * Remove a linha [META]{...} do final e devolve metadados para triagem humana.
- */
-function splitConciergeMeta(raw) {
-  const empty = { escalate: false, reason: '', specialtyHint: '' };
-  if (!raw || typeof raw !== 'string') {
-    return { displayText: '', concierge: empty };
-  }
-  const trimmed = raw.trimEnd();
-  const lineRe = /\n\[META\](\{[\s\S]*\})\s*$/;
-  const m1 = trimmed.match(lineRe);
-  if (m1) {
-    try {
-      const parsed = JSON.parse(m1[1]);
-      const displayText = trimmed.slice(0, m1.index).trimEnd();
-      return { displayText, concierge: normalizeConcierge(parsed) };
-    } catch {
-      return { displayText: trimmed, concierge: empty };
-    }
-  }
-  const lines = trimmed.split('\n');
-  const last = lines[lines.length - 1];
-  if (last && last.trim().startsWith('[META]')) {
-    try {
-      const jsonStr = last.replace(/^\[META\]/, '').trim();
-      const parsed = JSON.parse(jsonStr);
-      const displayText = lines.slice(0, -1).join('\n').trimEnd();
-      return { displayText, concierge: normalizeConcierge(parsed) };
-    } catch {
-      return { displayText: trimmed, concierge: empty };
-    }
-  }
-  return { displayText: trimmed, concierge: empty };
-}
-
-/** Produtor pediu encaminhamento humano explícito no texto desta mensagem (sem depender do modelo). */
-function userRequestsHumanHelp(message) {
-  const m = String(message || '').toLowerCase();
-  if (!m.trim()) return false;
-  const patterns = [
-    /\bagr[oô]nomo\b/,
-    /\bespecialista\b/,
-    /\batendimento\s+humano\b/,
-    /\batendimento\s+presencial\b/,
-    /\bvisita\s+t[eé]cnica\b/,
-    /\bpreciso\s+de\s+(um\s+)?(agr[oô]nomo|especialista|t[eé]cnico)\b/,
-    /\bquero\s+(falar|conversar)\s+com\s+(um\s+)?(agr[oô]nomo|especialista|t[eé]cnico)\b/,
-    /\bfalar\s+com\s+(um\s+)?(agr[oô]nomo|especialista|t[eé]cnico)\b/,
-    /\bencaminhar\s+(para\s+)?(um\s+)?(agr[oô]nomo|especialista)\b/,
-    /\bcontato\s+(do|com)\s+(o\s+)?(agr[oô]nomo|especialista)\b/,
-    /\bpreciso\s+falar\s+com\b/,
-    /\bwhatsapp\s+(do\s+)?(agr[oô]nomo|especialista)\b/,
-    /\blaudo\s+crea\b/,
-    /\breceitu[aá]rio\b.*\b(agr[oô]nomo|defensivo)\b/,
-  ];
-  return patterns.some((re) => re.test(m));
-}
-
-/**
- * Triagem humana na UI só quando há anexo nesta mensagem OU pedido explícito de especialista.
- * Evita cartão de parceiro e nomes em todo turno de chat só texto.
- */
-function gateConciergeEscalation(concierge, { hasAttachments, explicitHuman }) {
-  const empty = { escalate: false, reason: '', specialtyHint: '' };
-  if (hasAttachments || explicitHuman) {
-    return {
-      escalate: Boolean(concierge && concierge.escalate),
-      reason: String((concierge && concierge.reason) || '').slice(0, 800),
-      specialtyHint: String((concierge && concierge.specialtyHint) || '').slice(0, 160),
-    };
-  }
-  return empty;
 }
 
 function extractGeminiText(responseData) {
@@ -372,9 +278,8 @@ router.post(
         orderedContext.length === 0
           ? 'Esta é a primeira mensagem da conversa: você pode começar com uma saudação curta.'
           : 'Esta conversa já está em andamento: NÃO comece com saudação (como "Olá", "Olá, produtor" ou "Oi"); vá direto à resposta.',
-        'No texto principal da resposta, NÃO invente nem cite nomes de pessoas, agrônomos ou empresas parceiras. O aplicativo encaminha a parceiros cadastrados quando for o caso — use apenas a linha [META] para sinalizar necessidade de humano, sem nomes próprios.',
-        'Quando perceber que o caso foge do que pode ser resolvido com segurança apenas por chat (incerteza, laudo formal, receituário agronômico, urgência fitossanitária), reconheça o limite — isso será sinalizado ao sistema na linha [META] final, conforme as regras do rodapé.',
-        CONCIERGE_FOOTER,
+        'Não invente nem cite nomes de pessoas, agrônomos ou empresas.',
+        'Quando o caso fugir do que pode ser resolvido com segurança apenas por chat (incerteza, laudo formal, receita agronômica, urgência fitossanitária), reconheça o limite e oriente o produtor a procurar um agrônomo ou técnico habilitado da sua região.',
       ].join('\n');
 
       const prompt = [
@@ -496,8 +401,6 @@ router.post(
           '5. **Monitoramento**: o que observar nas próximas semanas.',
           '',
           '**Observação**: Se a qualidade da imagem não permitir diagnóstico preciso de algum item, informe claramente e oriente o produtor a enviar fotos mais próximas, em boa iluminação, de folhas afetadas e saudáveis para comparação.',
-          '',
-          CONCIERGE_FOOTER,
         ].join('\n'));
       }
 
@@ -510,17 +413,10 @@ router.post(
         return res.status(502).json({ message: 'Resposta vazia do modelo.' });
       }
 
-      const { displayText, concierge } = splitConciergeMeta(responseText);
-      if (!displayText.trim()) {
-        return res.status(502).json({ message: 'Resposta inválida do modelo após triagem.' });
+      const displayText = String(responseText).trim();
+      if (!displayText) {
+        return res.status(502).json({ message: 'Resposta inválida do modelo.' });
       }
-
-      const hasAttachments = files.length > 0;
-      const explicitHuman = userRequestsHumanHelp(message);
-      const conciergeOut = gateConciergeEscalation(concierge, {
-        hasAttachments,
-        explicitHuman,
-      });
 
       const fileNames = files.map((file) => file.originalname).filter(Boolean);
       const persistedMessage =
@@ -544,7 +440,6 @@ router.post(
       return res.json({
         threadId,
         response: displayText,
-        concierge: conciergeOut,
       });
     } catch (error) {
       if (error.statusCode === 403) {
@@ -555,6 +450,44 @@ router.post(
     }
   }
 );
+
+/**
+ * GET /api/ai/chat/media/:chatId/:index
+ * Imagem/PDF enviado ao IAgro — apenas o dono da mensagem.
+ */
+router.get('/chat/media/:chatId/:index', aiReportLimiter, async (req, res) => {
+  const clerkUserId = clerkUserIdFromReq(req);
+  if (!clerkUserId) {
+    return res.status(401).json({ message: 'Faça login para ver o anexo.' });
+  }
+  const index = Number.parseInt(String(req.params.index), 10);
+  try {
+    const row = await ChatHistory.findOne({
+      where: { id: String(req.params.chatId), clerkUserId, isActive: true },
+      attributes: ['id', 'attachments'],
+    });
+    const anexo = row && Array.isArray(row.attachments) ? row.attachments[index] : null;
+    if (!anexo?.key) {
+      return res.status(404).json({ message: 'Anexo não encontrado.' });
+    }
+    let buf;
+    try {
+      buf = await readStoredFile(anexo.key);
+    } catch (err) {
+      if (err.code === 'ENOENT') return res.status(404).json({ message: 'Este anexo não está mais disponível.' });
+      throw err;
+    }
+    res.setHeader('Content-Type', anexo.mime || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    return res.send(buf);
+  } catch (e) {
+    if (e?.name === 'SequelizeDatabaseError') {
+      return res.status(404).json({ message: 'Anexo não encontrado.' });
+    }
+    console.error('Erro ao ler anexo do IAgro:', e.message);
+    return res.status(500).json({ message: 'Falha ao ler anexo.' });
+  }
+});
 
 router.get('/chat/threads', aiReportLimiter, async (req, res) => {
   try {
@@ -630,6 +563,12 @@ router.get('/chat/history', aiReportLimiter, async (req, res) => {
           sender: 'user',
           text: row.message,
           createdAt: row.createdAt,
+          attachments: (Array.isArray(row.attachments) ? row.attachments : []).map((a, index) => ({
+            chatId: row.id,
+            index,
+            name: a.name || null,
+            mimeType: a.mime || null,
+          })),
         },
         {
           id: `${row.id}-assistant`,

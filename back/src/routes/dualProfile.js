@@ -2,6 +2,7 @@ const express = require('express');
 const { models } = require('../config/database');
 const { Op } = require('sequelize');
 const { normalizeUf } = require('../utils/brazilUfs');
+const { deleteStoredFile } = require('../services/iagroMediaStorage');
 
 const router = express.Router();
 
@@ -129,7 +130,7 @@ router.put('/me', async (req, res) => {
 
 /**
  * DELETE /api/dual-profile/me — exclui todos os dados do usuário (LGPD art. 18, VI — direito ao esquecimento).
- * Remove: DualUserProfile, ChatHistory, HybridConversation.
+ * Remove: DualUserProfile, ChatHistory e os anexos enviados ao IAgro.
  */
 router.delete('/me', async (req, res) => {
   try {
@@ -143,10 +144,13 @@ router.delete('/me', async (req, res) => {
       return res.status(404).json({ message: 'Perfil não encontrado.' });
     }
 
-    await Promise.all([
-      models.ChatHistory.destroy({ where: { clerkUserId } }),
-      models.HybridConversation.destroy({ where: { produtorClerkId: clerkUserId } }),
-    ]);
+    const comAnexos = await models.ChatHistory.findAll({
+      where: { clerkUserId, attachments: { [Op.ne]: null } },
+      attributes: ['attachments'],
+    });
+    await models.ChatHistory.destroy({ where: { clerkUserId } });
+    const chaves = comAnexos.flatMap((r) => (Array.isArray(r.attachments) ? r.attachments : []).map((a) => a.key));
+    await Promise.all(chaves.map((k) => deleteStoredFile(k)));
     await profile.destroy();
 
     return res.json({

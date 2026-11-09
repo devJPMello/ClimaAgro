@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
 import { Card, CardBody, CardHeader, CardTitle } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { Badge } from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Modal } from '../components/ui/Modal';
 import {
   AlertTriangle, MapPin,
-  ChevronLeft, ChevronRight, Eye, Handshake, Search, X,
+  ChevronLeft, ChevronRight, Eye, Search, X,
 } from 'lucide-react';
 import { AsyncStateView } from '../components/ui/AsyncStateView';
 import { AlertasSkeleton } from '../components/ui/PageSkeletons';
@@ -90,21 +88,7 @@ function formatUpdatedAt(iso: string): string {
   }
 }
 
-function tipoToEspecialidade(tipo: string): string {
-  const t = tipo.toLowerCase();
-  if (t.includes('chuva') || t.includes('umidade') || t.includes('inundação') || t.includes('irrigação'))
-    return 'Irrigação e Recursos Hídricos';
-  if (t.includes('granizo') || t.includes('praga') || t.includes('doença'))
-    return 'Fitossanidade';
-  if (t.includes('geada') || t.includes('frio') || t.includes('temperatura') || t.includes('soja') || t.includes('milho'))
-    return 'Soja e Milho';
-  if (t.includes('solo') || t.includes('nutrição') || t.includes('fertili'))
-    return 'Solos e Nutrição de Plantas';
-  return '';
-}
-
 export function Alertas() {
-  const navigate = useNavigate();
   const [severidadeFiltro, setSeveridadeFiltro] = usePersistedState(STORAGE_KEYS.ALERTAS_SEVERIDADE, 'todos');
   const [tipoFiltro, setTipoFiltro] = usePersistedState(STORAGE_KEYS.ALERTAS_TIPO, 'todos');
   const [ufFiltro, setUfFiltro] = usePersistedState(STORAGE_KEYS.ALERTAS_UF, 'ALL');
@@ -352,8 +336,6 @@ export function Alertas() {
                     <ul className="md:hidden divide-y divide-border/60">
                       {paginados.map((alerta) => {
                         const fonte = fonteLabel(alerta.fonte);
-                        const podeFalarComEspecialista =
-                          alerta.severidade === 'critical' || alerta.severidade === 'high';
                         return (
                           <li key={alerta.id} className={`border-l-[3px] ${SEVERITY_ROW_ACCENT[alerta.severidade]}`}>
                             <button
@@ -385,21 +367,6 @@ export function Alertas() {
                                 </span>
                               </div>
                             </button>
-                            {podeFalarComEspecialista && (
-                              <div className="px-4 pb-4 -mt-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const esp = tipoToEspecialidade(alerta.tipo);
-                                    void navigate(esp ? `/parceiros?especialidade=${encodeURIComponent(esp)}` : '/parceiros');
-                                  }}
-                                  className="inline-flex items-center gap-1.5 text-xs text-primary"
-                                >
-                                  <Handshake className="w-4 h-4" />
-                                  Falar com especialista
-                                </button>
-                              </div>
-                            )}
                           </li>
                         );
                       })}
@@ -473,19 +440,6 @@ export function Alertas() {
                                 </td>
                                 <td className="px-4 py-5">
                                   <div className="flex items-center gap-1.5">
-                                    {(alerta.severidade === 'critical' || alerta.severidade === 'high') && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const esp = tipoToEspecialidade(alerta.tipo);
-                                          void navigate(esp ? `/parceiros?especialidade=${encodeURIComponent(esp)}` : '/parceiros');
-                                        }}
-                                        className="p-1.5 rounded-lg hover:bg-primary/10 border border-transparent hover:border-primary/30 transition-all text-primary/70 hover:text-primary"
-                                        title="Falar com especialista"
-                                      >
-                                        <Handshake className="w-4 h-4" />
-                                      </button>
-                                    )}
                                     <button
                                       type="button"
                                       onClick={() => setSelectedAlerta(alerta)}
@@ -597,24 +551,6 @@ export function Alertas() {
         onClose={() => setSelectedAlerta(null)}
         title={selectedAlerta?.tipo ?? 'Detalhe do Alerta'}
         size="xl"
-        footer={
-          selectedAlerta &&
-          (selectedAlerta.severidade === 'critical' || selectedAlerta.severidade === 'high') ? (
-            <>
-              <Button variant="ghost" onClick={() => setSelectedAlerta(null)}>Fechar</Button>
-              <Button
-                onClick={() => {
-                  const esp = tipoToEspecialidade(selectedAlerta.tipo);
-                  void navigate(esp ? `/parceiros?especialidade=${encodeURIComponent(esp)}` : '/parceiros');
-                  setSelectedAlerta(null);
-                }}
-              >
-                <Handshake className="w-4 h-4" />
-                Falar com especialista
-              </Button>
-            </>
-          ) : undefined
-        }
       >
         {selectedAlerta && (
             <div className="space-y-4">

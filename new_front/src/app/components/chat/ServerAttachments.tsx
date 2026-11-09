@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { fetchIaAttachmentBlob, type IaAttachmentDto } from '../../../lib/api/hybridChatApi';
+import { fetchIaAttachmentBlob, type IaAttachmentDto } from '../../../lib/api/iagroChatApi';
 import { AttachmentNames } from './AttachmentNames';
 import { MessageAttachments, type AttachmentItem } from './MessageAttachments';
 

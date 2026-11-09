@@ -7,7 +7,6 @@ interface ChatInputProps {
   setInput: (value: string) => void;
   loadingSend: boolean;
   canSend: boolean;
-  humanHandoff: boolean;
   isRecording: boolean;
   pendingFiles: File[];
   pendingPreviews: Map<File, string>;
@@ -24,7 +23,6 @@ export function ChatInput({
   setInput,
   loadingSend,
   canSend,
-  humanHandoff,
   isRecording,
   pendingFiles,
   pendingPreviews,
@@ -82,11 +80,7 @@ export function ChatInput({
                 if (canSend) onSubmit(e as unknown as FormEvent<HTMLFormElement>);
               }
             }}
-            placeholder={
-              humanHandoff
-                ? 'Sua mensagem será enviada ao WhatsApp do agrônomo...'
-                : 'Pergunte ao IAgro...'
-            }
+            placeholder="Pergunte ao IAgro..."
             rows={1}
             className={[
               'w-full h-14 resize-none overflow-hidden rounded-2xl border bg-input-background',
@@ -95,25 +89,15 @@ export function ChatInput({
             ].join(' ')}
           />
 
-          {humanHandoff ? (
-            <span
-              className="absolute left-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full cursor-not-allowed opacity-40 text-muted-foreground"
-              title="Com especialista ativo, envie apenas texto aqui; use anexos em Minhas conversas ou sem intervenção humana."
-              aria-label="Anexos indisponíveis com especialista ativo"
-            >
-              <Paperclip className="w-4 h-4" aria-hidden />
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={onOpenAttachmentModal}
-              title="Anexar ficheiros ao IAgro"
-              className="absolute left-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Abrir anexos para o IAgro"
-            >
-              <Paperclip className="w-4 h-4" aria-hidden />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onOpenAttachmentModal}
+            title="Anexar ficheiros ao IAgro"
+            className="absolute left-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="Abrir anexos para o IAgro"
+          >
+            <Paperclip className="w-4 h-4" aria-hidden />
+          </button>
 
           <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
             <button

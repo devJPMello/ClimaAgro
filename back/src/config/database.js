@@ -42,34 +42,7 @@ const sequelize = new Sequelize(dbUrl, {
 // Disponibilizar `sequelize` antes de `require` dos modelos (evita circular: database → User → database com exports ainda vazio).
 module.exports.sequelize = sequelize;
 
-async function ensureExternalMessageIdColumn() {
-  const qi = sequelize.getQueryInterface();
-  const tableDesc = await qi.describeTable('hybrid_messages').catch(() => null);
-  if (!tableDesc) {
-    console.log('ℹ️  Tabela hybrid_messages ainda não existe — será criada pelo sync.');
-    return;
-  }
-  if (tableDesc.external_message_id) {
-    return; // coluna já existe
-  }
-  console.log('⚙️  Criando coluna external_message_id em hybrid_messages...');
-  const { DataTypes } = require('sequelize');
-  await qi.addColumn('hybrid_messages', 'external_message_id', {
-    type: DataTypes.STRING(255),
-    allowNull: true,
-    unique: true,
-  });
-  console.log('✅ Coluna external_message_id criada com sucesso.');
-}
-
-/** Migração: coluna com a data em que o agrônomo confirmou o WhatsApp por código. */
-async function ensureWhatsappVerificadoColumn() {
-  await sequelize.query(
-    'ALTER TABLE IF EXISTS dual_user_profiles ADD COLUMN IF NOT EXISTS whatsapp_verificado_em TIMESTAMPTZ;'
-  );
-}
-
-/** Migração: tabela com os ficheiros do chat com o agrônomo (o disco do Render é apagado a cada reinício). */
+/** Migração: tabela com os anexos do IAgro (o disco do Render é apagado a cada reinício). */
 async function ensureHybridMediaTable() {
   await sequelize.query(`
     CREATE TABLE IF NOT EXISTS hybrid_media_files (
@@ -86,23 +59,9 @@ async function ensureChatAttachmentsColumn() {
   await sequelize.query('ALTER TABLE IF EXISTS chat_history ADD COLUMN IF NOT EXISTS attachments JSONB;');
 }
 
-/** Migração: códigos de confirmação do WhatsApp (sobrevivem ao servidor dormir/reiniciar). */
-async function ensureWhatsappVerificacoesTable() {
-  await sequelize.query(`
-    CREATE TABLE IF NOT EXISTS whatsapp_verificacoes (
-      user_id VARCHAR(128) NOT NULL,
-      tipo VARCHAR(16) NOT NULL,
-      dados JSONB NOT NULL,
-      expira_em TIMESTAMPTZ NOT NULL,
-      PRIMARY KEY (user_id, tipo)
-    );
-  `);
-}
-
 async function ensureIndexes() {
   const indexDefs = [
     { name: 'idx_climate_data_uf_date', table: 'climate_data', cols: '(uf, date)' },
-    { name: 'idx_hybrid_messages_conversation_id', table: 'hybrid_messages', cols: '(conversation_id)' },
   ];
   for (const { name, table, cols } of indexDefs) {
     try {
@@ -139,12 +98,9 @@ const connectDB = async () => {
       console.log('✅ Modelos sincronizados');
     }
 
-    // Migração: garante coluna external_message_id em hybrid_messages (todos os ambientes)
-    await ensureExternalMessageIdColumn();
-    await ensureWhatsappVerificadoColumn();
+    // Migrações leves (todos os ambientes)
     await ensureHybridMediaTable();
     await ensureChatAttachmentsColumn();
-    await ensureWhatsappVerificacoesTable();
 
     // Garante índices críticos (CREATE INDEX IF NOT EXISTS — não bloqueia se já existirem)
     await ensureIndexes();
@@ -246,8 +202,6 @@ const ReportExport = require('../models/ReportExport');
 const IbgeSidra1612Row = require('../models/IbgeSidra1612Row');
 const ChatHistory = require('../models/ChatHistory');
 const DualUserProfile = require('../models/DualUserProfile');
-const HybridConversation = require('../models/HybridConversation');
-const HybridMessage = require('../models/HybridMessage');
 
 // Configurar associações entre modelos
 const setupAssociations = () => {
@@ -263,9 +217,6 @@ const setupAssociations = () => {
   ClimateData.belongsTo(GeoData, { foreignKey: 'geoDataId', as: 'geoData' });
 
   // Report/Alert em models/ ainda são esquemas Mongoose legados — não associar aqui ao Sequelize.
-
-  HybridConversation.hasMany(HybridMessage, { foreignKey: 'conversationId', as: 'messages' });
-  HybridMessage.belongsTo(HybridConversation, { foreignKey: 'conversationId', as: 'conversation' });
 
 };
 
@@ -286,8 +237,6 @@ module.exports = {
     ReportExport,
     IbgeSidra1612Row,
     ChatHistory,
-    DualUserProfile,
-    HybridConversation,
-    HybridMessage
+    DualUserProfile
   }
 };

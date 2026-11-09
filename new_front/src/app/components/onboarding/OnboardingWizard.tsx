@@ -197,14 +197,14 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
               </p>
               <p>
                 <strong>Dados coletados:</strong> nome, e-mail, telefone, UF e município,
-                histórico de conversas com o IAgro e preferências de notificação. Para
-                agrônomos parceiros, também são coletados CPF e registro CREA para fins
-                de verificação profissional.
+                histórico de conversas com o IAgro (incluindo imagens e documentos enviados)
+                e preferências de notificação.
               </p>
               <p>
                 <strong>Compartilhamento:</strong> seus dados não são vendidos nem
-                compartilhados com terceiros. Agrônomos parceiros recebem somente o resumo
-                do caso quando você solicita atendimento humano.
+                compartilhados com terceiros. As mensagens enviadas ao IAgro são
+                processadas pelo serviço de inteligência artificial Google Gemini para
+                gerar as respostas.
               </p>
               <p>
                 <strong>Retenção:</strong> histórico de chat e relatórios são mantidos por

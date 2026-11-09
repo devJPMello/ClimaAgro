@@ -13,9 +13,6 @@ import {
   Menu,
   X,
   Bot,
-  Handshake,
-  MessagesSquare,
-  ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useClerk, useUser } from '@clerk/clerk-react';
@@ -32,13 +29,10 @@ const navigationMain = [
   { name: 'Séries Temporais', path: '/series-temporais', icon: LineChart },
   { name: 'Alertas', path: '/alertas', icon: Bell },
   { name: 'IAgro', path: '/iagro', icon: Bot },
-  { name: 'Agrônomos Parceiros', path: '/parceiros', icon: Handshake },
-  { name: 'Minhas conversas', path: '/minhas-conversas', icon: MessagesSquare },
   { name: 'Exportar Relatório', path: '/exportar', icon: FileText },
 ];
 
 const perfilNavItem = { name: 'Perfil', path: '/perfil', icon: User };
-const adminNavItem = { name: 'Admin — Agrônomos', path: '/admin/agronomos', icon: ShieldCheck };
 
 const navigation = [...navigationMain, perfilNavItem];
 
@@ -85,12 +79,7 @@ export function RootLayout() {
   const userName = user?.fullName || user?.firstName || 'Usuário';
   const userEmail = user?.primaryEmailAddress?.emailAddress || 'sem-email@conta.com';
 
-  const adminIds = (import.meta.env.VITE_ADMIN_USER_IDS as string | undefined ?? '')
-    .split(',')
-    .map((s: string) => s.trim())
-    .filter(Boolean);
-  const isAdmin = adminIds.length > 0 && !!user?.id && adminIds.includes(user.id);
-  const navItems = isAdmin ? [...navigation, adminNavItem] : navigation;
+  const navItems = navigation;
 
   const handleLogout = async () => {
     setUserMenuOpen(false);

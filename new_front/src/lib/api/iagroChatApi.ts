@@ -1,11 +1,20 @@
 import { httpClient } from './httpClient';
 import { getCachedClerkToken } from './authTokenStore';
 
+/** Imagem/PDF enviado ao IAgro e guardado no servidor. */
+export type IaAttachmentDto = {
+  chatId: string;
+  index: number;
+  name: string | null;
+  mimeType: string | null;
+};
+
 export type IAgroMessage = {
   id: string;
   sender: 'user' | 'assistant';
   text: string;
   createdAt: string;
+  attachments?: IaAttachmentDto[];
 };
 
 export type IAgroThread = {
@@ -21,13 +30,6 @@ export type IAgroSearchResult = {
   title: string;
   snippet: string;
   lastMessageAt: string;
-};
-
-/** Triagem IA → humano (linha [META] parseada no backend). */
-export type ConciergeMeta = {
-  escalate: boolean;
-  reason?: string;
-  specialtyHint?: string;
 };
 
 function normalizeApiBaseUrl(raw: string): string {
@@ -83,7 +85,7 @@ export async function sendIAgroMessage(
   await acordarServidor();
   const files = payload.files ?? [];
   if (files.length === 0) {
-    return httpClient.post<{ threadId: string; response: string; concierge?: ConciergeMeta }>(
+    return httpClient.post<{ threadId: string; response: string }>(
       'ai/chat/messages',
       {
         message: payload.message,
@@ -112,7 +114,7 @@ export async function sendIAgroMessage(
     throw new Error(message);
   }
 
-  return (await response.json()) as { threadId: string; response: string; concierge?: ConciergeMeta };
+  return (await response.json()) as { threadId: string; response: string };
 }
 
 export async function listIAgroThreads(clerkUserId: string) {
@@ -164,4 +166,16 @@ export async function deleteIAgroThread(threadId: string, clerkUserId: string) {
     throw new Error(maybeJson?.message || 'Falha ao excluir conversa.');
   }
   return (await response.json()) as { success: boolean; threadId: string };
+}
+
+/** Baixa um anexo (imagem/PDF) enviado ao IAgro; só o dono da conversa consegue. */
+export async function fetchIaAttachmentBlob(
+  chatId: string,
+  index: number,
+  clerkUserId: string
+): Promise<Blob | null> {
+  const url = `${getApiBase()}/ai/chat/media/${encodeURIComponent(chatId)}/${index}`;
+  const response = await fetch(url, { headers: clerkHeaders(clerkUserId) });
+  if (!response.ok) return null;
+  return await response.blob();
 }

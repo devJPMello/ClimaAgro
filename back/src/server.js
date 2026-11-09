@@ -7,7 +7,6 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { Server } = require('socket.io');
 const { connectDB, sequelize, models } = require('./config/database');
 const { startClimateAutoSyncScheduler } = require('./services/climateSyncScheduler');
 const logger = require('./lib/logger');
@@ -100,8 +99,6 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Export-Client-Id', 'X-Clerk-User-Id']
   })
 );
-// Webhook Evolution API WhatsApp (application/json — parser específico na rota)
-app.use('/webhook/evolution', require('./routes/whatsappWebhook'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -116,7 +113,6 @@ app.use(
 );
 app.use(
   ['/api/auth', '/api/users', '/api/dual-profile',
-   '/api/hybrid-chat', '/api/agronomos-parceiros',
    '/api/admin'],
   userLimiter
 );
@@ -159,9 +155,6 @@ app.use('/api/climate', require('./routes/climate'));
 app.use('/api/clima', require('./routes/climate'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/dual-profile', require('./routes/dualProfile'));
-app.use('/api/hybrid-chat', require('./routes/hybridChat'));
-app.use('/api/agronomos-parceiros', require('./routes/agronomosParceiros'));
-app.use('/api/admin/agronomos', require('./routes/adminAgronomos'));
 app.use('/api/superset', require('./routes/superset'));
 app.use('/api/inmet-adapter', require('./routes/inmetAdapter'));
 
@@ -209,67 +202,12 @@ app.use('*', (req, res) => {
 const PORT = process.env.PORT || 5000;
 
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin(origin, callback) {
-      const allowed = parseFrontendOrigins();
-      if (!origin) return callback(null, true);
-      if (allowed.includes(origin)) return callback(null, true);
-      return callback(null, false);
-    },
-    credentials: true,
-    methods: ['GET', 'POST'],
-  },
-});
-app.set('io', io);
-
-io.use(async (socket, next) => {
-  const token = socket.handshake.auth?.token;
-  if (token && process.env.CLERK_SECRET_KEY) {
-    try {
-      const { verifyToken } = require('@clerk/backend');
-      const payload = await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY });
-      socket.data.clerkUserId = payload.sub;
-    } catch {
-      // Token present but invalid — reject connection
-      return next(new Error('Token inválido'));
-    }
-  }
-  next();
-});
-
-io.on('connection', (socket) => {
-  socket.on('join:produtor', (clerkId) => {
-    // Use verified identity from token; fall back to client claim only in dev
-    const effectiveId = socket.data.clerkUserId || (typeof clerkId === 'string' && clerkId.length > 4 ? clerkId : null);
-    if (effectiveId) {
-      socket.join(`produtor:${effectiveId}`);
-    }
-  });
-});
 
 server.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📊 API: http://localhost:${PORT}/api  ·  health: http://localhost:${PORT}/api/health`);
-  console.log(`💬 WebSocket: /socket.io  ·  Webhook Evolution API: POST http://localhost:${PORT}/webhook/evolution`);
-
-  const publicBase = String(process.env.PUBLIC_API_BASE_URL || '').trim().replace(/\/+$/, '');
-  if (publicBase) {
-    console.log(`📲 Evolution API — configure o webhook na instância (evento MESSAGES_UPSERT):`);
-    console.log(`   POST ${publicBase}/webhook/evolution`);
-  } else {
-    console.log(`📲 Evolution API webhook: defina PUBLIC_API_BASE_URL no .env para ver a URL pública do webhook.`);
-  }
-
-  const evolutionOk = process.env.EVOLUTION_API_URL && process.env.EVOLUTION_API_KEY;
-  if (evolutionOk) {
-    console.log(`✉️  Evolution API: envio de WhatsApp habilitado (instância: ${process.env.EVOLUTION_INSTANCE_NAME || 'climaagro'}).`);
-  } else {
-    console.log(`⚠️  Evolution API: envio desabilitado — defina EVOLUTION_API_URL, EVOLUTION_API_KEY e EVOLUTION_INSTANCE_NAME no .env`);
-  }
-
   startClimateAutoSyncScheduler({ sequelize, models });
 });
 
-module.exports = { app, server, io };
+module.exports = { app, server };

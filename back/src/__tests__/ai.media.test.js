@@ -4,15 +4,13 @@ const express = require('express');
 const mockChatHistoryFindOne = jest.fn();
 const mockReadStoredFile = jest.fn();
 
+jest.mock('../config/database', () => ({ sequelize: {}, models: {} }));
 jest.mock('../models/ChatHistory', () => ({
   findOne: (...args) => mockChatHistoryFindOne(...args),
   findAll: jest.fn(),
 }));
-jest.mock('../models/HybridConversation', () => ({}));
-jest.mock('../models/HybridMessage', () => ({}));
-jest.mock('../models/DualUserProfile', () => ({}));
-jest.mock('../services/evolutionService', () => ({}));
-jest.mock('../services/hybridMediaStorage', () => ({
+jest.mock('../services/iagroDataContextService', () => ({ buildIagroDataContext: jest.fn() }));
+jest.mock('../services/iagroMediaStorage', () => ({
   readStoredFile: (...args) => mockReadStoredFile(...args),
   saveBuffer: jest.fn(),
   deleteStoredFile: jest.fn(),
@@ -29,11 +27,11 @@ jest.mock('../middleware/clerkAuth', () => ({
 const DONO = 'user_dono';
 const CHAT_ID = '6f1c2b1e-0000-4000-8000-000000000001';
 
-describe('GET /api/hybrid-chat/ia-media/:chatId/:index (anexos do IAgro)', () => {
+describe('GET /api/ai/chat/media/:chatId/:index (anexos do IAgro)', () => {
   let app;
   beforeAll(() => {
     app = express();
-    app.use('/api/hybrid-chat', require('../routes/hybridChat'));
+    app.use('/api/ai', require('../routes/ai'));
   });
   beforeEach(() => {
     mockChatHistoryFindOne.mockReset();
@@ -47,7 +45,7 @@ describe('GET /api/hybrid-chat/ia-media/:chatId/:index (anexos do IAgro)', () =>
     });
     mockReadStoredFile.mockResolvedValue(Buffer.from('%PDF-teste'));
 
-    const res = await request(app).get(`/api/hybrid-chat/ia-media/${CHAT_ID}/0`).set('X-Clerk-User-Id', DONO);
+    const res = await request(app).get(`/api/ai/chat/media/${CHAT_ID}/0`).set('X-Clerk-User-Id', DONO);
 
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toMatch(/application\/pdf/);
@@ -56,19 +54,19 @@ describe('GET /api/hybrid-chat/ia-media/:chatId/:index (anexos do IAgro)', () =>
 
   test('outro usuário não encontra a mensagem (404)', async () => {
     mockChatHistoryFindOne.mockResolvedValue(null);
-    const res = await request(app).get(`/api/hybrid-chat/ia-media/${CHAT_ID}/0`).set('X-Clerk-User-Id', 'outro');
+    const res = await request(app).get(`/api/ai/chat/media/${CHAT_ID}/0`).set('X-Clerk-User-Id', 'outro');
     expect(res.status).toBe(404);
     expect(mockReadStoredFile).not.toHaveBeenCalled();
   });
 
   test('índice inexistente dá 404', async () => {
     mockChatHistoryFindOne.mockResolvedValue({ id: CHAT_ID, attachments: [] });
-    const res = await request(app).get(`/api/hybrid-chat/ia-media/${CHAT_ID}/3`).set('X-Clerk-User-Id', DONO);
+    const res = await request(app).get(`/api/ai/chat/media/${CHAT_ID}/3`).set('X-Clerk-User-Id', DONO);
     expect(res.status).toBe(404);
   });
 
   test('sem login dá 401', async () => {
-    const res = await request(app).get(`/api/hybrid-chat/ia-media/${CHAT_ID}/0`);
+    const res = await request(app).get(`/api/ai/chat/media/${CHAT_ID}/0`);
     expect(res.status).toBe(401);
   });
 });

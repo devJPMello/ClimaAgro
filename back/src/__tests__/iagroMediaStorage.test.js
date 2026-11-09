@@ -16,7 +16,7 @@ const mockQuery = jest.fn(async (sql, { replacements }) => {
 });
 jest.mock('../config/database', () => ({ sequelize: { query: (...a) => mockQuery(...a) } }));
 
-const { saveBuffer, readStoredFile, deleteStoredFile } = require('../services/hybridMediaStorage');
+const { saveBuffer, readStoredFile, deleteStoredFile } = require('../services/iagroMediaStorage');
 
 describe('mídia do chat com agrônomo guardada no banco', () => {
   beforeEach(() => mockTabela.clear());

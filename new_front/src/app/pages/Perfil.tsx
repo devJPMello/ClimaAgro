@@ -420,7 +420,6 @@ export function Perfil() {
                       <ul className="text-sm text-muted-foreground space-y-1.5 pl-4 list-disc">
                         <li>Perfil e informações pessoais</li>
                         <li>Histórico de conversas com o IAgro</li>
-                        <li>Conversas com agrônomos parceiros</li>
                       </ul>
                       <p className="text-xs text-muted-foreground text-center border-t border-border pt-3">
                         Conforme o art. 18, VI da LGPD — direito ao esquecimento.

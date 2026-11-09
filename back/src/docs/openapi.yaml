@@ -11,7 +11,6 @@ info:
     - Alertas meteorológicos oficiais multi-fonte
     - Relatórios exportáveis (PDF/CSV)
     - Consultoria agronômica via IA (Google Gemini)
-    - Escalada para agrônomos parceiros via WhatsApp
 
     ## Autenticação
     A maioria dos endpoints requer autenticação via **Clerk**. Envie o Bearer JWT no header `Authorization`,
@@ -21,7 +20,7 @@ info:
     | Grupo | Limite |
     |---|---|
     | Dados climáticos, produtividade, geo | 100 req/min |
-    | Perfil, chat híbrido, agrônomos | 30 req/min |
+    | Perfil e usuários | 30 req/min |
     | Relatórios | 20 req/min |
     | IA | 20 req/min |
 
@@ -45,12 +44,8 @@ tags:
     description: Alertas meteorológicos oficiais
   - name: Relatórios
     description: Exportação de relatórios PDF/CSV
-  - name: Chat Híbrido
-    description: Escalada IA → agrônomo parceiro via WhatsApp
   - name: Perfil
-    description: Perfil do usuário (produtor ou agrônomo)
-  - name: Agrônomos
-    description: Diretório de agrônomos parceiros
+    description: Perfil do usuário
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Componentes reutilizáveis
@@ -296,67 +291,6 @@ components:
         foiGeradoComIA:
           type: boolean
           default: false
-
-    # ── Chat Híbrido ─────────────────────────────────────────────────────────
-    EscalateBody:
-      type: object
-      required: [threadId]
-      properties:
-        threadId:
-          type: string
-          description: ID do tópico de chat com o IAgro
-          example: thread_abc123
-        whatsappAgronomo:
-          type: string
-          description: Número WhatsApp do agrônomo (se auto-pick estiver desativado)
-          example: "5562999991234"
-        agronomoParceiroId:
-          type: string
-          format: uuid
-        produtorNome:
-          type: string
-          example: João da Silva
-        casoDestaque:
-          type: string
-          example: Lagarta do cartucho na soja — 3º instar larval
-        specialtyFilter:
-          type: string
-          example: Pragas
-        autoPickBySpecialty:
-          type: boolean
-          default: false
-          description: Busca automaticamente o agrônomo disponível pela especialidade
-
-    EscalateResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
-          example: true
-        conversationId:
-          type: string
-          format: uuid
-        waUrl:
-          type: string
-          example: "https://wa.me/5562999991234?text=..."
-        summary:
-          type: string
-          description: Corpo da mensagem enviada ao agrônomo via WhatsApp
-        intervencaoHumana:
-          type: boolean
-          example: true
-        atendimentoAtivo:
-          type: boolean
-          example: true
-        agronomoParceiroId:
-          type: string
-          format: uuid
-        agronomoNome:
-          type: string
-          example: Dra. Ana Fitossanitária
-        agronomoEspecialidade:
-          type: string
-          example: Pragas
 
     # ── Perfil ───────────────────────────────────────────────────────────────
     DualUserProfile:
@@ -758,140 +692,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  # ── Chat Híbrido ───────────────────────────────────────────────────────────
-
-  /api/hybrid-chat/escalate:
-    post:
-      tags: [Chat Híbrido]
-      summary: Escalar conversa IA para agrônomo parceiro
-      description: |
-        Coleta o histórico recente do IAgro (últimas 5 interações), cria ou atualiza
-        uma `HybridConversation`, envia a mensagem de contexto ao agrônomo via WhatsApp
-        (Evolution API) e retorna o link `wa.me` para o produtor continuar o atendimento.
-
-        **Modos de seleção do agrônomo:**
-        - **Explícito:** envie `whatsappAgronomo` com o número direto
-        - **Auto-pick:** envie `autoPickBySpecialty: true` + `specialtyFilter` para busca automática
-      security:
-        - BearerAuth: []
-        - ClerkUserIdHeader: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EscalateBody'
-            examples:
-              explicit:
-                summary: Número explícito
-                value:
-                  threadId: thread_abc123
-                  whatsappAgronomo: "5562999991234"
-                  produtorNome: João da Silva
-                  casoDestaque: Lagarta do cartucho na soja
-              autoPick:
-                summary: Auto-pick por especialidade
-                value:
-                  threadId: thread_abc123
-                  produtorNome: João da Silva
-                  specialtyFilter: Pragas
-                  autoPickBySpecialty: true
-      responses:
-        '200':
-          description: Escalada realizada com sucesso
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EscalateResponse'
-        '400':
-          description: threadId ausente, WhatsApp inválido ou sem mensagens IA no tópico
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                message: Não há mensagens da IA neste tópico para enviar.
-        '401':
-          description: Não autenticado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Nenhum agrônomo encontrado para a especialidade solicitada
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-              example:
-                message: Nenhum agrônomo parceiro ativo encontrado para a especialidade "Irrigação".
-        '500':
-          description: Falha ao enviar mensagem via WhatsApp
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  /api/hybrid-chat/status:
-    get:
-      tags: [Chat Híbrido]
-      summary: Status da conversa híbrida
-      description: Retorna o estado atual da conversa (ativa, intervenção humana, dados do agrônomo).
-      security:
-        - BearerAuth: []
-        - ClerkUserIdHeader: []
-      parameters:
-        - name: threadId
-          in: query
-          required: true
-          schema:
-            type: string
-          example: thread_abc123
-      responses:
-        '200':
-          description: Status retornado
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  conversation:
-                    type: object
-                    nullable: true
-                    properties:
-                      id:
-                        type: string
-                        format: uuid
-                      whatsappAgronomo:
-                        type: string
-                      intervencaoHumana:
-                        type: boolean
-                      atendimentoAtivo:
-                        type: boolean
-                      avaliacaoEstrelas:
-                        type: integer
-                        nullable: true
-                        minimum: 1
-                        maximum: 5
-                  intervencaoHumana:
-                    type: boolean
-                  atendimentoAtivo:
-                    type: boolean
-        '400':
-          description: threadId ou identificação do produtor ausente
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Não autenticado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-
-  # ── Perfil ─────────────────────────────────────────────────────────────────
-
   /api/dual-profile/me:
     get:
       tags: [Perfil]
@@ -971,55 +771,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 
   # ── Agrônomos ──────────────────────────────────────────────────────────────
-
-  /api/agronomos-parceiros:
-    get:
-      tags: [Agrônomos]
-      summary: Listar agrônomos parceiros ativos
-      description: Retorna o diretório de agrônomos parceiros cadastrados e aprovados na plataforma.
-      parameters:
-        - name: especialidade
-          in: query
-          schema:
-            type: string
-            example: Pragas
-          description: Filtrar por especialidade
-        - name: uf
-          in: query
-          schema:
-            type: string
-            example: TO
-          description: Filtrar por estado de atuação
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 20
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
-      responses:
-        '200':
-          description: Lista de agrônomos parceiros
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  items:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/AgronomistaItem'
-                  total:
-                    type: integer
-                    example: 12
-
-  # ── Produtividade ──────────────────────────────────────────────────────────
 
   /api/productivity/climate-vs-productivity:
     get:
