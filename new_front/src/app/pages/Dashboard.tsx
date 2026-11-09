@@ -21,6 +21,7 @@ import { DashboardSkeleton } from '../components/ui/PageSkeletons';
 import { EstadoDrilldownModal } from '../components/dashboard/EstadoDrilldownModal';
 import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 import { getDashboardSummary } from '../../lib/api/climateApi';
+import { useProfileUfState } from '../../lib/hooks/useProfileUf';
 import type { DashboardMetricKey, DashboardRegionRowDto, DashboardSummaryDto } from '../../lib/api/contracts/climate';
 
 const KPI_ICONS: Record<DashboardMetricKey, LucideIcon> = {
@@ -71,7 +72,13 @@ const atalhos = [
 const CARD_SCROLL_STEP = 272; // card width (256px) + gap (16px)
 
 export function Dashboard() {
-  const { status, data, error, reload } = useAsyncResource(() => getDashboardSummary(), []);
+  const { uf: ufPerfil, loaded: perfilCarregado } = useProfileUfState();
+  const [verTodos, setVerTodos] = useState(false);
+  const estado = !verTodos && ufPerfil ? ufPerfil : undefined;
+  const { status, data, error, reload } = useAsyncResource(
+    () => (perfilCarregado ? getDashboardSummary({ state: estado }) : new Promise<DashboardSummaryDto>(() => {})),
+    [perfilCarregado, estado]
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(true);
@@ -96,9 +103,19 @@ export function Dashboard() {
           Dashboard
         </h1>
         <p className="text-muted-foreground">
-          Visão geral do clima e da produtividade em estados selecionados dinamicamente (últimos dias e último ano com
-          dados na base).
+          {estado
+            ? `Clima e produtividade do seu estado (${estado}), conforme o perfil — últimos dias e último ano com dados na base.`
+            : 'Visão geral do clima e da produtividade em estados selecionados dinamicamente (últimos dias e último ano com dados na base).'}
         </p>
+        {ufPerfil && (
+          <button
+            type="button"
+            onClick={() => setVerTodos((v) => !v)}
+            className="mt-2 text-sm text-primary hover:underline"
+          >
+            {verTodos ? `Ver só o meu estado (${ufPerfil})` : 'Ver os principais estados'}
+          </button>
+        )}
       </div>
 
       <AsyncStateView<DashboardSummaryDto>
@@ -136,11 +153,11 @@ export function Dashboard() {
                   <div className="min-w-0">
                     <CardTitle>Resumo por localidade</CardTitle>
                     <CardDescription>
-                      Todos os estados com dados na base — clima agregado (últimos 14 dias) e produtividade média no último ano agrícola
+                      {estado ? `Estado do seu perfil (${estado})` : 'Estados em destaque'} — clima agregado (últimos 14 dias) e produtividade média no último ano agrícola
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <span className="text-xs text-muted-foreground mr-auto sm:mr-2">{summary.regioes.length} estados</span>
+                    <span className="text-xs text-muted-foreground mr-auto sm:mr-2">{summary.regioes.length} {summary.regioes.length === 1 ? 'estado' : 'estados'}</span>
                     <button
                       type="button"
                       onClick={scrollLeft}

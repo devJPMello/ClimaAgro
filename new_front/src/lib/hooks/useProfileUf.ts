@@ -2,13 +2,18 @@ import { useEffect, useState } from 'react';
 import { useUser } from '@clerk/clerk-react';
 import { getMyDualProfile } from '../api/dualProfileApi';
 
-/** Retorna a UF salva no perfil do usuário (ex: "TO"), ou null enquanto carrega / se não configurada. */
-export function useProfileUf(): string | null {
-  const { user } = useUser();
+/** UF salva no perfil (ex: "TO") e se a consulta ao perfil já terminou (com ou sem UF). */
+export function useProfileUfState(): { uf: string | null; loaded: boolean } {
+  const { user, isLoaded } = useUser();
   const [profileUf, setProfileUf] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!isLoaded) return;
+    if (!user?.id) {
+      setLoaded(true);
+      return;
+    }
     let cancelled = false;
     void getMyDualProfile(user.id)
       .then((p) => {
@@ -16,11 +21,19 @@ export function useProfileUf(): string | null {
           setProfileUf(p.uf);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [user?.id, isLoaded]);
 
-  return profileUf;
+  return { uf: profileUf, loaded };
+}
+
+/** Retorna a UF salva no perfil do usuário (ex: "TO"), ou null enquanto carrega / se não configurada. */
+export function useProfileUf(): string | null {
+  return useProfileUfState().uf;
 }

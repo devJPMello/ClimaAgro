@@ -82,9 +82,9 @@ function principalDashboardAlertRelevant(item, principalSet, cityStateToId, prin
 /**
  * Dashboard principal: uma linha por UF prioritária (malha estadual em `geo_data`).
  */
-async function buildDashboardPrincipalStates({ models }) {
+async function buildDashboardPrincipalStates({ models, ufs }) {
   const { ClimateData, GeoData, Productivity, OfficialAlert } = models;
-  const principalUfs = await pickDashboardPrincipalUfs(GeoData);
+  const principalUfs = Array.isArray(ufs) && ufs.length ? ufs : await pickDashboardPrincipalUfs(GeoData);
   const principalSet = new Set(principalUfs);
 
   const allStateRows = await GeoData.findAll({
@@ -366,6 +366,10 @@ async function buildDashboardSummary({ models, state: stateParam }) {
     stateParam != null && String(stateParam).trim() !== '' ? String(stateParam).trim().toUpperCase().slice(0, 2) : '';
   if (!trimmed) {
     return buildDashboardPrincipalStates({ models });
+  }
+  // UF escolhida (ex.: a do perfil do usuário): mesma visão estadual do resumo principal, só para ela.
+  if (/^[A-Z]{2}$/.test(trimmed) && process.env.DASHBOARD_STATE_VIEW !== 'municipal') {
+    return buildDashboardPrincipalStates({ models, ufs: [trimmed] });
   }
   const uf = trimmed;
 
