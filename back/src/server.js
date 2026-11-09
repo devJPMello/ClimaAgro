@@ -113,7 +113,7 @@ app.use(
 );
 app.use(
   ['/api/auth', '/api/users', '/api/dual-profile',
-   '/api/admin'],
+   '/api/whatsapp', '/api/admin'],
   userLimiter
 );
 app.use(['/api/reports', '/api/superset'], reportLimiter);
@@ -155,6 +155,7 @@ app.use('/api/climate', require('./routes/climate'));
 app.use('/api/clima', require('./routes/climate'));
 app.use('/api/ai', require('./routes/ai'));
 app.use('/api/dual-profile', require('./routes/dualProfile'));
+app.use('/api/whatsapp', require('./routes/whatsapp'));
 app.use('/api/superset', require('./routes/superset'));
 app.use('/api/inmet-adapter', require('./routes/inmetAdapter'));
 

@@ -5,13 +5,17 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { FileText, Download, Clock, CheckCircle, XCircle, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
+import { Link } from 'react-router';
+import { useUser } from '@clerk/clerk-react';
+import { Checkbox } from '../components/ui/Checkbox';
+import { enviarRelatorioWhatsapp, getWhatsappStatus, type WhatsappStatus } from '../../lib/api/whatsappApi';
 import { createReportExport, listReportExports } from '../../lib/api/reportExportsApi';
 import type { ReportExportItemDto } from '../../lib/api/contracts/reportExports';
 import { EmptyState } from '../components/ui/EmptyState';
 import { brazilUfSelectOptionsAlphabetical, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
 import { displayLocalidadeLabel } from '../../lib/geo/tocantinsCities';
 import { getProductivityYearOptions } from '../../lib/filters/appFilters';
-import { downloadReportFile, type ReportExportFileFormat } from '../../lib/reportExportFile';
+import { buildReportFile, downloadReportFile, type ReportExportFileFormat } from '../../lib/reportExportFile';
 import {
   gatherReportDados,
   type ReportTipoKey,
@@ -58,6 +62,9 @@ export function ExportarRelatorios() {
   const [anoInicio, setAnoInicio] = useState(yearOptions[Math.min(2, yearOptions.length - 1)]?.value ?? '2024');
   const [anoFim, setAnoFim] = useState(yearOptions[0]?.value ?? '2026');
   const [formato, setFormato] = useState('pdf');
+  const { user } = useUser();
+  const [wppStatus, setWppStatus] = useState<WhatsappStatus | null>(null);
+  const [enviarWhatsapp, setEnviarWhatsapp] = useState(false);
   const [exportStep, setExportStep] = useState<ExportStep | null>(null);
   const loading = exportStep !== null;
   const [loadingHistorico, setLoadingHistorico] = useState(true);
@@ -143,6 +150,15 @@ export function ExportarRelatorios() {
     void carregarHistorico();
   }, [carregarHistorico]);
 
+  useEffect(() => {
+    if (!user?.id) return;
+    getWhatsappStatus(user.id)
+      .then(setWppStatus)
+      .catch(() => setWppStatus(null));
+  }, [user?.id]);
+
+  const podeEnviarWhatsapp = Boolean(wppStatus?.disponivel && wppStatus.verificado);
+
   const handleExportar = async () => {
     if (!localidadeValida) {
       toast.error('Selecione uma UF para definir o escopo do relatório.');
@@ -174,13 +190,24 @@ export function ExportarRelatorios() {
       // Etapa 2: geração do arquivo (síncrona, exibe o step por 700ms antes)
       setExportStep('gerando');
       await wait(700);
-      downloadReportFile({
+      const dadosArquivo = {
         titulo: tipo,
         local,
         periodo,
         formato: fmt,
         dadosIntegrados,
-      });
+      };
+      downloadReportFile(dadosArquivo);
+
+      if (enviarWhatsapp && podeEnviarWhatsapp && user?.id) {
+        try {
+          const { blob, filename } = buildReportFile(dadosArquivo);
+          await enviarRelatorioWhatsapp(user.id, { blob, filename, titulo: `${tipo} — ${local}` });
+          toast.success('Relatório enviado para o seu WhatsApp.');
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : 'Não foi possível enviar o relatório ao WhatsApp.');
+        }
+      }
 
       if (fmt === 'xlsx') {
         toast.message(
@@ -394,6 +421,27 @@ export function ExportarRelatorios() {
                   </div>
                 );
               })()}
+
+              {podeEnviarWhatsapp ? (
+                <Checkbox
+                  label={
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-sm font-medium text-foreground">Enviar também para o meu WhatsApp</span>
+                      <span className="text-xs text-muted-foreground">O arquivo vai para o número {wppStatus?.numero}</span>
+                    </span>
+                  }
+                  checked={enviarWhatsapp}
+                  onChange={(e) => setEnviarWhatsapp(e.target.checked)}
+                />
+              ) : wppStatus?.disponivel ? (
+                <p className="text-xs text-muted-foreground">
+                  Quer receber o relatório no WhatsApp?{' '}
+                  <Link to="/perfil" className="text-primary underline underline-offset-2">
+                    Cadastre o número no Perfil
+                  </Link>
+                  .
+                </p>
+              ) : null}
 
               <Button
                 variant="primary"

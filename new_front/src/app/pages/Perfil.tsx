@@ -21,6 +21,7 @@ import { StatsListSkeleton } from '../components/ui/PageSkeletons';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Modal } from '../components/ui/Modal';
 import { STORAGE_KEYS } from '../../lib/storage/storageKeys';
+import { WhatsAppCard } from '../components/perfil/WhatsAppCard';
 
 type StatItem = {
   label: string;
@@ -508,6 +509,8 @@ export function Perfil() {
             </CardBody>
           </Card>
 
+          {user?.id ? <WhatsAppCard clerkUserId={user.id} /> : null}
+
           {/* Preferências de Notificação */}
           <Card>
             <CardHeader>
@@ -518,8 +521,8 @@ export function Perfil() {
               <Checkbox
                 label={
                   <span className="flex flex-col gap-0.5">
-                    <span className="text-sm font-medium text-foreground">Alertas climáticos críticos</span>
-                    <span className="text-xs text-muted-foreground">Eventos extremos como secas, geadas, granizo e tempestades severas</span>
+                    <span className="text-sm font-medium text-foreground">Alertas climáticos críticos por WhatsApp</span>
+                    <span className="text-xs text-muted-foreground">Avisos oficiais de severidade alta no seu estado, enviados ao WhatsApp confirmado acima</span>
                   </span>
                 }
                 checked={notifAlertasCriticos}

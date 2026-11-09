@@ -345,8 +345,8 @@ function drawFooters(doc: jsPDF, margin: number): void {
   }
 }
 
-/** Gera PDF A4 com capa, metadados, secções e tabelas quando possível. */
-export function downloadReportPdf(payload: ReportFilePayload): void {
+/** Monta o PDF A4 (capa, metadados, secções e tabelas quando possível) sem baixar. */
+function createReportPdf(payload: ReportFilePayload): { doc: jsPDF; name: string } {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const margin = 48;
   const maxW = pageWidth(doc) - margin * 2;
@@ -397,6 +397,12 @@ export function downloadReportPdf(payload: ReportFilePayload): void {
   drawFooters(doc, margin);
 
   const name = `climaagro-relatorio-${slug(payload.local)}-${Date.now()}.pdf`;
+  return { doc, name };
+}
+
+/** Gera PDF A4 com capa, metadados, secções e tabelas quando possível e baixa o arquivo. */
+export function downloadReportPdf(payload: ReportFilePayload): void {
+  const { doc, name } = createReportPdf(payload);
   doc.save(name);
 }
 
@@ -413,7 +419,7 @@ function downloadTextFile(filename: string, content: string, mime: string): void
   URL.revokeObjectURL(url);
 }
 
-export function downloadReportCsv(payload: ReportFilePayload, fileExt: 'csv' | 'xlsx' = 'csv'): void {
+function createReportCsv(payload: ReportFilePayload, fileExt: 'csv' | 'xlsx' = 'csv'): { content: string; filename: string } {
   const rows = [
     ['Campo', 'Valor'],
     ['Título', payload.titulo],
@@ -433,8 +439,25 @@ export function downloadReportCsv(payload: ReportFilePayload, fileExt: 'csv' | '
   }
   const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
   const csv = rows.map((r) => r.map(escape).join(';')).join('\r\n');
-  const ext = fileExt === 'xlsx' ? 'csv' : 'csv';
-  downloadTextFile(`climaagro-relatorio-${slug(payload.local)}-${Date.now()}.${ext}`, csv, 'text/csv');
+  return { content: csv, filename: `climaagro-relatorio-${slug(payload.local)}-${Date.now()}.csv` };
+}
+
+export function downloadReportCsv(payload: ReportFilePayload, fileExt: 'csv' | 'xlsx' = 'csv'): void {
+  const { content, filename } = createReportCsv(payload, fileExt);
+  downloadTextFile(filename, content, 'text/csv');
+}
+
+/** Gera o mesmo arquivo do download, mas devolve o conteúdo (para enviar ao WhatsApp). */
+export function buildReportFile(payload: ReportFilePayload): { blob: Blob; filename: string } {
+  if (payload.formato === 'pdf') {
+    const { doc, name } = createReportPdf(payload);
+    return { blob: doc.output('blob'), filename: name };
+  }
+  const { content, filename } = createReportCsv(
+    payload.formato === 'csv' ? payload : { ...payload, formato: 'xlsx' },
+    payload.formato === 'csv' ? 'csv' : 'xlsx'
+  );
+  return { blob: new Blob([`\uFEFF${content}`], { type: 'text/csv;charset=utf-8' }), filename };
 }
 
 /** CSV com separador compatível com Excel (pt-BR). */

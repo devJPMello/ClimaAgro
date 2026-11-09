@@ -824,7 +824,15 @@ async function runClimateSyncOnce({ sequelize, models }) {
         ? await syncOpenMeteoForStates({ sequelize, ClimateData, GeoData, transaction: undefined })
         : await syncOpenMeteoForTocantinsMunicipalities({ ClimateData, GeoData, transaction: undefined });
     const alertRes = await syncOfficialAlertsFromJson({ OfficialAlert, transaction: undefined });
-    return { ok: true, cptec: cptecRes, openMeteo: openMeteoRes, officialAlerts: alertRes };
+    // Avisa por WhatsApp (quem ligou "Alertas críticos" no Perfil). Falha aqui nunca derruba a sincronização.
+    let whatsapp;
+    try {
+      whatsapp = await require('./whatsappAlertsService').notificarAlertasCriticos({ models });
+    } catch (e) {
+      console.error('[sync:climate] alertas por WhatsApp:', e.message);
+      whatsapp = { erro: e.message };
+    }
+    return { ok: true, cptec: cptecRes, openMeteo: openMeteoRes, officialAlerts: alertRes, whatsapp };
   } catch (e) {
     return { ok: false, error: e.message || String(e) };
   }

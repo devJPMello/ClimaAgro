@@ -59,6 +59,38 @@ async function ensureChatAttachmentsColumn() {
   await sequelize.query('ALTER TABLE IF EXISTS chat_history ADD COLUMN IF NOT EXISTS attachments JSONB;');
 }
 
+/** Migração: data em que o usuário confirmou o WhatsApp por código. */
+async function ensureWhatsappVerificadoColumn() {
+  await sequelize.query(
+    'ALTER TABLE IF EXISTS dual_user_profiles ADD COLUMN IF NOT EXISTS whatsapp_verificado_em TIMESTAMPTZ;'
+  );
+}
+
+/** Migração: códigos de confirmação do WhatsApp (sobrevivem ao servidor dormir/reiniciar). */
+async function ensureWhatsappVerificacoesTable() {
+  await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_verificacoes (
+      user_id VARCHAR(128) NOT NULL,
+      tipo VARCHAR(16) NOT NULL,
+      dados JSONB NOT NULL,
+      expira_em TIMESTAMPTZ NOT NULL,
+      PRIMARY KEY (user_id, tipo)
+    );
+  `);
+}
+
+/** Migração: alertas já enviados por WhatsApp (cada alerta vai uma única vez por usuário). */
+async function ensureWhatsappAlertasEnviadosTable() {
+  await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_alertas_enviados (
+      user_id VARCHAR(128) NOT NULL,
+      alerta_id VARCHAR(160) NOT NULL,
+      enviado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, alerta_id)
+    );
+  `);
+}
+
 async function ensureIndexes() {
   const indexDefs = [
     { name: 'idx_climate_data_uf_date', table: 'climate_data', cols: '(uf, date)' },
@@ -101,6 +133,9 @@ const connectDB = async () => {
     // Migrações leves (todos os ambientes)
     await ensureHybridMediaTable();
     await ensureChatAttachmentsColumn();
+    await ensureWhatsappVerificadoColumn();
+    await ensureWhatsappVerificacoesTable();
+    await ensureWhatsappAlertasEnviadosTable();
 
     // Garante índices críticos (CREATE INDEX IF NOT EXISTS — não bloqueia se já existirem)
     await ensureIndexes();
