@@ -154,7 +154,46 @@ async function contextoClimatico(uf, data, agora = new Date()) {
   return { janelaDias: JANELA_DIAS, antes, depois };
 }
 
+const ROTULO_TIPO = {
+  plantio: 'Plantio',
+  adubacao: 'Adubação',
+  aplicacao: 'Aplicação',
+  praga_doenca: 'Praga ou doença observada',
+  colheita: 'Colheita',
+  observacao: 'Observação geral',
+};
+
+function dataBr(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '');
+}
+
+function descreveClima(r) {
+  if (!r || !r.dias) return 'sem dados de clima';
+  const partes = [];
+  if (r.chuvaMm != null) {
+    partes.push(`${String(r.chuvaMm).replace('.', ',')} mm de chuva${r.diasComChuva != null ? ` em ${r.diasComChuva} dia(s)` : ''}`);
+  }
+  if (r.tempMedia != null) partes.push(`temperatura média de ${String(r.tempMedia).replace('.', ',')} °C`);
+  return partes.length ? partes.join(', ') : 'sem dados de clima';
+}
+
+/** Texto do registro (e do clima do período, se houver) para enviar ao WhatsApp do próprio usuário. */
+function montarMensagemWhatsapp(registro, clima) {
+  const local = [registro.cultura, registro.municipio, registro.uf].filter(Boolean).join(' · ');
+  const linhas = ['📓 ClimaAgro — Diário de Campo', '', `*${ROTULO_TIPO[registro.tipo] || registro.tipo}* — ${dataBr(registro.data)}`];
+  if (local) linhas.push(local);
+  if (registro.observacao) linhas.push('', registro.observacao);
+  if (clima) {
+    linhas.push('', `Clima do estado (${registro.uf}):`);
+    linhas.push(`• ${clima.janelaDias} dias antes: ${descreveClima(clima.antes)}`);
+    linhas.push(`• ${clima.janelaDias} dias depois: ${clima.depois ? descreveClima(clima.depois) : 'ainda sem dados'}`);
+  }
+  return linhas.join(String.fromCharCode(10));
+}
+
 module.exports = {
+  montarMensagemWhatsapp,
   TIPOS,
   MAX_REGISTROS_POR_USUARIO,
   validarEntrada,

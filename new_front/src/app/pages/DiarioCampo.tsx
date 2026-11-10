@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useUser } from '@clerk/clerk-react';
 import { toast } from 'sonner';
-import { BookOpen, CloudRain, ImagePlus, Loader2, Trash2 } from 'lucide-react';
+import { Link } from 'react-router';
+import { BookOpen, CloudRain, ImagePlus, Loader2, MessageCircle, Trash2 } from 'lucide-react';
 import { Card, CardBody, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
@@ -13,11 +14,13 @@ import {
   baixarFoto,
   climaDoRegistro,
   criarRegistro,
+  enviarRegistroWhatsapp,
   listarRegistros,
   type ClimaDoRegistro,
   type RegistroDiario,
   type TipoRegistro,
 } from '../../lib/api/diarioApi';
+import { getWhatsappStatus } from '../../lib/api/whatsappApi';
 import { descreveClima, formataData, rotuloTipo, TIPOS_REGISTRO } from '../../lib/diario/formatacao';
 import { useClimateUfs } from '../../lib/hooks/useClimateUfs';
 import { useProfileUf } from '../../lib/hooks/useProfileUf';
@@ -112,6 +115,31 @@ export function DiarioCampo() {
   const [erroLista, setErroLista] = useState<string | null>(null);
   const [climas, setClimas] = useState<Record<string, ClimaDoRegistro | 'carregando'>>({});
   const [confirmandoId, setConfirmandoId] = useState<string | null>(null);
+  const [whatsappPronto, setWhatsappPronto] = useState(false);
+  const [enviandoId, setEnviandoId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!clerkUserId) return;
+    void getWhatsappStatus(clerkUserId)
+      .then((s) => setWhatsappPronto(Boolean(s.verificado && s.disponivel)))
+      .catch(() => setWhatsappPronto(false));
+  }, [clerkUserId]);
+
+  async function enviarAoWhatsapp(id: string) {
+    setEnviandoId(id);
+    try {
+      const r = await enviarRegistroWhatsapp(clerkUserId, id);
+      toast.success(
+        r.fotosTotal > 0
+          ? `Registro enviado ao seu WhatsApp (${r.fotosEnviadas} de ${r.fotosTotal} foto(s)).`
+          : 'Registro enviado ao seu WhatsApp.'
+      );
+    } catch (e) {
+      toast.error(mensagemDeErro(e, 'Não foi possível enviar ao WhatsApp.'));
+    } finally {
+      setEnviandoId(null);
+    }
+  }
 
   const ufOptions = useMemo(
     () => [
@@ -300,6 +328,15 @@ export function DiarioCampo() {
             </CardBody>
           </Card>
         )}
+        {!whatsappPronto && registros && registros.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Quer receber os registros no WhatsApp?{' '}
+            <Link to="/perfil" className="text-primary underline">
+              Cadastre o número no Perfil
+            </Link>
+            .
+          </p>
+        )}
         {registros?.map((r) => {
           const clima = climas[r.id];
           return (
@@ -332,6 +369,18 @@ export function DiarioCampo() {
                     <CloudRain className="h-4 w-4" />
                     {clima && clima !== 'carregando' ? 'Atualizar clima' : 'Ver clima do período'}
                   </Button>
+                  {whatsappPronto && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="text-xs"
+                      onClick={() => void enviarAoWhatsapp(r.id)}
+                      loading={enviandoId === r.id}
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                      Enviar ao WhatsApp
+                    </Button>
+                  )}
                   {confirmandoId === r.id ? (
                     <>
                       <Button type="button" variant="danger" className="text-xs" onClick={() => void apagar(r.id)}>

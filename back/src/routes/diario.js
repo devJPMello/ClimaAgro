@@ -1,6 +1,9 @@
 const express = require('express');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
 const { clerkAuth } = require('../middleware/clerkAuth');
+const { models } = require('../config/database');
+const evolutionService = require('../services/evolutionService');
 const diario = require('../services/diarioService');
 const { saveBuffer, readStoredFile, deleteStoredFile } = require('../services/iagroMediaStorage');
 
@@ -114,6 +117,61 @@ router.get('/:id/clima', async (req, res) => {
   } catch (e) {
     console.error('diario GET clima:', e.message);
     return res.status(500).json({ message: 'Falha ao consultar o clima do registro.' });
+  }
+});
+
+const whatsappLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `diario-whatsapp:${req.clerkUserId}`,
+  message: { message: 'Muitos envios seguidos. Aguarde um minuto.' },
+});
+
+// POST /api/diario/:id/whatsapp — envia o registro (texto, clima do período e fotos) ao WhatsApp confirmado do dono
+router.post('/:id/whatsapp', whatsappLimiter, async (req, res) => {
+  try {
+    const registro = await diario.buscarBruto(req.clerkUserId, String(req.params.id));
+    if (!registro) return res.status(404).json({ message: 'Registro não encontrado.' });
+
+    const perfil = await models.DualUserProfile.findOne({ where: { clerkUserId: req.clerkUserId } });
+    if (!perfil?.whatsapp || !perfil.whatsappVerificadoEm) {
+      return res.status(400).json({ message: 'Confirme o seu WhatsApp no Perfil antes de enviar o diário.' });
+    }
+
+    let clima = null;
+    try {
+      clima = await diario.contextoClimatico(registro.uf, registro.data);
+    } catch (e) {
+      console.warn('diario whatsapp: clima indisponível:', e.message);
+    }
+
+    const texto = await evolutionService.sendMessage(perfil.whatsapp, diario.montarMensagemWhatsapp(registro, clima));
+    if (!texto.sent) {
+      return res.status(503).json({ message: 'Não foi possível enviar pelo WhatsApp agora. Tente novamente mais tarde.' });
+    }
+
+    let fotosEnviadas = 0;
+    const anexos = Array.isArray(registro.attachments) ? registro.attachments : [];
+    for (const [i, anexo] of anexos.entries()) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const dados = await readStoredFile(anexo.key);
+        const nome = String(anexo.name || `foto-${i + 1}.jpg`).replace(/[^\w.\-() ]+/g, '_').slice(0, 100);
+        // eslint-disable-next-line no-await-in-loop
+        const envio = await evolutionService.sendMedia(perfil.whatsapp, `Foto ${i + 1} de ${anexos.length}`, dados, anexo.mime, {
+          fileName: nome,
+        });
+        if (envio.sent) fotosEnviadas += 1;
+      } catch (e) {
+        console.warn('diario whatsapp: foto não enviada:', e.message);
+      }
+    }
+    return res.json({ success: true, fotosEnviadas, fotosTotal: anexos.length });
+  } catch (e) {
+    console.error('diario POST whatsapp:', e.message);
+    return res.status(500).json({ message: 'Falha ao enviar o registro ao WhatsApp.' });
   }
 });
 

@@ -108,6 +108,15 @@ export function climaDoRegistro(clerkUserId: string, id: string) {
   });
 }
 
+/** Envia o registro (texto, clima do período e fotos) ao WhatsApp confirmado do próprio usuário. */
+export function enviarRegistroWhatsapp(clerkUserId: string, id: string) {
+  return httpClient.post<{ success: boolean; fotosEnviadas: number; fotosTotal: number }>(
+    `diario/${encodeURIComponent(id)}/whatsapp`,
+    {},
+    { headers: clerkHeaders(clerkUserId) }
+  );
+}
+
 /** Baixa uma foto do registro; só o dono consegue. */
 export async function baixarFoto(clerkUserId: string, id: string, index: number): Promise<Blob | null> {
   const response = await fetch(`${getApiBase()}/diario/${encodeURIComponent(id)}/anexo/${index}`, {

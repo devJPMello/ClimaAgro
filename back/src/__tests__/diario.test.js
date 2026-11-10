@@ -5,8 +5,19 @@ const mockQuery = jest.fn();
 const mockSaveBuffer = jest.fn();
 const mockRead = jest.fn();
 const mockDelete = jest.fn();
+const mockPerfil = jest.fn();
+const mockSendMessage = jest.fn();
+const mockSendMedia = jest.fn();
 
-jest.mock('../config/database', () => ({ sequelize: { query: (...a) => mockQuery(...a) }, models: {} }));
+jest.mock('../config/database', () => ({
+  sequelize: { query: (...a) => mockQuery(...a) },
+  models: { DualUserProfile: { findOne: (...a) => mockPerfil(...a) } },
+}));
+jest.mock('../services/evolutionService', () => ({
+  sendMessage: (...a) => mockSendMessage(...a),
+  sendMedia: (...a) => mockSendMedia(...a),
+  isConfigured: () => true,
+}));
 jest.mock('../services/iagroMediaStorage', () => ({
   saveBuffer: (...a) => mockSaveBuffer(...a),
   readStoredFile: (...a) => mockRead(...a),
@@ -178,5 +189,56 @@ describe('rotas /api/diario', () => {
 
     expect((await request(app).get(`/api/diario/${id}/anexo/0`).set('x-test-user', 'u2')).status).toBe(404);
     expect((await request(app).get(`/api/diario/${id}/anexo/9`).set('x-test-user', 'u1')).status).toBe(404);
+  });
+
+  describe('envio ao WhatsApp', () => {
+    const NUMERO = '63999990000';
+
+    beforeEach(() => {
+      mockSendMessage.mockResolvedValue({ sent: true });
+      mockSendMedia.mockResolvedValue({ sent: true });
+    });
+
+    test('exige número confirmado e não envia nada sem ele', async () => {
+      await novo();
+      mockPerfil.mockResolvedValue({ whatsapp: null, whatsappVerificadoEm: null });
+      const r = await request(app).post(`/api/diario/${registros[0].id}/whatsapp`).set('x-test-user', 'u1');
+      expect(r.status).toBe(400);
+      expect(r.body.message).toMatch(/Confirme o seu WhatsApp/);
+      expect(mockSendMessage).not.toHaveBeenCalled();
+    });
+
+    test('envia o texto com o clima e as fotos para o número do dono', async () => {
+      await novo().attach('files', Buffer.from('x'), { filename: 'f.jpg', contentType: 'image/jpeg' });
+      mockPerfil.mockResolvedValue({ whatsapp: NUMERO, whatsappVerificadoEm: new Date() });
+      mockRead.mockResolvedValue(Buffer.from('imagem'));
+
+      const r = await request(app).post(`/api/diario/${registros[0].id}/whatsapp`).set('x-test-user', 'u1');
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ success: true, fotosEnviadas: 1, fotosTotal: 1 });
+      const [numero, texto] = mockSendMessage.mock.calls[0];
+      expect(numero).toBe(NUMERO);
+      expect(texto).toContain('Aplicação');
+      expect(texto).toContain('01/11/2026');
+      expect(texto).toContain('Aplicação preventiva');
+      expect(mockSendMedia).toHaveBeenCalledWith(NUMERO, expect.stringContaining('Foto 1'), expect.any(Buffer), 'image/jpeg', expect.any(Object));
+    });
+
+    test('outro usuário não consegue enviar o registro alheio', async () => {
+      await novo();
+      mockPerfil.mockResolvedValue({ whatsapp: NUMERO, whatsappVerificadoEm: new Date() });
+      const r = await request(app).post(`/api/diario/${registros[0].id}/whatsapp`).set('x-test-user', 'u2');
+      expect(r.status).toBe(404);
+      expect(mockSendMessage).not.toHaveBeenCalled();
+    });
+
+    test('WhatsApp fora do ar devolve 503 e não manda fotos', async () => {
+      await novo();
+      mockPerfil.mockResolvedValue({ whatsapp: NUMERO, whatsappVerificadoEm: new Date() });
+      mockSendMessage.mockResolvedValue({ sent: false, reason: 'whatsapp_api_error' });
+      const r = await request(app).post(`/api/diario/${registros[0].id}/whatsapp`).set('x-test-user', 'u1');
+      expect(r.status).toBe(503);
+      expect(mockSendMedia).not.toHaveBeenCalled();
+    });
   });
 });
