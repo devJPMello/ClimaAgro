@@ -20,7 +20,8 @@ import {
   getClimateVsProductivity,
   type ProductivityListResponse,
 } from '../../lib/api/productivityApi';
-import { buildProductivityCropSelectOptions, getProductivityYearOptions, getYearRangeNote } from '../../lib/filters/appFilters';
+import { YearRangeNote } from '../components/ui/YearRangeNote';
+import { buildProductivityCropSelectOptions, getProductivityYearOptions } from '../../lib/filters/appFilters';
 import type { ClimateSeriesVariable } from '../../lib/api/contracts/climate';
 import { formatUfLabel, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
 import { useProfileUf } from '../../lib/hooks/useProfileUf';
@@ -439,8 +440,8 @@ export function SeriesTemporais() {
             <Select label="Ano inicial" value={startYear} onChange={(e) => setStartYear(e.target.value)} options={yearOptions} />
             <Select label="Ano final" value={endYear} onChange={(e) => setEndYear(e.target.value)} options={yearOptions} />
           </div>
+          <YearRangeNote className="mt-3" />
           <div className="mt-2">
-            <p className="text-xs text-muted-foreground mb-1">{getYearRangeNote()}</p>
             <p className="text-sm text-muted-foreground">
               O intervalo de anos filtra clima e produtividade para os gráficos abaixo.
             </p>
