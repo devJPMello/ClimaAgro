@@ -99,6 +99,14 @@ export function getProductivityYearOptions(): Array<{ value: string; label: stri
   });
 }
 
+/** Explica, junto de qualquer filtro de ano, por que só aparecem esses anos. */
+export function getYearRangeNote(): string {
+  const anos = getProductivityYearOptions().map((o) => o.value);
+  const ini = anos[anos.length - 1];
+  const fim = anos[0];
+  return `Os anos listados vão de ${ini} a ${fim} porque é o período coberto pela base do ClimaAgro: os dados de clima e de produtividade foram coletados a partir de janeiro de ${ini}, e o ano mais recente é o ano em curso. Anos fora dessa janela não têm dados no sistema.`;
+}
+
 /** Safra no formato do banco (`ano_inicial/ano_final_curto`), ex.: `2024/25`. */
 export function getProductivitySeasonOptions(): Array<{ value: string; label: string }> {
   const y0 = new Date().getFullYear();

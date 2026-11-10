@@ -14,7 +14,7 @@ import type { ReportExportItemDto } from '../../lib/api/contracts/reportExports'
 import { EmptyState } from '../components/ui/EmptyState';
 import { brazilUfSelectOptionsAlphabetical, UF_SELECT_PLACEHOLDER_OPTION } from '../../lib/geo/brazilStatesMalha';
 import { displayLocalidadeLabel } from '../../lib/geo/tocantinsCities';
-import { getProductivityYearOptions } from '../../lib/filters/appFilters';
+import { getProductivityYearOptions, getYearRangeNote } from '../../lib/filters/appFilters';
 import { buildReportFile, downloadReportFile, type ReportExportFileFormat } from '../../lib/reportExportFile';
 import {
   gatherReportDados,
@@ -332,6 +332,7 @@ export function ExportarRelatorios() {
                 />
               </div>
               <p className="text-xs text-muted-foreground -mt-2">
+                {getYearRangeNote()}{' '}
                 Os anos definem o intervalo civil completo (1º de janeiro a 31 de dezembro dos extremos) usado nas
                 consultas de clima e produtividade. Se o ano inicial for maior que o final, o outro campo é ajustado
                 automaticamente.
