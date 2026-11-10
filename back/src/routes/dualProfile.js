@@ -3,6 +3,7 @@ const { models } = require('../config/database');
 const { Op } = require('sequelize');
 const { normalizeUf } = require('../utils/brazilUfs');
 const { deleteStoredFile } = require('../services/iagroMediaStorage');
+const diarioService = require('../services/diarioService');
 
 const router = express.Router();
 
@@ -130,7 +131,7 @@ router.put('/me', async (req, res) => {
 
 /**
  * DELETE /api/dual-profile/me — exclui todos os dados do usuário (LGPD art. 18, VI — direito ao esquecimento).
- * Remove: DualUserProfile, ChatHistory e os anexos enviados ao IAgro.
+ * Remove: DualUserProfile, ChatHistory, os anexos enviados ao IAgro e o Diário de Campo (registros e fotos).
  */
 router.delete('/me', async (req, res) => {
   try {
@@ -151,6 +152,8 @@ router.delete('/me', async (req, res) => {
     await models.ChatHistory.destroy({ where: { clerkUserId } });
     const chaves = comAnexos.flatMap((r) => (Array.isArray(r.attachments) ? r.attachments : []).map((a) => a.key));
     await Promise.all(chaves.map((k) => deleteStoredFile(k)));
+    const chavesDiario = await diarioService.removerTodos(clerkUserId);
+    await Promise.all(chavesDiario.map((k) => deleteStoredFile(k)));
     await profile.destroy();
 
     return res.json({

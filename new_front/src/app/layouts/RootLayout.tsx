@@ -14,6 +14,7 @@ import {
   X,
   Bot,
   GitCompare,
+  BookOpen,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useClerk, useUser } from '@clerk/clerk-react';
@@ -29,6 +30,7 @@ const navigationMain = [
   { name: 'Mapa de Produtividade', path: '/mapa-produtividade', icon: TrendingUp },
   { name: 'Séries Temporais', path: '/series-temporais', icon: LineChart },
   { name: 'Comparador de Estados', path: '/comparador', icon: GitCompare },
+  { name: 'Diário de Campo', path: '/diario', icon: BookOpen },
   { name: 'Alertas', path: '/alertas', icon: Bell },
   { name: 'IAgro', path: '/iagro', icon: Bot },
   { name: 'Exportar Relatório', path: '/exportar', icon: FileText },

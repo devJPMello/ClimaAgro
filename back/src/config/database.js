@@ -91,6 +91,27 @@ async function ensureWhatsappAlertasEnviadosTable() {
   `);
 }
 
+/** Migração: registros do Diário de Campo (fotos ficam em hybrid_media_files, referenciadas em attachments). */
+async function ensureFieldDiaryTable() {
+  await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS field_diary_entries (
+      id VARCHAR(36) PRIMARY KEY,
+      user_id VARCHAR(128) NOT NULL,
+      entry_date DATE NOT NULL,
+      entry_type VARCHAR(20) NOT NULL,
+      crop VARCHAR(60),
+      uf CHAR(2) NOT NULL,
+      municipality VARCHAR(80),
+      notes TEXT,
+      attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await sequelize.query(
+    'CREATE INDEX IF NOT EXISTS idx_field_diary_user_date ON field_diary_entries (user_id, entry_date DESC);'
+  );
+}
+
 async function ensureIndexes() {
   const indexDefs = [
     { name: 'idx_climate_data_uf_date', table: 'climate_data', cols: '(uf, date)' },
@@ -136,6 +157,7 @@ const connectDB = async () => {
     await ensureWhatsappVerificadoColumn();
     await ensureWhatsappVerificacoesTable();
     await ensureWhatsappAlertasEnviadosTable();
+    await ensureFieldDiaryTable();
 
     // Garante índices críticos (CREATE INDEX IF NOT EXISTS — não bloqueia se já existirem)
     await ensureIndexes();

@@ -7,6 +7,7 @@ import { MapaClimatico } from "./pages/MapaClimatico";
 import { MapaProdutividade } from "./pages/MapaProdutividade";
 import { SeriesTemporais } from "./pages/SeriesTemporais";
 import { ComparadorEstados } from "./pages/ComparadorEstados";
+import { DiarioCampo } from "./pages/DiarioCampo";
 import { Alertas } from "./pages/Alertas";
 import { ExportarRelatorios } from "./pages/ExportarRelatorios";
 import { IAgro } from "./pages/IAgro";
@@ -49,6 +50,7 @@ export const router = createBrowserRouter([
       { path: "mapa-produtividade", Component: MapaProdutividade },
       { path: "series-temporais", Component: SeriesTemporais },
       { path: "comparador", Component: ComparadorEstados },
+      { path: "diario", Component: DiarioCampo },
       { path: "alertas", Component: Alertas },
       { path: "exportar", Component: ExportarRelatorios },
       { path: "iagro", Component: IAgro },
