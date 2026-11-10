@@ -4,9 +4,11 @@ import { LEGEND_BY_METRIC, normalizeBrazilMapMetric } from './brazilMapConfig';
 interface MapMetricLegendProps {
   metric: BrazilMapMetric;
   className?: string;
+  /** Observação exibida no fim da legenda (ex.: por que só alguns anos aparecem no filtro). */
+  note?: string;
 }
 
-export function MapMetricLegend({ metric, className }: MapMetricLegendProps) {
+export function MapMetricLegend({ metric, className, note }: MapMetricLegendProps) {
   const items = LEGEND_BY_METRIC[normalizeBrazilMapMetric(metric)];
   return (
     <div className={className}>
@@ -22,6 +24,7 @@ export function MapMetricLegend({ metric, className }: MapMetricLegendProps) {
           </div>
         ))}
       </div>
+      {note && <p className="mt-3 text-xs text-muted-foreground leading-snug">{note}</p>}
     </div>
   );
 }

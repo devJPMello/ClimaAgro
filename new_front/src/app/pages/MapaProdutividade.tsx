@@ -225,9 +225,8 @@ export function MapaProdutividade() {
                   />
                   <Select label="Mês" value={mes} onChange={(e) => setMes(e.target.value)} options={MONTH_OPTIONS} />
                   <Select label="Ano" value={ano} onChange={(e) => setAno(e.target.value)} options={YEAR_OPTIONS} />
-                  <p className="text-xs text-muted-foreground -mt-2">{getYearRangeNote()}</p>
                   <div className="pt-4 border-t border-border">
-                    <MapMetricLegend metric="produtividade" />
+                    <MapMetricLegend metric="produtividade" note={getYearRangeNote()} />
                   </div>
                 </CardBody>
               </Card>
