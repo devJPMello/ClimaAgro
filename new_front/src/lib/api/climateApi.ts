@@ -10,7 +10,7 @@ export async function getDashboardSummary(params?: { state?: string }): Promise<
   if (raw && raw.length === 2) {
     return httpClient.get<DashboardSummaryDto>(`climate/dashboard-summary?state=${encodeURIComponent(raw)}`);
   }
-  /** Sem `state`: resumo principal (MT, TO, GO, SP, MG) no backend. */
+  /** Sem `state`: resumo nacional, com todos os estados presentes na base. */
   return httpClient.get<DashboardSummaryDto>('climate/dashboard-summary');
 }
 

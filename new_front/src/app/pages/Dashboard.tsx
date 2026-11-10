@@ -105,7 +105,7 @@ export function Dashboard() {
         <p className="text-muted-foreground">
           {estado
             ? `Clima e produtividade do seu estado (${estado}), conforme o perfil — últimos dias e último ano com dados na base.`
-            : 'Visão geral do clima e da produtividade em estados selecionados dinamicamente (últimos dias e último ano com dados na base).'}
+            : 'Visão geral do clima e da produtividade em todos os estados com dados na base (últimos dias e último ano com dados na base).'}
         </p>
         {ufPerfil && (
           <button
@@ -113,7 +113,7 @@ export function Dashboard() {
             onClick={() => setVerTodos((v) => !v)}
             className="mt-2 text-sm text-primary hover:underline"
           >
-            {verTodos ? `Ver só o meu estado (${ufPerfil})` : 'Ver os principais estados'}
+            {verTodos ? `Ver só o meu estado (${ufPerfil})` : 'Ver todos os estados'}
           </button>
         )}
       </div>
@@ -153,7 +153,7 @@ export function Dashboard() {
                   <div className="min-w-0">
                     <CardTitle>Resumo por localidade</CardTitle>
                     <CardDescription>
-                      {estado ? `Estado do seu perfil (${estado})` : 'Estados em destaque'} — clima agregado (últimos 14 dias) e produtividade média no último ano agrícola
+                      {estado ? `Estado do seu perfil (${estado})` : 'Todos os estados com dados na base'} — clima agregado (últimos 14 dias) e produtividade média no último ano agrícola
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">

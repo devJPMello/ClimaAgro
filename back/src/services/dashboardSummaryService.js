@@ -357,7 +357,7 @@ async function buildDashboardPrincipalStates({ models, ufs }) {
 /**
  * Monta o JSON esperado pelo `DashboardSummaryDto` do new_front.
  * @param {{ models: object, state?: string }} opts — `state`: sigla UF (ex.: TO) para visão municipal daquela UF;
- *   se omitido, resumo principal com MT, TO, GO, SP e MG (nível estadual).
+ *   se omitido, resumo nacional com todos os estados presentes em geo_data (nível estadual).
  */
 async function buildDashboardSummary({ models, state: stateParam }) {
   const { ClimateData, GeoData, Productivity, OfficialAlert } = models;
