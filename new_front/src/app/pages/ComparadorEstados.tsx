@@ -8,6 +8,7 @@ import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { YearRangeNote } from '../components/ui/YearRangeNote';
+import { MapasEstados } from '../components/comparador/MapasEstados';
 import { getClimateSeriesByUf, getDashboardSummary } from '../../lib/api/climateApi';
 import { listProductivityProductLabels, listProductivityRecords } from '../../lib/api/productivityApi';
 import { useClimateUfs } from '../../lib/hooks/useClimateUfs';
@@ -75,6 +76,8 @@ async function carregarEstado(uf: string, cultura: string, anos: number[]) {
     alertas: regiao?.alertas ?? 0,
     produtividadeMediaPeriodo: media(Object.values(prodPorAno)),
     chuvaMensalMediaPeriodo: media(chuvaPorMes),
+    temperaturaNum: regiao?.temperaturaNum ?? null,
+    precipitacaoNum: regiao?.precipitacaoNum ?? null,
   };
   return { uf, linhaResumo, chuvaPorMes, prodPorAno };
 }
@@ -242,6 +245,8 @@ export function ComparadorEstados() {
 
       {resultado && (
         <>
+          <MapasEstados resumo={resultado.resumo} />
+
           <Card>
             <CardHeader>
               <CardTitle>Resumo por estado</CardTitle>

@@ -67,6 +67,9 @@ export type ResumoEstado = {
   alertas: number;
   produtividadeMediaPeriodo: number | null;
   chuvaMensalMediaPeriodo: number | null;
+  /** Valores numéricos usados para colorir os mapas (clima dos últimos 14 dias). */
+  temperaturaNum?: number | null;
+  precipitacaoNum?: number | null;
 };
 
 const CABECALHO_CSV = [
