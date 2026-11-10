@@ -255,9 +255,9 @@ export function ComparadorEstados() {
                       <th className="py-2 pr-4 font-medium">Estado</th>
                       <th className="py-2 pr-4 font-medium">Temperatura (14 d)</th>
                       <th className="py-2 pr-4 font-medium">Chuva (14 d)</th>
-                      <th className="py-2 pr-4 font-medium">Produtividade (último ano)</th>
+                      <th className="py-2 pr-4 font-medium">Produtividade (último ano, todas as culturas)</th>
                       <th className="py-2 pr-4 font-medium">Alertas</th>
-                      <th className="py-2 pr-4 font-medium">Produtividade média</th>
+                      <th className="py-2 pr-4 font-medium">Produtividade média da cultura</th>
                       <th className="py-2 font-medium">Chuva mensal média</th>
                     </tr>
                   </thead>

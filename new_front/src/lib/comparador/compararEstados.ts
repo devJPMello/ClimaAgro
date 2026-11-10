@@ -73,9 +73,9 @@ const CABECALHO_CSV = [
   'UF',
   'Temperatura (14 dias)',
   'Precipitação (14 dias)',
-  'Produtividade (último ano)',
+  'Produtividade (último ano, todas as culturas)',
   'Alertas',
-  'Produtividade média no período (t/ha)',
+  'Produtividade média da cultura no período (t/ha)',
   'Chuva mensal média no período (mm)',
 ];
 
