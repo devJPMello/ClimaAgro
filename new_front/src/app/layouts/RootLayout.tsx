@@ -13,6 +13,7 @@ import {
   Menu,
   X,
   Bot,
+  GitCompare,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useClerk, useUser } from '@clerk/clerk-react';
@@ -27,6 +28,7 @@ const navigationMain = [
   { name: 'Mapa Climático', path: '/mapa-climatico', icon: MapPin },
   { name: 'Mapa de Produtividade', path: '/mapa-produtividade', icon: TrendingUp },
   { name: 'Séries Temporais', path: '/series-temporais', icon: LineChart },
+  { name: 'Comparador de Estados', path: '/comparador', icon: GitCompare },
   { name: 'Alertas', path: '/alertas', icon: Bell },
   { name: 'IAgro', path: '/iagro', icon: Bot },
   { name: 'Exportar Relatório', path: '/exportar', icon: FileText },
