@@ -15,7 +15,7 @@ export type ReportMeta = { titulo: string; local: string };
 export async function buildReportXlsx(meta: ReportMeta, model: ReportModel, generatedAt = new Date()): Promise<Blob> {
   const { default: writeXlsxFile } = await import('write-excel-file/browser');
 
-  const head = (value: string) => ({ value, fontWeight: 'bold' as const, backgroundColor: '#dcfce7', textColor: '#166534' });
+  const head = (value: string) => ({ value, fontWeight: 'bold' as const, backgroundColor: '#e3effc', textColor: '#0d47a1' });
   const num = (value: number | null, format: string) => (value == null || !Number.isFinite(value) ? null : { value, type: Number, format });
   const text = (value: string | number | null) => (value == null ? null : { value: String(value) });
 

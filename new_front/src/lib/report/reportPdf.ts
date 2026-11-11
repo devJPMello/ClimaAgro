@@ -14,14 +14,14 @@ import {
   type ReportModel,
 } from './reportModel';
 
-const BRAND: RGB = [22, 101, 52];
-const BRAND_LIGHT: RGB = [220, 252, 231];
+const BRAND: RGB = [13, 71, 161];
+const BRAND_LIGHT: RGB = [227, 239, 252];
 const TEXT_MUTED: RGB = [82, 82, 91];
 const BORDER: RGB = [228, 228, 231];
 const ZEBRA: RGB = [247, 248, 250];
 const RAIN: RGB = [55, 138, 221];
 const TEMP: RGB = [216, 90, 48];
-const PROD: RGB = [59, 109, 17];
+const PROD: RGB = [13, 71, 161];
 
 const MARGIN = 48;
 const FOOTER_RESERVE = 52;
@@ -60,7 +60,7 @@ function cover(doc: jsPDF, meta: ReportPdfMeta, model: ReportModel, generatedAt:
   const bandH = 104;
   doc.setFillColor(...BRAND);
   doc.rect(0, 0, w, bandH, 'F');
-  doc.setTextColor(220, 252, 231);
+  doc.setTextColor(214, 232, 252);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.text(`ClimaAgro · ${meta.titulo}`, MARGIN, 38);
@@ -70,7 +70,7 @@ function cover(doc: jsPDF, meta: ReportPdfMeta, model: ReportModel, generatedAt:
   doc.text(doc.splitTextToSize(model.stateLabel, w - MARGIN * 2)[0] ?? model.stateLabel, MARGIN, 68);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  doc.setTextColor(220, 252, 231);
+  doc.setTextColor(214, 232, 252);
   doc.text(`Período: ${periodLabel(model)}  ·  gerado em ${generatedAt.toLocaleDateString('pt-BR')}`, MARGIN, 90);
   doc.setTextColor(0, 0, 0);
   return bandH + 22;
@@ -289,23 +289,7 @@ function productivityTables(doc: jsPDF, y: number, model: ReportModel): number {
     ],
     crops.map((c) => [c.crop, String(c.records), formatNumber(c.average, 2)])
   );
-  const sorted = [...model.productivity]
-    .filter((r) => r.value != null)
-    .sort((a, b) => a.crop.localeCompare(b.crop, 'pt-BR') || (a.year ?? 0) - (b.year ?? 0))
-    .slice(0, 60);
-  if (!sorted.length) return y;
-  y = sectionTitle(doc, y, `Detalhe por cultura e ano${model.productivity.length > 60 ? ' (primeiros 60 registros)' : ''}`);
-  return table(
-    doc,
-    y,
-    [
-      { header: 'Cultura', weight: 3 },
-      { header: 'Ano', weight: 1, align: 'right' },
-      { header: 'Local', weight: 3 },
-      { header: 'Produtividade (t/ha)', weight: 2, align: 'right' },
-    ],
-    sorted.map((r) => [r.crop, r.year != null ? String(r.year) : '—', r.place, formatNumber(r.value, 2)])
-  );
+  return y;
 }
 
 function seasonTable(doc: jsPDF, y: number, model: ReportModel): number {
