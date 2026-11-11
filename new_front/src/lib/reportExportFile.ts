@@ -1,4 +1,7 @@
 import { jsPDF } from 'jspdf';
+import { createModelReportPdf } from './report/reportPdf';
+import { buildReportCsv, buildReportXlsx } from './report/reportTables';
+import type { ReportModel } from './report/reportModel';
 
 export type ReportExportFileFormat = 'pdf' | 'csv' | 'xlsx';
 
@@ -11,6 +14,8 @@ export interface ReportFilePayload {
   corpoTexto?: string;
   /** Bloco com estatísticas e amostras vindas da API (clima / produtividade). */
   dadosIntegrados?: string;
+  /** Dados estruturados do relatório (gráficos, planilha e CSV). Sem ele, cai no layout só de texto. */
+  model?: ReportModel;
 }
 
 const BRAND: [number, number, number] = [22, 101, 52];
@@ -347,6 +352,10 @@ function drawFooters(doc: jsPDF, margin: number): void {
 
 /** Monta o PDF A4 (capa, metadados, secções e tabelas quando possível) sem baixar. */
 function createReportPdf(payload: ReportFilePayload): { doc: jsPDF; name: string } {
+  if (payload.model) {
+    const doc = createModelReportPdf({ titulo: payload.titulo, local: payload.local }, payload.model);
+    return { doc, name: `climaagro-relatorio-${slug(payload.local)}-${Date.now()}.pdf` };
+  }
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const margin = 48;
   const maxW = pageWidth(doc) - margin * 2;
@@ -420,6 +429,9 @@ function downloadTextFile(filename: string, content: string, mime: string): void
 }
 
 function createReportCsv(payload: ReportFilePayload, fileExt: 'csv' | 'xlsx' = 'csv'): { content: string; filename: string } {
+  if (payload.model) {
+    return { content: buildReportCsv(payload.model), filename: `climaagro-relatorio-${slug(payload.local)}-${Date.now()}.csv` };
+  }
   const rows = [
     ['Campo', 'Valor'],
     ['Título', payload.titulo],
@@ -447,11 +459,29 @@ export function downloadReportCsv(payload: ReportFilePayload, fileExt: 'csv' | '
   downloadTextFile(filename, content, 'text/csv');
 }
 
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /** Gera o mesmo arquivo do download, mas devolve o conteúdo (para enviar ao WhatsApp). */
-export function buildReportFile(payload: ReportFilePayload): { blob: Blob; filename: string } {
+export async function buildReportFile(payload: ReportFilePayload): Promise<{ blob: Blob; filename: string }> {
   if (payload.formato === 'pdf') {
     const { doc, name } = createReportPdf(payload);
     return { blob: doc.output('blob'), filename: name };
+  }
+  if (payload.formato === 'xlsx' && payload.model) {
+    const blob = await buildReportXlsx({ titulo: payload.titulo, local: payload.local }, payload.model);
+    return { blob: new Blob([blob], { type: XLSX_MIME }), filename: `climaagro-relatorio-${slug(payload.local)}-${Date.now()}.xlsx` };
   }
   const { content, filename } = createReportCsv(
     payload.formato === 'csv' ? payload : { ...payload, formato: 'xlsx' },
@@ -460,16 +490,16 @@ export function buildReportFile(payload: ReportFilePayload): { blob: Blob; filen
   return { blob: new Blob([`\uFEFF${content}`], { type: 'text/csv;charset=utf-8' }), filename };
 }
 
-/** CSV com separador compatível com Excel (pt-BR). */
-export function downloadReportFile(payload: ReportFilePayload): void {
-  const f = payload.formato;
-  if (f === 'pdf') {
+/** Baixa o relatório no formato escolhido: PDF, Excel (.xlsx, com abas) ou CSV. */
+export async function downloadReportFile(payload: ReportFilePayload): Promise<void> {
+  if (payload.formato === 'pdf') {
     downloadReportPdf(payload);
     return;
   }
-  if (f === 'csv') {
+  if (payload.formato === 'csv') {
     downloadReportCsv(payload, 'csv');
     return;
   }
-  downloadReportCsv({ ...payload, formato: 'xlsx' }, 'xlsx');
+  const { blob, filename } = await buildReportFile(payload);
+  downloadBlob(blob, filename);
 }

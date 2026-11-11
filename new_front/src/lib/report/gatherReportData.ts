@@ -11,6 +11,13 @@ import {
 } from '../api/productivityApi';
 import { labelForProductivityCropType } from '../filters/appFilters';
 import { formatUfLabel, UF_NOME } from '../geo/brazilStatesMalha';
+import {
+  emptyReportModel,
+  type MonthlyClimate,
+  type MonthlyProductivity,
+  type ProductivityRecord,
+  type ReportModel,
+} from './reportModel';
 import { REPORT_EXPORT_UF, TOCANTINS_CITY_VALUE_TO_NAME } from '../geo/tocantinsCities';
 
 /** Ano civil a partir de `YYYY-MM-DD` sem usar `Date` em UTC (evita 2025-01-01 → getFullYear() === 2024 em BRT). */
@@ -498,6 +505,42 @@ function monthLabelPtBr(ym: string): string {
   }
 }
 
+function climateModelFromSeries(series: ClimateMonthlySeries | null): MonthlyClimate[] | null {
+  if (!series) return null;
+  return series.monthKeys.map((ym) => {
+    const acc = series.byMonth.get(ym);
+    const hasData = Boolean(acc && acc.days > 0);
+    return {
+      ym,
+      label: monthLabelPtBr(ym),
+      days: hasData ? acc!.days : 0,
+      temperature: hasData && acc!.temps.length ? mean(acc!.temps) : null,
+      rainfall: hasData && acc!.precs.length ? acc!.precs.reduce((a, b) => a + b, 0) : null,
+      humidity: hasData && acc!.hums.length ? mean(acc!.hums) : null,
+      wind: hasData && acc!.winds.length ? mean(acc!.winds) : null,
+    };
+  });
+}
+
+function productivityModelRows(rows: ProductivityListResponse['data'], ufLabel: string): ProductivityRecord[] {
+  return rows.map((r) => {
+    const raw = r.productLabel || r.cropType;
+    return {
+      year: typeof r.year === 'number' ? r.year : r.year != null && Number.isFinite(Number(r.year)) ? Number(r.year) : null,
+      crop: raw ? labelForProductivityCropType(String(raw)) : '—',
+      value: n(r.productivity),
+      place: r.geoData?.name || r.municipalityName || ufLabel,
+    };
+  });
+}
+
+function monthlyProductivityModel(buckets: { ym: string; rows: ProductivityListResponse['data'] }[]): MonthlyProductivity[] {
+  return buckets.map(({ ym, rows }) => {
+    const values = rows.map((r) => n(r.productivity)).filter((x): x is number => x != null);
+    return { ym, label: monthLabelPtBr(ym), records: rows.length, average: values.length ? mean(values) : null };
+  });
+}
+
 function formatClimateMonthlyExportBlock(series: ClimateMonthlySeries): string {
   const lines: string[] = [
     ...series.summaryLines,
@@ -529,7 +572,7 @@ async function buildClimateExportSection(
   ufLabel: string,
   startDate: string,
   endDate: string
-): Promise<string> {
+): Promise<{ text: string; series: ClimateMonthlySeries | null }> {
   const dailyRows = await listAllClimateRecordsInRange({
     state: ufLabel,
     startDate,
@@ -562,9 +605,12 @@ async function buildClimateExportSection(
   }
 
   if (!chosen) {
-    return `Sem dados de clima para «${formatUfLabel(ufLabel)}» no intervalo pedido (nem série /climate/series nem listagem diária com agregação mensal). Verifique a sincronização no servidor.`;
+    return {
+      text: `Sem dados de clima para «${formatUfLabel(ufLabel)}» no intervalo pedido (nem série /climate/series nem listagem diária com agregação mensal). Verifique a sincronização no servidor.`,
+      series: null,
+    };
   }
-  return formatClimateMonthlyExportBlock(chosen);
+  return { text: formatClimateMonthlyExportBlock(chosen), series: chosen };
 }
 
 /** Comparativo com safra: uma linha por mês com clima e produtividade (valor da API). */
@@ -839,10 +885,16 @@ function formatProductivityBlock(perYear: ProductivityListResponse['data'][], uf
   return lines.join('\n');
 }
 
+/** Texto longo com dados reais da API (clima e/ou produtividade). */
+export async function gatherReportDados(params: Parameters<typeof gatherReport>[0]): Promise<string> {
+  return (await gatherReport(params)).text;
+}
+
 /**
- * Texto longo com dados reais da API (clima e/ou produtividade) para incluir no PDF/CSV.
+ * Reúne os dados reais da API (clima e/ou produtividade) em texto e em um modelo estruturado
+ * (números), usado pelo PDF com gráficos, pela planilha .xlsx e pelo CSV.
  */
-export async function gatherReportDados(params: {
+export async function gatherReport(params: {
   tipo: ReportTipoKey;
   localidadeKey: string;
   displayLocal?: string;
@@ -850,9 +902,15 @@ export async function gatherReportDados(params: {
   endDate: string;
   /** Só `tipo === 'produtividade'`: filtra produtividade/SIDRA pela safra SIDRA (`2024/25`). */
   productivitySeason?: string;
-}): Promise<string> {
+}): Promise<{ text: string; model: ReportModel }> {
   const ufLabel = normalizeReportUf(params.localidadeKey);
   const chunks: string[] = [];
+  const model = emptyReportModel(
+    params.tipo,
+    formatUfLabel(ufLabel),
+    String(params.startDate).slice(0, 10),
+    String(params.endDate).slice(0, 10)
+  );
   const seasonProd =
     (params.tipo === 'produtividade' || params.tipo === 'comparativo') && params.productivitySeason?.trim()
       ? params.productivitySeason.trim()
@@ -867,13 +925,27 @@ export async function gatherReportDados(params: {
           state: ufLabel,
         });
         const compRows = comp.success && Array.isArray(comp.data) ? comp.data : [];
+        model.season = seasonProd;
+        model.seasonRows = compRows.map((row) => {
+          const ref = row.month || (typeof row.mes === 'string' && /^\d{4}-\d{2}/.test(row.mes) ? row.mes.slice(0, 7) : '');
+          return {
+            month: ref,
+            label: row.mes || row.month || ref,
+            rainfall: n(row.climate),
+            temperature: n(row.avgTemperature),
+            humidity: n(row.avgHumidity),
+            productivity: n(row.productivity),
+          };
+        });
         chunks.push('=== Comparativo (safra) — clima e produtividade por mês (API climate-vs-productivity) ===\n');
         chunks.push(`Safra: ${seasonProd}\n`);
         if (comp.meta?.baseYear) chunks.push(`Ano-base do clima: ${comp.meta.baseYear}\n`);
         chunks.push(formatComparativoSeasonMerged(compRows));
       } else if (!isComparativoCivil) {
         chunks.push('=== Dados climáticos (listagem diária e/ou série por UF) ===\n');
-        chunks.push(await buildClimateExportSection(ufLabel, params.startDate, params.endDate));
+        const climateSection = await buildClimateExportSection(ufLabel, params.startDate, params.endDate);
+        model.climate = climateModelFromSeries(climateSection.series);
+        chunks.push(climateSection.text);
       }
     } catch {
       chunks.push('=== Dados climáticos ===\nNão foi possível obter os dados (rede, sessão ou servidor).');
@@ -903,6 +975,7 @@ export async function gatherReportDados(params: {
         }
       }
       const flatProd = perYear.flat();
+      model.productivity = productivityModelRows(flatProd, ufLabel);
       const monthKeysProd = monthKeysBetweenInclusive(
         String(params.startDate).slice(0, 10),
         String(params.endDate).slice(0, 10)
@@ -927,6 +1000,7 @@ export async function gatherReportDados(params: {
         }
         monthlyBuckets.push({ ym, rows });
       }
+      model.monthlyProductivity = monthlyProductivityModel(monthlyBuckets);
 
       if (isComparativoCivil) {
         const climRows = await listAllClimateRecordsInRange({
@@ -953,6 +1027,7 @@ export async function gatherReportDados(params: {
         } else if (!climateSeries && climateFromSeries) {
           climateSeries = climateFromSeries;
         }
+        model.climate = climateModelFromSeries(climateSeries);
         chunks.push('\n\n=== Comparativo mensal (clima × produtividade) ===\n');
         chunks.push(
           formatComparativoCivilMonthlyBlock(
@@ -992,5 +1067,5 @@ export async function gatherReportDados(params: {
     }
   }
 
-  return chunks.join('').trim();
+  return { text: chunks.join('').trim(), model };
 }

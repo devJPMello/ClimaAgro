@@ -18,7 +18,7 @@ import { YearRangeNote } from '../components/ui/YearRangeNote';
 import { getProductivityYearOptions } from '../../lib/filters/appFilters';
 import { buildReportFile, downloadReportFile, type ReportExportFileFormat } from '../../lib/reportExportFile';
 import {
-  gatherReportDados,
+  gatherReport,
   type ReportTipoKey,
   localidadeKeyFromStoredLocal,
   parseExportPeriodoLabel,
@@ -47,8 +47,8 @@ function labelTipoRelatorio(value: string): string {
 
 function labelFormatoResumo(value: string): string {
   if (value === 'pdf') return 'PDF';
-  if (value === 'csv') return 'CSV (separador ;)';
-  return 'Excel (arquivo .csv compatível com Excel / LibreOffice)';
+  if (value === 'csv') return 'CSV (uma linha por mês e variável)';
+  return 'Excel (.xlsx com abas)';
 }
 
 export function ExportarRelatorios() {
@@ -177,8 +177,8 @@ export function ExportarRelatorios() {
       const fmt = formato as ReportExportFileFormat;
 
       // Etapa 1: coleta de dados (mínimo 700ms para o step ser visível)
-      const [dadosIntegrados] = await Promise.all([
-        gatherReportDados({
+      const [coleta] = await Promise.all([
+        gatherReport({
           tipo: tipoRelatorio as ReportTipoKey,
           localidadeKey: localidade,
           displayLocal: local,
@@ -196,24 +196,19 @@ export function ExportarRelatorios() {
         local,
         periodo,
         formato: fmt,
-        dadosIntegrados,
+        dadosIntegrados: coleta.text,
+        model: coleta.model,
       };
-      downloadReportFile(dadosArquivo);
+      await downloadReportFile(dadosArquivo);
 
       if (enviarWhatsapp && podeEnviarWhatsapp && user?.id) {
         try {
-          const { blob, filename } = buildReportFile(dadosArquivo);
+          const { blob, filename } = await buildReportFile(dadosArquivo);
           await enviarRelatorioWhatsapp(user.id, { blob, filename, titulo: `${tipo} — ${local}` });
           toast.success('Relatório enviado para o seu WhatsApp.');
         } catch (e) {
           toast.error(e instanceof Error ? e.message : 'Não foi possível enviar o relatório ao WhatsApp.');
         }
-      }
-
-      if (fmt === 'xlsx') {
-        toast.message(
-          'Arquivo CSV gerado (separador ;), em UTF-8. No Excel, use Dados > De texto/CSV ou abra direto conforme a versão.'
-        );
       }
 
       // Etapa 3: registro no histórico (mínimo 700ms)
@@ -252,7 +247,7 @@ export function ExportarRelatorios() {
       const parsed = parseExportPeriodoLabel(item.periodo);
       const tipoItem = reportTipoFromStoredLabel(item.tipo);
       const key = localidadeKeyFromStoredLocal(item.local);
-      const dadosIntegrados = await gatherReportDados({
+      const coleta = await gatherReport({
         tipo: tipoItem,
         localidadeKey: key,
         displayLocal: item.local,
@@ -262,13 +257,14 @@ export function ExportarRelatorios() {
           tipoItem === 'produtividade' || tipoItem === 'comparativo' ? parsed.productivitySeason : undefined,
       });
       const fmt = String(item.formato).toLowerCase() as ReportExportFileFormat;
-      downloadReportFile({
+      await downloadReportFile({
         titulo: item.tipo,
         local: item.local,
         periodo: item.periodo,
         formato: fmt === 'pdf' || fmt === 'csv' || fmt === 'xlsx' ? fmt : 'pdf',
         corpoTexto: undefined,
-        dadosIntegrados,
+        dadosIntegrados: coleta.text,
+        model: coleta.model,
       });
       toast.success('Download iniciado.');
     } catch (e) {
@@ -354,11 +350,8 @@ export function ExportarRelatorios() {
                 onChange={(e) => setFormato(e.target.value)}
                 options={[
                   { value: 'pdf', label: 'PDF' },
-                  { value: 'csv', label: 'CSV (texto; separador ;)' },
-                  {
-                    value: 'xlsx',
-                    label: 'Excel (mesmo conteúdo em .csv para abrir no Excel — não é planilha .xlsx binária)',
-                  },
+                  { value: 'csv', label: 'CSV (uma linha por mês e variável)' },
+                  { value: 'xlsx', label: 'Excel (.xlsx com abas: resumo, clima, produtividade)' },
                 ]}
               />
 
@@ -470,17 +463,17 @@ export function ExportarRelatorios() {
                 <div className="space-y-2 text-sm text-muted-foreground">
                   <div className="flex items-start gap-2">
                     <span className="w-14 shrink-0 font-medium text-foreground">PDF</span>
-                    <span>Texto estruturado com cabeçalho e bloco &quot;Dados climáticos e agrícolas&quot; vindos da API.</span>
+                    <span>Capa, números em destaque, gráficos de chuva, temperatura e produtividade, leitura dos dados, tabelas e fontes.</span>
                   </div>
                   <div className="flex items-start gap-2">
                     <span className="w-14 shrink-0 font-medium text-foreground">CSV</span>
-                    <span>Algumas linhas-chave (metadados + dados agregados em uma coluna), separador ponto e vírgula.</span>
+                    <span>Uma linha por mês e por variável (seção, período, cultura, variável, valor, unidade), com separador ponto e vírgula e vírgula decimal.</span>
                   </div>
                   <div className="flex items-start gap-2">
                     <span className="w-14 shrink-0 font-medium text-foreground">Excel</span>
                     <span>
-                      Na prática, o mesmo CSV (UTF-8, separador ;) salvo com extensão .csv — adequado para abrir no
-                      Excel; não há arquivo .xlsx binário nem macros.
+                      Planilha .xlsx de verdade, com abas (Resumo, Clima mensal, Produtividade, Por cultura e Safra),
+                      cabeçalho formatado e colunas separadas, pronta para filtrar e fazer gráficos.
                     </span>
                   </div>
                 </div>
@@ -504,8 +497,8 @@ export function ExportarRelatorios() {
                   </li>
                 </ul>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Não há gráficos embutidos no PDF nem recomendações agronômicas automáticas — apenas texto e números
-                  obtidos das APIs.
+                  A &quot;leitura dos dados&quot; do PDF é gerada por regras simples sobre os números (máximos, meses
+                  chuvosos, variação entre anos), sem inteligência artificial e sem recomendações agronômicas.
                 </p>
               </div>
 
