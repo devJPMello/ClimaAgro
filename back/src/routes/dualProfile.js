@@ -22,7 +22,7 @@ router.get('/me', async (req, res) => {
     }
     const row = await models.DualUserProfile.findOne({
       where: { clerkUserId },
-      attributes: ['uf', 'municipio', 'nome', 'email', 'telefone', 'tipo', 'notifAlertasCriticos', 'notifRelatorios', 'notifAtualizacoes', 'lgpdConsentDate'],
+      attributes: ['uf', 'municipio', 'nome', 'email', 'tipo', 'notifAlertasCriticos', 'notifRelatorios', 'notifAtualizacoes', 'lgpdConsentDate'],
     });
     return res.json({ profile: row });
   } catch (e) {
@@ -32,7 +32,7 @@ router.get('/me', async (req, res) => {
 });
 
 /**
- * PUT /api/dual-profile/me — cria ou atualiza UF/município (e telefone) para IAgro, alertas e dados regionais.
+ * PUT /api/dual-profile/me — cria ou atualiza UF/município para IAgro, alertas e dados regionais.
  */
 router.put('/me', async (req, res) => {
   try {
@@ -56,12 +56,6 @@ router.put('/me', async (req, res) => {
         ? String(body.municipio || '')
             .trim()
             .slice(0, 120)
-        : undefined;
-    const telefone =
-      body.telefone !== undefined
-        ? String(body.telefone || '')
-            .trim()
-            .slice(0, 32)
         : undefined;
     const nomeIn =
       body.nome !== undefined
@@ -88,13 +82,11 @@ router.put('/me', async (req, res) => {
         tipo: 'produtor',
         uf: ufVal,
         municipio: municipio !== undefined ? municipio || null : null,
-        telefone: telefone !== undefined ? telefone || null : null,
       });
     } else {
       const patch = {};
       if (body.uf !== undefined) patch.uf = ufVal;
       if (municipio !== undefined) patch.municipio = municipio || null;
-      if (telefone !== undefined) patch.telefone = telefone || null;
       if (nomeIn) patch.nome = nomeIn;
       if (emailIn) patch.email = emailIn;
       if (typeof body.notifAlertasCriticos === 'boolean') patch.notifAlertasCriticos = body.notifAlertasCriticos;
@@ -105,7 +97,7 @@ router.put('/me', async (req, res) => {
         await row.update(patch);
       }
       await row.reload({
-        attributes: ['uf', 'municipio', 'nome', 'email', 'telefone', 'tipo', 'notifAlertasCriticos', 'notifRelatorios', 'notifAtualizacoes', 'lgpdConsentDate'],
+        attributes: ['uf', 'municipio', 'nome', 'email', 'tipo', 'notifAlertasCriticos', 'notifRelatorios', 'notifAtualizacoes', 'lgpdConsentDate'],
       });
     }
 
@@ -115,7 +107,6 @@ router.put('/me', async (req, res) => {
         municipio: row.municipio,
         nome: row.nome,
         email: row.email,
-        telefone: row.telefone,
         tipo: row.tipo,
         notifAlertasCriticos: row.notifAlertasCriticos,
         notifRelatorios: row.notifRelatorios,

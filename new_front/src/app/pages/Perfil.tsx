@@ -4,7 +4,7 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Button } from '../components/ui/Button';
 import { Checkbox } from '../components/ui/Checkbox';
-import { User, Mail, Moon, Phone, MapPin, Bell, FileText, Calendar, Sun, AlertTriangle } from 'lucide-react';
+import { User, Mail, Moon, MapPin, Bell, FileText, Calendar, Sun, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUser, useClerk } from '@clerk/clerk-react';
 import { TO_CITY_VALUE_TO_NAME } from '../../lib/geo/tocantinsCities';
@@ -77,7 +77,6 @@ export function Perfil() {
   const [deleting, setDeleting] = useState(false);
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
-  const [telefone, setTelefone] = useState('');
   const [ufSigla, setUfSigla] = useState('TO');
   const [municipioFavorito, setMunicipioFavorito] = useState('Palmas');
   const ufIbgeId = UF_IBGE_ID_BY_SIGLA[ufSigla] ?? '17';
@@ -105,7 +104,6 @@ export function Perfil() {
         if (p?.uf && UF_IBGE_ID_BY_SIGLA[p.uf]) {
           setUfSigla(p.uf);
         }
-        if (p?.telefone) setTelefone(p.telefone);
         if (p?.notifAlertasCriticos !== undefined) setNotifAlertasCriticos(p.notifAlertasCriticos);
         if (p?.notifRelatorios !== undefined) setNotifRelatorios(p.notifRelatorios);
         if (p?.notifAtualizacoes !== undefined) setNotifAtualizacoes(p.notifAtualizacoes);
@@ -164,7 +162,6 @@ export function Perfil() {
     if (!user) return;
     setNome(user.fullName || user.firstName || '');
     setEmail(user.primaryEmailAddress?.emailAddress || '');
-    setTelefone(user.primaryPhoneNumber?.phoneNumber || '');
   }, [user]);
 
   const {
@@ -190,7 +187,6 @@ export function Perfil() {
       await putMyDualProfile(user.id, {
         uf: ufSigla,
         municipio: municipioFavorito,
-        telefone: telefone.trim() || null,
         nome: user.fullName || user.firstName || nome || 'Produtor',
         email: user.primaryEmailAddress?.emailAddress || email || 'sem-email@climaagro.local',
       });
@@ -320,18 +316,6 @@ export function Perfil() {
                   className="pl-11"
                   disabled
                   helperText="Gerenciado pela conta Clerk"
-                />
-              </div>
-
-              <div className="relative">
-                <Phone className="absolute left-3 top-[42px] w-5 h-5 text-muted-foreground" />
-                <Input
-                  label="Telefone"
-                  type="tel"
-                  value={telefone}
-                  onChange={(e) => setTelefone(e.target.value)}
-                  className="pl-11"
-                  disabled={!editando}
                 />
               </div>
 

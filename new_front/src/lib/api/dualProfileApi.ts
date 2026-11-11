@@ -6,7 +6,6 @@ export type DualProfileDto = {
   municipio: string | null;
   nome: string;
   email: string;
-  telefone: string | null;
   tipo: string;
   notifAlertasCriticos: boolean;
   notifRelatorios: boolean;
@@ -34,7 +33,6 @@ export async function putMyDualProfile(
   body: {
     uf?: string;
     municipio?: string;
-    telefone?: string | null;
     nome?: string;
     email?: string;
     notifAlertasCriticos?: boolean;

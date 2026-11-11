@@ -190,14 +190,15 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
                 Política de Privacidade — ClimaAgro
               </div>
               <p>
-                O ClimaAgro coleta e processa seus dados pessoais (nome, e-mail, telefone e
+                O ClimaAgro coleta e processa seus dados pessoais (nome, e-mail e
                 localização) exclusivamente para personalizar alertas climáticos, relatórios
                 agrícolas e consultas ao IAgro, conforme o <strong>art. 7º, I</strong> da
                 LGPD (Lei 13.709/2018).
               </p>
               <p>
-                <strong>Dados coletados:</strong> nome, e-mail, telefone, UF e município,
-                histórico de conversas com o IAgro (incluindo imagens e documentos enviados)
+                <strong>Dados coletados:</strong> nome, e-mail, UF e município, o número de
+                WhatsApp (opcional, confirmado por código), os registros do Diário de Campo,
+                o histórico de conversas com o IAgro (incluindo imagens e documentos enviados)
                 e preferências de notificação.
               </p>
               <p>
