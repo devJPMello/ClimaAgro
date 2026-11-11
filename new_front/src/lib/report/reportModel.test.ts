@@ -6,6 +6,7 @@ import {
   formatNumber,
   mainCrop,
   periodLabel,
+  productivityByCrop,
   productivityByYear,
   rainfallByCalendarMonth,
   rainfallByFullYear,
@@ -90,6 +91,20 @@ describe('modelo do relatório', () => {
     ]);
     expect(mainCrop(records)).toBe('Soja');
     expect(mainCrop([])).toBeNull();
+  });
+
+  test('mainCrop prefere soja/milho a uma cultura com mais registros, e ignora produtividade zero', () => {
+    const records = [
+      { year: 2024, crop: 'Cana-de-açúcar', value: 80, place: 'MT' },
+      { year: 2025, crop: 'Cana-de-açúcar', value: 81, place: 'MT' },
+      { year: 2026, crop: 'Cana-de-açúcar', value: 82, place: 'MT' },
+      { year: 2026, crop: 'Soja', value: 3.9, place: 'MT' },
+      { year: 2026, crop: 'Alho', value: 0, place: 'MT' },
+    ];
+    expect(mainCrop(records)).toBe('Soja');
+    expect(productivityByCrop(records).map((c) => c.crop)).not.toContain('Alho');
+    expect(mainCrop([{ year: 2026, crop: 'Alho', value: 0, place: 'MT' }])).toBeNull();
+    expect(mainCrop(records.filter((r) => r.crop !== 'Soja'))).toBe('Cana-de-açúcar');
   });
 
   test('sampleCorrelation', () => {

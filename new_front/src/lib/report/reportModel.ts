@@ -120,7 +120,7 @@ export type YearAverage = { year: number; average: number; records: number };
 export function productivityByYear(records: ProductivityRecord[], crop?: string): YearAverage[] {
   const byYear = new Map<number, number[]>();
   for (const r of records) {
-    if (r.year == null || r.value == null || !Number.isFinite(r.value)) continue;
+    if (r.year == null || r.value == null || !Number.isFinite(r.value) || r.value <= 0) continue;
     if (crop && r.crop !== crop) continue;
     byYear.set(r.year, [...(byYear.get(r.year) ?? []), r.value]);
   }
@@ -134,7 +134,7 @@ export type CropAverage = { crop: string; average: number; records: number };
 export function productivityByCrop(records: ProductivityRecord[]): CropAverage[] {
   const byCrop = new Map<string, number[]>();
   for (const r of records) {
-    if (r.value == null || !Number.isFinite(r.value)) continue;
+    if (r.value == null || !Number.isFinite(r.value) || r.value <= 0) continue;
     byCrop.set(r.crop, [...(byCrop.get(r.crop) ?? []), r.value]);
   }
   return [...byCrop.entries()]
@@ -142,10 +142,20 @@ export function productivityByCrop(records: ProductivityRecord[]): CropAverage[]
     .sort((a, b) => b.average - a.average);
 }
 
-/** Cultura com mais registros com valor (a que melhor representa o estado nos gráficos). */
+/** Culturas que o produtor mais procura; entram primeiro como "cultura principal" dos gráficos. */
+const PREFERRED_CROPS = ['soja', 'milho', 'trigo', 'arroz', 'feij', 'algod', 'sorgo', 'cana', 'caf'];
+
+/**
+ * Cultura que representa o estado nos gráficos: a primeira da lista de preferidas que tenha produção;
+ * se nenhuma tiver, a de mais registros. Produtividade zero (sem área colhida) não conta.
+ */
 export function mainCrop(records: ProductivityRecord[]): string | null {
   const byCrop = productivityByCrop(records);
   if (!byCrop.length) return null;
+  for (const key of PREFERRED_CROPS) {
+    const found = byCrop.filter((c) => c.crop.toLowerCase().includes(key));
+    if (found.length) return found.reduce((a, b) => (b.records > a.records ? b : a)).crop;
+  }
   return byCrop.reduce((a, b) => (b.records > a.records ? b : a)).crop;
 }
 
