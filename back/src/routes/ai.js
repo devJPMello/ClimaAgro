@@ -9,8 +9,19 @@ const pdfParse = require('pdf-parse');
 const ChatHistory = require('../models/ChatHistory');
 const { buildIagroDataContext } = require('../services/iagroDataContextService');
 const { clerkAuth } = require('../middleware/clerkAuth');
-const { sequelize } = require('../config/database');
+const { sequelize, models } = require('../config/database');
 const { saveBuffer, readStoredFile, deleteStoredFile } = require('../services/iagroMediaStorage');
+const { instrucaoDiario, removerMarcador, extrairAnotacao, hojeBrasilia } = require('../services/iagroDiarioService');
+
+/** UF e município do perfil, usados para completar a anotação proposta ao Diário de Campo. */
+async function perfilParaDiario(clerkUserId) {
+  try {
+    const perfil = await models?.DualUserProfile?.findOne({ where: { clerkUserId }, attributes: ['uf', 'municipio'] });
+    return { ufPerfil: perfil?.uf || '', municipioPerfil: perfil?.municipio || '' };
+  } catch {
+    return { ufPerfil: '', municipioPerfil: '' };
+  }
+}
 
 const MAX_ATTACHMENT_TEXT_CHARS = 12000;
 
@@ -69,7 +80,7 @@ function buildThreadContext(records = []) {
   return records
     .map(
       (record) =>
-        `Usuário: ${record.message}\nIAgro: ${record.response || 'Sem resposta registrada.'}`
+        `Usuário: ${record.message}\nIAgro: ${removerMarcador(record.response) || 'Sem resposta registrada.'}`
     )
     .join('\n\n');
 }
@@ -280,6 +291,7 @@ router.post(
           : 'Esta conversa já está em andamento: NÃO comece com saudação (como "Olá", "Olá, produtor" ou "Oi"); vá direto à resposta.',
         'Não invente nem cite nomes de pessoas, agrônomos ou empresas.',
         'Quando o caso fugir do que pode ser resolvido com segurança apenas por chat (incerteza, laudo formal, receita agronômica, urgência fitossanitária), reconheça o limite e oriente o produtor a procurar um agrônomo ou técnico habilitado da sua região.',
+        instrucaoDiario(hojeBrasilia()),
       ].join('\n');
 
       const prompt = [
@@ -437,9 +449,11 @@ router.post(
         attachments: attachments.length ? attachments : null,
       });
 
+      const { texto, anotacao } = extrairAnotacao(displayText, await perfilParaDiario(clerkUserId));
       return res.json({
         threadId,
-        response: displayText,
+        response: texto || displayText,
+        anotacao,
       });
     } catch (error) {
       if (error.statusCode === 403) {
@@ -557,7 +571,13 @@ router.get('/chat/history', aiReportLimiter, async (req, res) => {
         order: [['createdAt', 'ASC']],
       });
 
-      const messages = rows.flatMap((row) => [
+      const perfilDiario = await perfilParaDiario(clerkUserId);
+      const messages = rows.flatMap((row) => {
+        const { texto, anotacao } = extrairAnotacao(row.response, {
+          ...perfilDiario,
+          hoje: hojeBrasilia(new Date(row.createdAt)),
+        });
+        return [
         {
           id: `${row.id}-user`,
           sender: 'user',
@@ -573,10 +593,12 @@ router.get('/chat/history', aiReportLimiter, async (req, res) => {
         {
           id: `${row.id}-assistant`,
           sender: 'assistant',
-          text: row.response,
+          text: texto,
+          anotacao,
           createdAt: row.updatedAt || row.createdAt,
         },
-      ]);
+        ];
+      });
 
       return res.json({ threadId, messages });
     } catch (error) {

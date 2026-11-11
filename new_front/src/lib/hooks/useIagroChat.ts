@@ -337,6 +337,7 @@ export function useIagroChat() {
           id: `tmp-assistant-${Date.now()}`,
           sender: 'assistant',
           text: response.response,
+          anotacao: response.anotacao ?? null,
           createdAt: new Date().toISOString(),
         },
       ]);

@@ -6,6 +6,7 @@ import { Camera, Cloud, Loader2 } from 'lucide-react';
 import { MessageAttachments } from '../chat/MessageAttachments';
 import { AttachmentNames } from '../chat/AttachmentNames';
 import { ServerAttachments } from '../chat/ServerAttachments';
+import { CartaoAnotacaoDiario } from './CartaoAnotacaoDiario';
 import type { IAgroMessage } from '../../../lib/api/iagroChatApi';
 import { attachmentNamesFromText, displayUserMessageText, type LocalMediaItem, type QuickAction } from '../../../lib/hooks/useIagroChat';
 
@@ -182,6 +183,9 @@ export function MessageArea({
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
                     {message.text}
                   </ReactMarkdown>
+                  {message.anotacao && userId && (
+                    <CartaoAnotacaoDiario proposta={message.anotacao} clerkUserId={userId} />
+                  )}
                 </div>
               </div>
             ) : (

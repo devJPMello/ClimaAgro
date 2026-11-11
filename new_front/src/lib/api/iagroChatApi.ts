@@ -2,6 +2,8 @@ import { httpClient } from './httpClient';
 import { getCachedClerkToken } from './authTokenStore';
 
 /** Imagem/PDF enviado ao IAgro e guardado no servidor. */
+import type { AnotacaoProposta } from '../diario/anotacaoIagro';
+
 export type IaAttachmentDto = {
   chatId: string;
   index: number;
@@ -15,6 +17,8 @@ export type IAgroMessage = {
   text: string;
   createdAt: string;
   attachments?: IaAttachmentDto[];
+  /** Anotação que o IAgro propõe para o Diário de Campo (só grava depois do Confirmar). */
+  anotacao?: AnotacaoProposta | null;
 };
 
 export type IAgroThread = {
@@ -85,7 +89,7 @@ export async function sendIAgroMessage(
   await acordarServidor();
   const files = payload.files ?? [];
   if (files.length === 0) {
-    return httpClient.post<{ threadId: string; response: string }>(
+    return httpClient.post<{ threadId: string; response: string; anotacao?: AnotacaoProposta | null }>(
       'ai/chat/messages',
       {
         message: payload.message,
@@ -114,7 +118,7 @@ export async function sendIAgroMessage(
     throw new Error(message);
   }
 
-  return (await response.json()) as { threadId: string; response: string };
+  return (await response.json()) as { threadId: string; response: string; anotacao?: AnotacaoProposta | null };
 }
 
 export async function listIAgroThreads(clerkUserId: string) {

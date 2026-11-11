@@ -46,6 +46,10 @@ tags:
     description: Exportação de relatórios PDF/CSV
   - name: Perfil
     description: Perfil do usuário
+  - name: WhatsApp
+    description: Confirmação do número e envios (alertas críticos, relatórios) pelo WhatsApp
+  - name: Diário de Campo
+    description: Registros privados da lavoura, com fotos e clima do período
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Componentes reutilizáveis
@@ -64,6 +68,41 @@ components:
       description: Fallback de desenvolvimento (desabilitado em produção com CLERK_SECRET_KEY)
 
   schemas:
+    RegistroDiario:
+      type: object
+      properties:
+        id:
+          type: string
+        data:
+          type: string
+          format: date
+        tipo:
+          type: string
+          enum: [plantio, adubacao, aplicacao, praga_doenca, colheita, observacao]
+        cultura:
+          type: string
+          nullable: true
+        uf:
+          type: string
+          example: TO
+        municipio:
+          type: string
+          nullable: true
+        observacao:
+          type: string
+          nullable: true
+        anexos:
+          type: array
+          items:
+            type: object
+            properties:
+              nome:
+                type: string
+              tipo:
+                type: string
+        criadoEm:
+          type: string
+          format: date-time
     # ── Erro padrão ─────────────────────────────────────────────────────────
     ErrorResponse:
       type: object
@@ -839,3 +878,266 @@ paths:
                         clima_variavel:
                           type: string
                           example: precipitacao
+
+  /api/whatsapp/status:
+    get:
+      tags: [WhatsApp]
+      summary: Situação do número de WhatsApp do usuário (número mascarado)
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      responses:
+        '200':
+          description: Situação do envio por WhatsApp
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  disponivel:
+                    type: boolean
+                  numero:
+                    type: string
+                    nullable: true
+                    example: '••••••9999'
+                  verificado:
+                    type: boolean
+                  alertasCriticos:
+                    type: boolean
+
+  /api/whatsapp/codigo:
+    post:
+      tags: [WhatsApp]
+      summary: Envia um código de 6 dígitos ao número informado (valido por 10 minutos)
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [whatsapp]
+              properties:
+                whatsapp:
+                  type: string
+                  example: '63999999999'
+      responses:
+        '200':
+          description: Código enviado
+        '400':
+          description: Número inválido
+        '429':
+          description: Muitos pedidos de código
+        '503':
+          description: WhatsApp indisponível
+
+  /api/whatsapp/confirmar:
+    post:
+      tags: [WhatsApp]
+      summary: Confirma o código e grava o número no perfil
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [codigo]
+              properties:
+                codigo:
+                  type: string
+                  example: '123456'
+      responses:
+        '200':
+          description: Número confirmado
+        '400':
+          description: Código incorreto ou expirado
+
+  /api/whatsapp:
+    delete:
+      tags: [WhatsApp]
+      summary: Remove o número de WhatsApp do perfil
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      responses:
+        '200':
+          description: Número removido
+
+  /api/whatsapp/relatorio:
+    post:
+      tags: [WhatsApp]
+      summary: Envia um relatório (PDF, CSV ou Excel) ao WhatsApp confirmado do próprio usuário
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                titulo:
+                  type: string
+                nomeArquivo:
+                  type: string
+      responses:
+        '200':
+          description: Relatório enviado
+        '400':
+          description: Sem número confirmado ou formato não suportado
+        '503':
+          description: WhatsApp indisponível
+
+  /api/diario:
+    get:
+      tags: [Diário de Campo]
+      summary: Lista os registros do Diário de Campo do usuário (mais recentes primeiro)
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      responses:
+        '200':
+          description: Registros do usuário
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  registros:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RegistroDiario'
+    post:
+      tags: [Diário de Campo]
+      summary: Cria um registro (multipart, até 3 fotos JPG/PNG/WebP de 5 MB)
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [data, tipo, uf]
+              properties:
+                data:
+                  type: string
+                  format: date
+                tipo:
+                  type: string
+                  enum: [plantio, adubacao, aplicacao, praga_doenca, colheita, observacao]
+                uf:
+                  type: string
+                  example: TO
+                cultura:
+                  type: string
+                municipio:
+                  type: string
+                observacao:
+                  type: string
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '201':
+          description: Registro criado
+        '400':
+          description: Dados inválidos, foto fora do formato ou limite de registros atingido
+
+  /api/diario/{id}:
+    delete:
+      tags: [Diário de Campo]
+      summary: Apaga o registro e as fotos
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Registro apagado
+        '404':
+          description: Não encontrado (ou de outro usuário)
+
+  /api/diario/{id}/anexo/{index}:
+    get:
+      tags: [Diário de Campo]
+      summary: Foto do registro (somente o dono)
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: index
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Imagem
+        '404':
+          description: Foto não encontrada
+
+  /api/diario/{id}/clima:
+    get:
+      tags: [Diário de Campo]
+      summary: Clima médio do estado na semana anterior e na posterior à data do registro
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Chuva, dias com chuva e temperatura média das duas janelas
+        '404':
+          description: Registro não encontrado
+
+  /api/diario/{id}/whatsapp:
+    post:
+      tags: [Diário de Campo]
+      summary: Envia o registro (texto, clima do período e fotos) ao WhatsApp confirmado do dono
+      security:
+        - BearerAuth: []
+        - ClerkUserIdHeader: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Enviado
+        '400':
+          description: Sem número de WhatsApp confirmado
+        '404':
+          description: Registro não encontrado
+        '503':
+          description: WhatsApp indisponível
