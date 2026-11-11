@@ -11,6 +11,11 @@ import {
 
 export type ReportMeta = { titulo: string; local: string };
 
+/** Produtividade zero (sem área colhida) é ausência de produção, não um valor: fica fora das planilhas. */
+function withProduction(model: ReportModel) {
+  return model.productivity.filter((r) => r.value != null && Number.isFinite(r.value) && r.value > 0);
+}
+
 /** Planilha .xlsx real, com uma aba para cada bloco de dados (a biblioteca só é carregada na hora de exportar). */
 export async function buildReportXlsx(meta: ReportMeta, model: ReportModel, generatedAt = new Date()): Promise<Blob> {
   const { default: writeXlsxFile } = await import('write-excel-file/browser');
@@ -74,14 +79,15 @@ export async function buildReportXlsx(meta: ReportMeta, model: ReportModel, gene
     });
   }
 
-  if (model.productivity.length) {
+  const produced = withProduction(model);
+  if (produced.length) {
     sheets.push({
       sheet: 'Produtividade',
       columns: [{ width: 28 }, { width: 8 }, { width: 28 }, { width: 18 }],
       stickyRowsCount: 1,
       data: [
         [head('Cultura'), head('Ano'), head('Local'), head('Produtividade (t/ha)')],
-        ...[...model.productivity]
+        ...[...produced]
           .sort((a, b) => a.crop.localeCompare(b.crop, 'pt-BR') || (a.year ?? 0) - (b.year ?? 0))
           .map((r) => [text(r.crop), r.year != null ? { value: r.year, type: Number } : null, text(r.place), num(r.value, '0.00')]),
       ],
@@ -92,7 +98,7 @@ export async function buildReportXlsx(meta: ReportMeta, model: ReportModel, gene
       stickyRowsCount: 1,
       data: [
         [head('Cultura'), head('Registros'), head('Média (t/ha)')],
-        ...productivityByCrop(model.productivity).map((c) => [text(c.crop), { value: c.records, type: Number }, num(c.average, '0.00')]),
+        ...productivityByCrop(produced).map((c) => [text(c.crop), { value: c.records, type: Number }, num(c.average, '0.00')]),
       ],
     });
   }
@@ -139,7 +145,7 @@ export function buildReportCsv(model: ReportModel): string {
     rows.push(['Clima', m.ym, null, 'Umidade média', m.humidity, '%', place]);
     rows.push(['Clima', m.ym, null, 'Vento médio', m.wind, 'km/h', place]);
   }
-  for (const r of model.productivity) {
+  for (const r of withProduction(model)) {
     rows.push(['Produtividade', r.year != null ? String(r.year) : null, r.crop, 'Produtividade', r.value, 't/ha', r.place]);
   }
   for (const r of model.seasonRows ?? []) {
