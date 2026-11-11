@@ -483,17 +483,17 @@ export function ExportarRelatorios() {
                 <p className="text-sm mb-2 font-medium">O que entra no relatório</p>
                 <ul className="space-y-1.5 text-sm text-muted-foreground list-disc list-inside">
                   <li>
-                    <strong className="text-foreground">Clima:</strong> resumo do período e tabela mensal agregada
-                    (API de clima).
+                    <strong className="text-foreground">Clima:</strong> destaques do período, gráfico de chuva e
+                    temperatura por mês e tabela mensal agregada (API de clima).
                   </li>
                   <li>
-                    <strong className="text-foreground">Produtividade:</strong> resumo mensal, detalhe por cultura,
-                    ano e município (API de produtividade).
+                    <strong className="text-foreground">Produtividade:</strong> gráfico por ano da cultura
+                    principal e resumo por cultura (API de produtividade).
                   </li>
                   <li>
-                    <strong className="text-foreground">Comparativo:</strong> por anos civis, resumo executivo, duas
-                    tabelas mensais (clima e produtividade), resumo por cultura e detalhe por registo; com safra SIDRA
-                    no histórico, usa a série climate-vs-productivity.
+                    <strong className="text-foreground">Comparativo:</strong> clima e produtividade juntos, com os
+                    dois gráficos, a leitura dos dados, a tabela mensal do clima e o resumo por cultura; com safra
+                    SIDRA no histórico, usa a série climate-vs-productivity.
                   </li>
                 </ul>
                 <p className="text-xs text-muted-foreground mt-2">
