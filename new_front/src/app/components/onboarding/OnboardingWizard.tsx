@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useUser } from '@clerk/clerk-react';
+import { useClerk, useUser } from '@clerk/clerk-react';
 import { Check, ChevronRight, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { Modal } from '../ui/Modal';
@@ -27,17 +27,18 @@ const STEP_TITLE = [
 const STEP_DESC = [
   'Vamos personalizar os dados climáticos e alertas para a sua região.',
   'Com o município definido, os dados são ainda mais precisos para a sua localidade.',
-  'Escolha as culturas de interesse para receber alertas e análises relevantes. Você pode selecionar várias — ou pular esta etapa.',
+  'Escolha as culturas que você acompanha. Selecione pelo menos uma; você pode marcar várias.',
   'Leia como tratamos seus dados pessoais em conformidade com a LGPD (Lei 13.709/2018).',
 ];
 
 interface OnboardingWizardProps {
   onComplete: () => void;
-  onSkip: () => void;
 }
 
-export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) {
+/** Boas-vindas obrigatórias: sem pular etapas nem fechar; a única saída é encerrar a sessão. */
+export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   const { user } = useUser();
+  const { signOut } = useClerk();
   const [step, setStep] = useState(0);
   const [uf, setUf] = useState('');
   const [municipio, setMunicipio] = useState('');
@@ -53,8 +54,8 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
   function canAdvance() {
     if (step === 0) return /^[A-Z]{2}$/.test(uf);
     if (step === 1) return municipio !== '';
-    if (step === 3) return lgpdConsent;
-    return true;
+    if (step === 2) return culturas.length > 0;
+    return lgpdConsent;
   }
 
   function toggleCultura(value: string) {
@@ -82,9 +83,7 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
         municipio: municipio || undefined,
         lgpdConsentDate: new Date().toISOString(),
       });
-      if (culturas.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.CULTURAS_PREFERIDAS, JSON.stringify(culturas));
-      }
+      localStorage.setItem(STORAGE_KEYS.CULTURAS_PREFERIDAS, JSON.stringify(culturas));
       toast.success('Perfil configurado com sucesso! Bem-vindo ao ClimaAgro.');
       onComplete();
     } catch (e) {
@@ -95,7 +94,7 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
   }
 
   return (
-    <Modal isOpen onClose={onSkip} title="Bem-vindo ao ClimaAgro" size="lg">
+    <Modal isOpen title="Bem-vindo ao ClimaAgro" size="lg">
       {/* Progress steps */}
       <div className="flex items-center justify-center gap-1 mb-7">
         {STEPS.map((label, i) => (
@@ -251,10 +250,11 @@ export function OnboardingWizard({ onComplete, onSkip }: OnboardingWizardProps) 
       <div className="flex items-center justify-between mt-6 pt-5 border-t border-border">
         <button
           type="button"
-          onClick={onSkip}
+          onClick={() => void signOut({ redirectUrl: '/login' })}
+          disabled={saving}
           className="text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
-          Pular por agora
+          Sair da conta
         </button>
         <div className="flex items-center gap-2">
           {step > 0 && (

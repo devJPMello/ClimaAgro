@@ -82,6 +82,8 @@ router.put('/me', async (req, res) => {
         tipo: 'produtor',
         uf: ufVal,
         municipio: municipio !== undefined ? municipio || null : null,
+        // O primeiro acesso cria o perfil: sem isto, o aceite da política se perde.
+        lgpdConsentDate: body.lgpdConsentDate ? new Date(body.lgpdConsentDate) : null,
       });
     } else {
       const patch = {};

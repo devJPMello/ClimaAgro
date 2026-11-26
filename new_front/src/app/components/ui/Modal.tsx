@@ -4,7 +4,8 @@ import { createPortal } from 'react-dom';
 
 interface ModalProps {
   isOpen: boolean;
-  onClose: () => void;
+  /** Sem `onClose`, o modal é obrigatório: não tem botão de fechar nem fecha ao clicar fora. */
+  onClose?: () => void;
   title: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
@@ -46,12 +47,15 @@ export function Modal({ isOpen, onClose, title, children, footer, size = 'lg' }:
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <h2 className="text-lg text-foreground">{title}</h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg hover:bg-muted transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              aria-label="Fechar"
+              className="p-1 rounded-lg hover:bg-muted transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
         <div className="px-6 py-5 overflow-y-auto flex-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{children}</div>
         {footer && (

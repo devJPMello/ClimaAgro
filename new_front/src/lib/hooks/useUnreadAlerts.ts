@@ -20,13 +20,17 @@ function saveSeenIds(ids: Set<string>) {
   } catch { /* silent */ }
 }
 
-export function useUnreadAlerts() {
+/**
+ * Alertas altos e críticos ainda não vistos, filtrados pela UF do perfil.
+ * `ativo` adia a busca (ex.: enquanto as boas-vindas pedem o estado); ao virar true, o perfil é relido.
+ */
+export function useUnreadAlerts(ativo = true) {
   const { user } = useUser();
   const [unread, setUnread] = useState<ClimateAlertDto[]>([]);
   const [uf, setUf] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!user?.id) return;
+    if (!ativo || !user?.id) return;
     try {
       const profile = await getMyDualProfile(user.id);
       // Se o usuário desativou notificações de alertas, não busca
@@ -42,7 +46,7 @@ export function useUnreadAlerts() {
       const seen = getSeenIds();
       setUnread(critical.filter((a) => !seen.has(a.id)));
     } catch { /* silent */ }
-  }, [user?.id]);
+  }, [ativo, user?.id]);
 
   useEffect(() => {
     void refresh();

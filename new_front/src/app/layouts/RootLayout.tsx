@@ -45,9 +45,20 @@ export function RootLayout() {
   const navigate = useNavigate();
   const { signOut } = useClerk();
   const { user } = useUser();
-  const { count: alertCount, alerts: unreadAlerts, uf: alertUf, markAllSeen } = useUnreadAlerts();
-  const { show: showOnboarding, dismiss: dismissOnboarding, complete: completeOnboarding } = useOnboardingStatus();
+  const {
+    show: showOnboarding,
+    liberado: onboardingLiberado,
+    complete: completeOnboarding,
+  } = useOnboardingStatus();
+  const { count: alertCount, alerts: unreadAlerts, uf: alertUf, markAllSeen } = useUnreadAlerts(onboardingLiberado);
   const toastShownRef = useRef(false);
+  // Muda quando o perfil é salvo nas boas-vindas, para a página aberta reler o estado.
+  const [versaoPerfil, setVersaoPerfil] = useState(0);
+
+  const handleOnboardingComplete = () => {
+    completeOnboarding();
+    setVersaoPerfil((v) => v + 1);
+  };
 
   // Acorda a API (Render gratuito) logo que o app abre, enquanto a pessoa navega.
   useEffect(() => {
@@ -223,12 +234,12 @@ export function RootLayout() {
 
         {/* Page content */}
         <main className="px-4 pb-6 pt-4 lg:p-6 min-h-full">
-          <Outlet />
+          <Outlet key={versaoPerfil} />
         </main>
       </div>
 
       {showOnboarding && (
-        <OnboardingWizard onComplete={completeOnboarding} onSkip={dismissOnboarding} />
+        <OnboardingWizard onComplete={handleOnboardingComplete} />
       )}
     </div>
   );

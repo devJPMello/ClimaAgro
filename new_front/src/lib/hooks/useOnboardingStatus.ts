@@ -2,12 +2,9 @@ import { useEffect, useState } from 'react';
 import { useUser } from '@clerk/clerk-react';
 import { getMyDualProfile } from '../api/dualProfileApi';
 
-const SESSION_KEY = 'climaagro.onboarding.dismissed';
-
 /**
  * Detecta se o usuário logado ainda não configurou estado e município.
- * Retorna `show=true` até o wizard ser concluído ou dispensado.
- * "Dispensado" é guardado em sessionStorage — reaparece no próximo login se o perfil ainda estiver incompleto.
+ * Retorna `show=true` até as boas-vindas serem concluídas (são obrigatórias).
  */
 export function useOnboardingStatus() {
   const { user, isLoaded } = useUser();
@@ -17,7 +14,6 @@ export function useOnboardingStatus() {
   useEffect(() => {
     if (!isLoaded) return;
     if (!user?.id) { setChecking(false); return; }
-    if (sessionStorage.getItem(SESSION_KEY) === '1') { setChecking(false); return; }
 
     let cancelled = false;
     void getMyDualProfile(user.id)
@@ -30,14 +26,14 @@ export function useOnboardingStatus() {
     return () => { cancelled = true; };
   }, [user?.id, isLoaded]);
 
-  function dismiss() {
-    sessionStorage.setItem(SESSION_KEY, '1');
-    setNeedsOnboarding(false);
-  }
-
   function complete() {
     setNeedsOnboarding(false);
   }
 
-  return { show: !checking && needsOnboarding, dismiss, complete };
+  return {
+    show: !checking && needsOnboarding,
+    /** true quando a consulta ao perfil terminou e as boas-vindas não estão na tela. */
+    liberado: !checking && !needsOnboarding,
+    complete,
+  };
 }
