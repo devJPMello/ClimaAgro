@@ -43,6 +43,8 @@ type ClimaRow = { mes: string; temperatura: number; precipitacao: number; umidad
 type CompRow = { mes: string; clima: number; produtividade: number | null };
 
 const MAX_CONCURRENT = 6;
+/** Teto de `climate/series` (um ponto por dia): precisa cobrir todo o intervalo de anos, senão o fim da série some. */
+const MAX_DIAS_SERIE = 20000;
 
 /** Executa `fn` sobre cada item com no máximo `concurrency` promises simultâneas. */
 async function concurrentMap<T, R>(
@@ -293,7 +295,7 @@ export function SeriesTemporais() {
     }
     const ys = Math.min(parseInt(startYear, 10), parseInt(endYear, 10));
     const ye = Math.max(parseInt(startYear, 10), parseInt(endYear, 10));
-    return getClimateSeriesByUf({ uf, start: `${ys}-01-01`, end: `${ye}-12-31`, variavel, limit: uf === 'ALL' ? 20000 : 1000, offset: 0 });
+    return getClimateSeriesByUf({ uf, start: `${ys}-01-01`, end: `${ye}-12-31`, variavel, limit: MAX_DIAS_SERIE, offset: 0 });
   }
 
   const carregar = useCallback(async () => {

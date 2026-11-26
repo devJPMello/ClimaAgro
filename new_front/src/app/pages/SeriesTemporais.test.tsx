@@ -68,8 +68,9 @@ describe('SeriesTemporais UF filter', () => {
     const ufSelect = screen.getAllByRole('combobox')[0];
     await waitFor(() => expect(ufSelect.querySelectorAll('option').length).toBeGreaterThanOrEqual(2));
     await userEvent.selectOptions(ufSelect, 'SP');
+    // O limite precisa cobrir vários anos (2023 a 2026 são 1.461 dias): com 1.000 o gráfico ficava com um vazio.
     await waitFor(() =>
-      expect(mocks.getClimateSeriesByUf).toHaveBeenCalledWith(expect.objectContaining({ uf: 'SP' }))
+      expect(mocks.getClimateSeriesByUf).toHaveBeenCalledWith(expect.objectContaining({ uf: 'SP', limit: 20000 }))
     );
     expect((ufSelect as HTMLSelectElement).value).toBe('SP');
   });
